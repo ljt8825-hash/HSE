@@ -1,0 +1,51 @@
+views/accidents/index.vue: error TS2322: Type '({ rowIndex }: { rowIndex: number; }) => number' is not assignable to type 'Formatter<any> | undefined'.
+views/hse/assessment-monthly/deduction-adjust.vue: error TS2322: Type '"default" | "neutral" | "error" | "success" | "warning" | "info"' is not assignable to type '"primary" | "default" | "error" | "success" | "warning" | "info" | undefined'.
+views/hse/assessment-monthly/deduction-adjust.vue: error TS2322: Type 'number | null' is not assignable to type 'number | undefined'.
+views/hse/assessment-monthly/deduction-adjust.vue: error TS2367: This comparison appears to be unintentional because the types 'number' and 'string' have no overlap.
+views/hse/assessment-rule/index.vue: error TS18047: '__VLS_ctx.viewData' is possibly 'null'.
+views/hse/assessment-rule/index.vue: error TS18048: 'n.children' is possibly 'undefined'.
+views/hse/assessment-rule/index.vue: error TS18048: 'row' is possibly 'undefined'.
+views/hse/assessment-rule/index.vue: error TS18048: 'row' is possibly 'undefined'.
+views/hse/assessment-rule/index.vue: error TS18048: 'row' is possibly 'undefined'.
+views/hse/assessment-rule/index.vue: error TS18048: 'row' is possibly 'undefined'.
+views/hse/assessment-rule/index.vue: error TS18048: 'row' is possibly 'undefined'.
+views/hse/assessment-rule/index.vue: error TS18048: 'row' is possibly 'undefined'.
+views/hse/assessment-rule/index.vue: error TS18048: 'row' is possibly 'undefined'.
+views/hse/assessment-rule/index.vue: error TS18048: 'row' is possibly 'undefined'.
+views/hse/assessment-rule/index.vue: error TS18048: 'row' is possibly 'undefined'.
+views/hse/assessment-rule/index.vue: error TS18048: 'row' is possibly 'undefined'.
+views/hse/assessment-rule/index.vue: error TS18048: 'row' is possibly 'undefined'.
+views/hse/assessment-rule/index.vue: error TS18048: 'row' is possibly 'undefined'.
+views/hse/assessment-rule/index.vue: error TS18048: 'row' is possibly 'undefined'.
+views/hse/assessment-rule/index.vue: error TS18048: 'row' is possibly 'undefined'.
+views/hse/assessment-rule/index.vue: error TS18048: 'row' is possibly 'undefined'.
+views/hse/assessment-rule/index.vue: error TS18048: 'row' is possibly 'undefined'.
+views/hse/assessment-rule/index.vue: error TS18048: 'row' is possibly 'undefined'.
+views/hse/assessment-rule/index.vue: error TS2322: Type '"default" | "info"' is not assignable to type 'HseStatusType | undefined'.
+views/hse/assessment-rule/index.vue: error TS2322: Type '"default" | "success"' is not assignable to type 'HseStatusType | undefined'.
+views/hse/assessment-rule/index.vue: error TS2322: Type '"default" | "success"' is not assignable to type 'HseStatusType | undefined'.
+views/hse/assessment-rule/index.vue: error TS2322: Type '"primary" | "success" | "warning" | "info"' is not assignable to type 'HseStatusType | undefined'.
+views/hse/assessment-rule/index.vue: error TS2322: Type '"primary" | "success" | "warning" | "info"' is not assignable to type 'HseStatusType | undefined'.
+views/hse/assessment-rule/index.vue: error TS2322: Type '({ key: string; width: number; title: string; align: string; renderHeader: () => VNode<RendererNode, RendererElement, { [key: string]: any; }>; render: (row: any) => VNode<...>; minWidth?: undefined; } | { ...; } | { ...; } | { ...; } | { ...; })[]' is not assignable to type 'TableColumn<any>[]'.
+views/hse/assessment-rule/index.vue: error TS2322: Type '({ title: string; key: string; width: number; align: string; render: (_r: any, index: number) => string; minWidth?: undefined; } | { title: string; key: string; minWidth: number; align: string; render: (row: any) => VNode<...>; width?: undefined; } | { ...; })[]' is not assignable to type 'TableColumn<any>[]'.
+views/hse/assessment-rule/index.vue: error TS2322: Type '(row: any, index: number) => number' is not assignable to type 'CreateRowKey<any>'.
+views/hse/assessment-rule/index.vue: error TS2345: Argument of type '{ detailCode: null; detailName: string; deductScore: number; unit: string; sortOrder: number; _t: string; }' is not assignable to parameter of type '{ _t?: string | undefined; id: number; detailCode: string | null; detailName: string; deductScore: number; unit: string; sortOrder: number; }'.
+views/hse/assessment-rule/index.vue: error TS2345: Argument of type '{ id: number | null; category: string; maxDeduct: number | null; remark: string | null; ruleCount: number | null; ruleTotal: number; ruleEnabled: number; ruleNames?: string | null | undefined; ... 4 more ...; originalCategory?: string | ... 1 more ... | undefined; } | undefined' is not assignable to parameter of type '{ id: number | null; category: string; maxDeduct: number | null; remark: string | null; ruleCount: number | null; ruleTotal: number; ruleEnabled: number; ruleNames?: string | null | undefined; ... 4 more ...; originalCategory?: string | ... 1 more ... | undefined; }'.
+views/hse/assessment-rule/index.vue: error TS2532: Object is possibly 'undefined'.
+views/hse/assessment-rule/index.vue: error TS2561: Object literal may only specify known properties, but '_ruleItems' does not exist in type '{ id: number | null; category: string; maxDeduct: number | null; remark: string | null; ruleCount: number | null; ruleTotal: number; ruleEnabled: number; ruleNames?: string | null | undefined; ... 4 more ...; originalCategory?: string | ... 1 more ... | undefined; }'. Did you mean to write 'ruleItems'?
+views/hse/assessment-rule/index.vue: error TS6133: 'NCascader' is declared but its value is never read.
+views/hse/assessment-rule/index.vue: error TS6133: 'row' is declared but its value is never read.
+views/hse/assessment-rule/index.vue: error TS7006: Parameter 'i' implicitly has an 'any' type.
+views/hse/assessment-rule/index.vue: error TS7006: Parameter 'name' implicitly has an 'any' type.
+views/hse/meeting-records/index.vue: error TS2322: Type '"default" | "error" | "success"' is not assignable to type 'HseStatusType | undefined'.
+views/hse/meeting-records/index.vue: error TS2322: Type 'string | null' is not assignable to type 'Value | null | undefined'.
+views/hse/meeting-records/index.vue: error TS2532: Object is possibly 'undefined'.
+views/hse/meeting-records/index.vue: error TS2532: Object is possibly 'undefined'.
+views/hse/responsibility-forms/index.vue: error TS6133: 'getEmployeeSelectorBatch' is declared but its value is never read.
+views/hse/responsibility-forms/index.vue: error TS6133: 'NDatePicker' is declared but its value is never read.
+views/site/grid/index.vue: error TS6133: 'handleViewViolations' is declared but its value is never read.
+views/site/grid/index.vue: error TS6133: 'onPageChange' is declared but its value is never read.
+views/site/grid-ledger/index.vue: error TS2353: Object literal may only specify known properties, and 'sortOrder' does not exist in type 'ColumnOptions<any>'.
+views/site/violation/analysis.vue: error TS2488: Type 'VxeTableGridColumns' must have a '[Symbol.iterator]()' method that returns an iterator.
+views/site/violation/analysis.vue: error TS6133: 'handleViewViolations' is declared but its value is never read.
+views/site/violation/analysis.vue: error TS6133: 'onPageChange' is declared but its value is never read.

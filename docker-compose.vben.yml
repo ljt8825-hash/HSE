@@ -1,0 +1,66 @@
+version: '3.8'
+
+# v4.1 vue-vben-admin 架构版本，生产前端主线为 安全看板vben/apps/web-naive
+# 使用方式：docker-compose -f docker-compose.vben.yml up -d
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: hse-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-safety_dashboard}
+      POSTGRES_USER: ${POSTGRES_USER:-hse_app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hse_app_password}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hse_app} -d ${POSTGRES_DB:-safety_dashboard}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: hse-backend
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=${POSTGRES_DB:-safety_dashboard}
+      - DB_USER=${POSTGRES_USER:-hse_app}
+      - DB_PASSWORD=${POSTGRES_PASSWORD:-hse_app_password}
+      - JWT_SECRET=${JWT_SECRET:-hse-safety-dashboard-secret-key-2024}
+      - JWT_EXPIRES_IN=24h
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./server/uploads:/app/server/uploads
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend.vben
+    container_name: hse-frontend
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  postgres_data:

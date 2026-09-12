@@ -1,0 +1,356 @@
+{
+  "generatedAt": "2026-08-30T11:12:36.644Z",
+  "employeeMaster": {
+    "table": "employee",
+    "columns": [
+      "id",
+      "name",
+      "id_card_hash",
+      "is_deleted"
+    ],
+    "rows": 1327,
+    "alive": 1311,
+    "authoritativeView": {
+      "name": "v_employee_org_full",
+      "rows": 1327,
+      "current": 1325,
+      "nameColumn": "name",
+      "idColumn": "employee_id"
+    },
+    "note": "考核对象 hse_assessment_target.employee_id 与视图 employee_id 100% 命中，故以视图为关联基准",
+    "targetIdCoverage": {
+      "targetIds": 62,
+      "matchedInView": 62
+    }
+  },
+  "employeeNameIndex": {
+    "employeeRows": 1325,
+    "distinctNormalizedNames": 1288,
+    "duplicateNames": [
+      {
+        "name": "张金娥",
+        "count": 2
+      },
+      {
+        "name": "测试甲",
+        "count": 6
+      },
+      {
+        "name": "李振清",
+        "count": 2
+      },
+      {
+        "name": "测试乙",
+        "count": 6
+      },
+      {
+        "name": "李金兰",
+        "count": 2
+      },
+      {
+        "name": "测试丙",
+        "count": 2
+      },
+      {
+        "name": "刘建军",
+        "count": 2
+      },
+      {
+        "name": "张书明",
+        "count": 2
+      },
+      {
+        "name": "张书利",
+        "count": 2
+      },
+      {
+        "name": "李秀芳",
+        "count": 2
+      },
+      {
+        "name": "李金枝",
+        "count": 2
+      },
+      {
+        "name": "刘桂芹",
+        "count": 3
+      },
+      {
+        "name": "刘秀芬",
+        "count": 3
+      },
+      {
+        "name": "王金生",
+        "count": 2
+      },
+      {
+        "name": "刘秀芝",
+        "count": 2
+      },
+      {
+        "name": "王月英",
+        "count": 2
+      },
+      {
+        "name": "刘俊峰",
+        "count": 2
+      },
+      {
+        "name": "李保华",
+        "count": 2
+      },
+      {
+        "name": "张文升",
+        "count": 2
+      },
+      {
+        "name": "郭秀梅",
+        "count": 2
+      },
+      {
+        "name": "张桂枝",
+        "count": 2
+      },
+      {
+        "name": "周国英",
+        "count": 2
+      },
+      {
+        "name": "张金华",
+        "count": 2
+      },
+      {
+        "name": "王俊英",
+        "count": 2
+      },
+      {
+        "name": "张桂芹",
+        "count": 2
+      },
+      {
+        "name": "刘延海",
+        "count": 2
+      },
+      {
+        "name": "孙风英",
+        "count": 2
+      }
+    ]
+  },
+  "violationRecords": {
+    "total": 2506,
+    "violatorNameEmpty": 1163,
+    "violatorNameEmptyPct": "46.41%",
+    "violatorNamePresent": 1343,
+    "violatorNamePresentPct": "53.59%",
+    "placeholderOrGender": 722,
+    "placeholderOrGenderPctOfPresent": "53.76%",
+    "validNameBase": 621,
+    "validNameBasePct": "24.78%",
+    "uniqueMatched": 521,
+    "uniqueMatchedPctOfValid": "83.90%",
+    "recoveredByCleaning": 6,
+    "recoveredByCleaningPctOfValid": "0.97%",
+    "totalMatched": 527,
+    "totalMatchedPctOfValid": "84.86%",
+    "totalMatchedPctOfTotal": "21.03%",
+    "duplicateMatched": 23,
+    "duplicateMatchedPctOfValid": "3.70%",
+    "noMatch": 70,
+    "noMatchPctOfValid": "11.27%",
+    "cleanFailed": 1,
+    "cleanFailedPctOfValid": "0.16%",
+    "distinctMatchedEmployeeIds": 338
+  },
+  "duplicateNameSamples": [
+    {
+      "name": "李振清",
+      "records": 5,
+      "candidateEmployees": 2
+    },
+    {
+      "name": "张桂芹",
+      "records": 3,
+      "candidateEmployees": 2
+    },
+    {
+      "name": "王俊英",
+      "records": 2,
+      "candidateEmployees": 2
+    },
+    {
+      "name": "张金娥",
+      "records": 2,
+      "candidateEmployees": 2
+    },
+    {
+      "name": "刘俊峰",
+      "records": 2,
+      "candidateEmployees": 2
+    },
+    {
+      "name": "周国英",
+      "records": 2,
+      "candidateEmployees": 2
+    },
+    {
+      "name": "李保华",
+      "records": 2,
+      "candidateEmployees": 2
+    },
+    {
+      "name": "张桂枝",
+      "records": 1,
+      "candidateEmployees": 2
+    },
+    {
+      "name": "王金生",
+      "records": 1,
+      "candidateEmployees": 2
+    },
+    {
+      "name": "张文升",
+      "records": 1,
+      "candidateEmployees": 2
+    }
+  ],
+  "unmatchedNameSamples": [
+    {
+      "name": "张均风",
+      "records": 3
+    },
+    {
+      "name": "楊印正",
+      "records": 3
+    },
+    {
+      "name": "李书风",
+      "records": 2
+    },
+    {
+      "name": "赵洪玲",
+      "records": 2
+    },
+    {
+      "name": "扬金英",
+      "records": 2
+    },
+    {
+      "name": "李荣莉",
+      "records": 1
+    },
+    {
+      "name": "张海蒸",
+      "records": 1
+    },
+    {
+      "name": "杨匊山",
+      "records": 1
+    },
+    {
+      "name": "杨红风",
+      "records": 1
+    },
+    {
+      "name": "杨秀",
+      "records": 1
+    },
+    {
+      "name": "张秀莱",
+      "records": 1
+    },
+    {
+      "name": "张书丽",
+      "records": 1
+    },
+    {
+      "name": "谷志",
+      "records": 1
+    },
+    {
+      "name": "王春胜生",
+      "records": 1
+    },
+    {
+      "name": "张考敬",
+      "records": 1
+    },
+    {
+      "name": "张爱红",
+      "records": 1
+    },
+    {
+      "name": "穿拖鞋",
+      "records": 1
+    },
+    {
+      "name": "王红信",
+      "records": 1
+    },
+    {
+      "name": "周红华",
+      "records": 1
+    },
+    {
+      "name": "贾迋州",
+      "records": 1
+    }
+  ],
+  "violationBehaviorPollution": {
+    "nonEmpty": 1257,
+    "nonEmptyPct": "50.16%",
+    "exactlyEqualsEmployeeName": 68,
+    "exactlyEqualsEmployeeNamePct": "2.71%",
+    "containsEmployeeName": 1,
+    "containsEmployeeNamePct": "0.04%",
+    "looksLikeChineseNameButUnmatched": 864,
+    "looksLikeChineseNameButUnmatchedPct": "34.48%"
+  },
+  "cycles": [
+    {
+      "cycleId": "24",
+      "period": "2026-08",
+      "status": "pending_review",
+      "assessmentTargets": 56,
+      "coverableTargets": 3,
+      "coverableTargetsPct": "5.36%",
+      "coverableViolationRecords": 3
+    },
+    {
+      "cycleId": "27",
+      "period": "2026-07",
+      "status": "pending_review",
+      "assessmentTargets": 62,
+      "coverableTargets": 3,
+      "coverableTargetsPct": "4.84%",
+      "coverableViolationRecords": 3
+    },
+    {
+      "cycleId": "28",
+      "period": "2026-06",
+      "status": "pending_review",
+      "assessmentTargets": 62,
+      "coverableTargets": 3,
+      "coverableTargetsPct": "4.84%",
+      "coverableViolationRecords": 3
+    }
+  ],
+  "threeCycleUnion": {
+    "distinctAssessmentTargets": 62,
+    "coverableTargets": 3,
+    "coverableTargetsPct": "4.84%",
+    "coverableViolationRecords": 3
+  },
+  "conclusion": {
+    "uniqueMatchRate": "84.86%",
+    "threshold": "≥90%（分母 = 真实姓名记录数，即剔除空值与 --/男/女 占位符）",
+    "canAutoBackfill": false,
+    "verdict": "未达标（84.86% < 90%）：不建议自动回填，需先治理录入页",
+    "blockers": [
+      "violator_name 为空 1163 条（占全部 46.41%）—— 无法关联",
+      "占位符/性别值 722 条（占姓名非空 53.76%）—— 录入页把「--」或性别填进了姓名列",
+      "重名 23 条（占真实姓名 3.70%）—— 必须人工裁定",
+      "匹配不到 71 条（占真实姓名 11.43%）—— 疑似离职/外包/错字/异体字"
+    ]
+  }
+}

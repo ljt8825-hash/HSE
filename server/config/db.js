@@ -1,0 +1,63 @@
+const { Pool } = require('pg');
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+
+const pgConfig = {
+  host: process.env.DB_HOST || '127.0.0.1',
+  port: parseInt(process.env.DB_PORT) || 5432,
+  user: process.env.DB_USER || 'postgres',
+  database: process.env.DB_NAME || process.env.DB_DATABASE || process.env.POSTGRES_DB || process.env.PGDATABASE || 'safety_dashboard',
+  max: 30, // 事故模块 onMounted 并发 4 个 endpoint + stats Promise.all 7 个查询 + save 期间多次查询，原 10 容易瞬时耗尽导致 auth 用户表查询超时（503 认证服务暂不可用）/事故 catch 抛错
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
+  client_encoding: 'UTF8'
+};
+
+// 空密码时使用 trust 认证，不传 password 字段
+const dbPassword = process.env.DB_PASSWORD;
+if (dbPassword && dbPassword.length > 0) {
+  pgConfig.password = dbPassword;
+}
+
+const pool = new Pool(pgConfig);
+
+var dbConnected = false;
+
+pool.on('error', (err) => {
+  console.warn('[DB] PostgreSQL 连接池异常:', err.message);
+  dbConnected = false;
+});
+
+const testConnection = async () => {
+  try {
+    const client = await pool.connect();
+    await client.query('SELECT 1');
+    client.release();
+    dbConnected = true;
+    console.log('[DB] PostgreSQL 连接池初始化成功');
+  } catch (err) {
+    dbConnected = false;
+    if (process.env.NODE_ENV === 'production') {
+      console.error('[DB] 生产环境 PostgreSQL 连接失败！所有 API 将返回数据库错误。请检查数据库配置:', err.message);
+    } else {
+      console.warn('[DB] PostgreSQL 连接失败，将使用内存数据模式运行:', err.message);
+    }
+  }
+};
+
+/**
+ * 判断数据库是否可用
+ * 生产环境强制返回 true，确保所有路由走数据库查询；
+ * 若 DB 实际不可用，pool.query() 会抛出异常由路由 catch 块返回错误响应。
+ * 开发环境保留内存降级模式。
+ */
+const isConnected = () => {
+  if (process.env.NODE_ENV === 'production') return true;
+  return dbConnected;
+};
+
+module.exports = {
+  pool,
+  testConnection,
+  isConnected
+};

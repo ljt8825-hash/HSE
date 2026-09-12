@@ -1,0 +1,22 @@
+{
+  "version": "1.0.0",
+  "description": "HSE审计能力配置 - 记录用户操作和数据变化",
+  "trackedActions": [
+    "login", "logout", "create", "update", "delete",
+    "approve", "reject", "import", "export", "download",
+    "password_change", "permission_change", "config_change"
+  ],
+  "trackedModules": [
+    "auth", "users", "roles", "menus",
+    "overview", "objectives", "regulations", "risk-control",
+    "hazards", "site-mgmt", "personnel", "training",
+    "emergency", "insurance", "system"
+  ],
+  "sensitiveFields": ["password", "id_card", "phone", "bank_account", "address"],
+  "retentionDays": 365,
+  "operationLog": {
+    "enabled": true,
+    "trackAllRequests": false,
+    "trackDataChanges": true
+  }
+}

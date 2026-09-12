@@ -1,0 +1,186 @@
+{
+  "version": "1.0.0",
+  "description": "HSE隐患治理业务规则 - 状态机、等级划分、来源分类、时效规则",
+  "updatedAt": "2026-07-25",
+  "ruleCode": "hazardRule",
+  "ruleName": "隐患治理业务规则",
+
+  "hazardLevels": [
+    {
+      "code": "level1",
+      "label": "一级",
+      "alias": "重大隐患",
+      "description": "可能造成重大人员伤亡或重大经济损失，必须立即停产停业整改",
+      "semanticColor": "danger",
+      "defaultDeadlineDays": 7,
+      "needCompanyLeaderReview": true,
+      "needEmergencyPlan": true
+    },
+    {
+      "code": "level2",
+      "label": "二级",
+      "alias": "较大隐患",
+      "description": "可能造成较大人员伤亡或较大经济损失，需限期整改",
+      "semanticColor": "warning",
+      "defaultDeadlineDays": 15,
+      "needCompanyLeaderReview": false,
+      "needEmergencyPlan": true
+    },
+    {
+      "code": "level3",
+      "label": "三级",
+      "alias": "一般隐患",
+      "description": "可能造成一般人员伤亡或一般经济损失，常规整改即可",
+      "semanticColor": "info",
+      "defaultDeadlineDays": 30,
+      "needCompanyLeaderReview": false,
+      "needEmergencyPlan": false
+    },
+    {
+      "code": "level4",
+      "label": "四级",
+      "alias": "轻微隐患",
+      "description": "危险性较低，对人身和财产安全影响较小",
+      "semanticColor": "success",
+      "defaultDeadlineDays": 60,
+      "needCompanyLeaderReview": false,
+      "needEmergencyPlan": false
+    }
+  ],
+
+  "statusFlow": {
+    "description": "隐患治理全流程状态机",
+    "statuses": [
+      {
+        "code": "discovered",
+        "label": "待登记",
+        "description": "隐患已发现，待登记建档",
+        "semanticColor": "info",
+        "allowedActions": ["assign", "rectify"]
+      },
+      {
+        "code": "assigned",
+        "label": "待整改",
+        "description": "已登记并分配整改责任人，等待整改",
+        "semanticColor": "warning",
+        "allowedActions": ["rectify", "reassign"]
+      },
+      {
+        "code": "processing",
+        "label": "整改中",
+        "description": "整改责任人正在落实整改措施",
+        "semanticColor": "warning",
+        "allowedActions": ["submitReview", "updateRectify"]
+      },
+      {
+        "code": "pending_review",
+        "label": "待复查",
+        "description": "整改完成，提交复查申请",
+        "semanticColor": "info",
+        "allowedActions": ["reviewPass", "reviewFail"]
+      },
+      {
+        "code": "closed",
+        "label": "已闭环",
+        "description": "复查通过，隐患治理完成闭环",
+        "semanticColor": "success",
+        "allowedActions": ["reopen"]
+      },
+      {
+        "code": "expired",
+        "label": "已超期",
+        "description": "超过整改期限仍未完成整改",
+        "semanticColor": "danger",
+        "allowedActions": ["rectify", "extendDeadline"]
+      }
+    ],
+    "transitions": [
+      { "from": "discovered", "to": "assigned", "action": "assign", "role": "乡镇主管/管理员", "description": "登记隐患并分配整改责任人" },
+      { "from": "discovered", "to": "processing", "action": "rectify", "role": "管理员/整改人", "description": "直接进入整改流程" },
+      { "from": "assigned", "to": "processing", "action": "rectify", "role": "整改人", "description": "开始落实整改措施" },
+      { "from": "assigned", "to": "assigned", "action": "reassign", "role": "乡镇主管/管理员", "description": "重新分配整改责任人" },
+      { "from": "processing", "to": "pending_review", "action": "submitReview", "role": "整改人", "description": "整改完成提交复查" },
+      { "from": "processing", "to": "processing", "action": "updateRectify", "role": "整改人", "description": "更新整改进展" },
+      { "from": "pending_review", "to": "closed", "action": "reviewPass", "role": "复查人/管理员", "description": "复查通过，闭环" },
+      { "from": "pending_review", "to": "processing", "action": "reviewFail", "role": "复查人/管理员", "description": "复查不通过，重新整改" },
+      { "from": "expired", "to": "processing", "action": "rectify", "role": "整改人", "description": "超期后继续整改" },
+      { "from": "expired", "to": "assigned", "action": "extendDeadline", "role": "乡镇主管/管理员", "description": "申请延期" },
+      { "from": "closed", "to": "discovered", "action": "reopen", "role": "管理员", "description": "隐患复发重新开启" }
+    ]
+  },
+
+  "hazardSources": [
+    { "code": "daily_check", "label": "日常检查", "description": "日常巡检、例行检查发现的隐患" },
+    { "code": "special_inspection", "label": "专项检查", "description": "专项安全检查、季节性检查发现的隐患" },
+    { "code": "comprehensive_inspection", "label": "综合检查", "description": "综合性安全大检查发现的隐患" },
+    { "code": "risk_derived", "label": "风险生成", "description": "从风险管控模块识别并生成的隐患" },
+    { "code": "employee_report", "label": "员工上报", "description": "员工主动上报的隐患线索" },
+    { "code": "supervisor_notice", "label": "上级督办", "description": "上级主管部门督办的隐患" },
+    { "code": "accident_derived", "label": "事故衍生", "description": "事故调查后发现的同类隐患" },
+    { "code": "other", "label": "其他来源", "description": "其他途径发现的隐患" }
+  ],
+
+  "hazardCategories": [
+    { "code": "fire_explosion", "label": "火灾爆炸", "description": "可能引发火灾或爆炸的隐患" },
+    { "code": "electrical", "label": "电气安全", "description": "电气设备、线路等方面的隐患" },
+    { "code": "mechanical", "label": "机械伤害", "description": "机械设备造成伤害的隐患" },
+    { "code": "fall", "label": "高处坠落", "description": "高处作业坠落风险隐患" },
+    { "code": "collapse", "label": "坍塌倾覆", "description": "建构筑物或设备坍塌倾覆隐患" },
+    { "code": "chemical", "label": "危险化学品", "description": "危险化学品储存、使用隐患" },
+    { "code": "poison_suffocation", "label": "中毒窒息", "description": "有毒有害气体或缺氧环境隐患" },
+    { "code": "vehicle", "label": "车辆交通", "description": "机动车辆交通安全隐患" },
+    { "code": "drowning", "label": "淹溺风险", "description": "水域作业淹溺隐患" },
+    { "code": "management", "label": "管理缺陷", "description": "管理制度、操作规程等方面的缺陷" },
+    { "code": "training", "label": "培训不足", "description": "人员安全培训不到位的隐患" },
+    { "code": "individual_protection", "label": "个体防护", "description": "个人防护用品配备或使用不当" },
+    { "code": "other", "label": "其他隐患", "description": "未列入上述分类的其他隐患" }
+  ],
+
+  "expiryRules": {
+    "description": "隐患整改时效规则",
+    "defaultDeadlineDays": 30,
+    "expiringThresholdDays": 7,
+    "expiryStatuses": [
+      { "code": "normal", "label": "正常", "description": "距整改期限 > 7天", "semanticColor": "success" },
+      { "code": "expiring", "label": "临期", "description": "距整改期限 ≤ 7天", "semanticColor": "warning" },
+      { "code": "expired", "label": "已超期", "description": "已超过整改期限", "semanticColor": "danger" },
+      { "code": "resolved", "label": "已完成", "description": "隐患已整改完成", "semanticColor": "success" }
+    ],
+    "notificationRules": [
+      { "trigger": "expiring", "recipients": "整改人+管理员", "frequency": "每天1次" },
+      { "trigger": "expired", "recipients": "整改人+管理员+乡镇主管", "frequency": "每天2次" }
+    ]
+  },
+
+  "responsibilityMatrix": {
+    "description": "隐患治理责任矩阵（严格对齐组织层级）",
+    "roles": [
+      { "code": "company_gm", "label": "公司总经理", "description": "审批一级(重大)隐患整改方案，监督一级隐患治理" },
+      { "code": "dept_manager", "label": "部门/中心负责人", "description": "审批二级(较大)隐患整改方案，监督本部门隐患治理" },
+      { "code": "township_manager", "label": "乡镇作业中心经理", "description": "审批三级(一般)隐患整改方案，分配整改责任人，监督辖区内隐患治理" },
+      { "code": "admin", "label": "管理员", "description": "隐患登记建档、数据维护、流程跟踪、复查验收" },
+      { "code": "employee", "label": "员工", "description": "上报隐患线索，执行整改任务，落实个人防护" }
+    ],
+    "byLevel": {
+      "level1": { "approveRole": "company_gm", "superviseRole": "dept_manager", "executeRole": "admin" },
+      "level2": { "approveRole": "dept_manager", "superviseRole": "township_manager", "executeRole": "admin" },
+      "level3": { "approveRole": "township_manager", "superviseRole": "admin", "executeRole": "employee" },
+      "level4": { "approveRole": "admin", "superviseRole": "admin", "executeRole": "employee" }
+    }
+  },
+
+  "autoUpgradeRules": {
+    "description": "隐患等级自动升级规则",
+    "rules": [
+      { "trigger": "整改超期 ≥ 7天", "action": "等级提升一级" },
+      { "trigger": "同类隐患重复出现 ≥ 3次/季度", "action": "等级提升一级" },
+      { "trigger": "复查不通过 ≥ 2次", "action": "等级提升一级" }
+    ]
+  },
+
+  "futureUpgrade": {
+    "stage1": "配置文件（当前版本）",
+    "stage2": "数据库规则表（assessment_rule）",
+    "stage3": "隐患规则中心（可视化配置、动态调整）"
+  }
+}

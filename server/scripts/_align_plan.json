@@ -1,0 +1,4870 @@
+[
+ {
+  "cyc": "2025-08",
+  "cid": 44,
+  "name": "张万恒",
+  "target": "738",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-08",
+  "cid": 44,
+  "name": "张万恒",
+  "target": "738",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-08",
+  "cid": 44,
+  "name": "张华平",
+  "target": "759",
+  "block": "training",
+  "excel": 9,
+  "sys": 0,
+  "delta": 9,
+  "action": "ADD",
+  "recs": []
+ },
+ {
+  "cyc": "2025-08",
+  "cid": 44,
+  "name": "张华平",
+  "target": "759",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-08",
+  "cid": 44,
+  "name": "张华平",
+  "target": "759",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-08",
+  "cid": 44,
+  "name": "杨清华",
+  "target": "784",
+  "block": "training",
+  "excel": 9,
+  "sys": 0,
+  "delta": 9,
+  "action": "ADD",
+  "recs": []
+ },
+ {
+  "cyc": "2025-08",
+  "cid": 44,
+  "name": "杨清华",
+  "target": "784",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-08",
+  "cid": 44,
+  "name": "杨清华",
+  "target": "784",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-08",
+  "cid": 44,
+  "name": "王臣祥",
+  "target": "743",
+  "block": "training",
+  "excel": 9,
+  "sys": 0,
+  "delta": 9,
+  "action": "ADD",
+  "recs": []
+ },
+ {
+  "cyc": "2025-08",
+  "cid": 44,
+  "name": "王臣祥",
+  "target": "743",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-08",
+  "cid": 44,
+  "name": "王臣祥",
+  "target": "743",
+  "block": "sanwei",
+  "excel": 0,
+  "sys": 1,
+  "delta": -1,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "573",
+    "s": 1
+   }
+  ]
+ },
+ {
+  "cyc": "2025-08",
+  "cid": 44,
+  "name": "王臣祥",
+  "target": "743",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-08",
+  "cid": 44,
+  "name": "张卫新",
+  "target": "750",
+  "block": "training",
+  "excel": 9,
+  "sys": 0,
+  "delta": 9,
+  "action": "ADD",
+  "recs": []
+ },
+ {
+  "cyc": "2025-08",
+  "cid": 44,
+  "name": "张卫新",
+  "target": "750",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-08",
+  "cid": 44,
+  "name": "张卫新",
+  "target": "750",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-08",
+  "cid": 44,
+  "name": "李振恒",
+  "target": "776",
+  "block": "training",
+  "excel": 9,
+  "sys": 0,
+  "delta": 9,
+  "action": "ADD",
+  "recs": []
+ },
+ {
+  "cyc": "2025-08",
+  "cid": 44,
+  "name": "李振恒",
+  "target": "776",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-08",
+  "cid": 44,
+  "name": "李振恒",
+  "target": "776",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-08",
+  "cid": 44,
+  "name": "郭志强",
+  "target": "789",
+  "block": "training",
+  "excel": 16,
+  "sys": 0,
+  "delta": 16,
+  "action": "ADD",
+  "recs": []
+ },
+ {
+  "cyc": "2025-08",
+  "cid": 44,
+  "name": "郭志强",
+  "target": "789",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-08",
+  "cid": 44,
+  "name": "郭志强",
+  "target": "789",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-08",
+  "cid": 44,
+  "name": "张和祥",
+  "target": "772",
+  "block": "culture",
+  "excel": 10,
+  "sys": 0,
+  "delta": 10,
+  "action": "ADD",
+  "recs": []
+ },
+ {
+  "cyc": "2025-08",
+  "cid": 44,
+  "name": "张和祥",
+  "target": "772",
+  "block": "training",
+  "excel": 9,
+  "sys": 0,
+  "delta": 9,
+  "action": "ADD",
+  "recs": []
+ },
+ {
+  "cyc": "2025-08",
+  "cid": 44,
+  "name": "张和祥",
+  "target": "772",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-08",
+  "cid": 44,
+  "name": "张和祥",
+  "target": "772",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-08",
+  "cid": 44,
+  "name": "谢俊章",
+  "target": "768",
+  "block": "culture",
+  "excel": 20,
+  "sys": 0,
+  "delta": 20,
+  "action": "ADD",
+  "recs": []
+ },
+ {
+  "cyc": "2025-08",
+  "cid": 44,
+  "name": "谢俊章",
+  "target": "768",
+  "block": "training",
+  "excel": 9,
+  "sys": 0,
+  "delta": 9,
+  "action": "ADD",
+  "recs": []
+ },
+ {
+  "cyc": "2025-08",
+  "cid": 44,
+  "name": "谢俊章",
+  "target": "768",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-08",
+  "cid": 44,
+  "name": "谢俊章",
+  "target": "768",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-09",
+  "cid": 45,
+  "name": "张华平",
+  "target": "821",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-09",
+  "cid": 45,
+  "name": "张华平",
+  "target": "821",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-09",
+  "cid": 45,
+  "name": "张万恒",
+  "target": "800",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-09",
+  "cid": 45,
+  "name": "张万恒",
+  "target": "800",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-09",
+  "cid": 45,
+  "name": "张和祥",
+  "target": "834",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-09",
+  "cid": 45,
+  "name": "张和祥",
+  "target": "834",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-09",
+  "cid": 45,
+  "name": "王臣祥",
+  "target": "805",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-09",
+  "cid": 45,
+  "name": "王臣祥",
+  "target": "805",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-09",
+  "cid": 45,
+  "name": "李振恒",
+  "target": "838",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-09",
+  "cid": 45,
+  "name": "李振恒",
+  "target": "838",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-09",
+  "cid": 45,
+  "name": "杨清华",
+  "target": "846",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-09",
+  "cid": 45,
+  "name": "杨清华",
+  "target": "846",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-09",
+  "cid": 45,
+  "name": "郭志强",
+  "target": "851",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-09",
+  "cid": 45,
+  "name": "郭志强",
+  "target": "851",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-09",
+  "cid": 45,
+  "name": "张卫新",
+  "target": "812",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-09",
+  "cid": 45,
+  "name": "张卫新",
+  "target": "812",
+  "block": "veto",
+  "excel": 100,
+  "sys": 100,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-09",
+  "cid": 45,
+  "name": "谢俊章",
+  "target": "830",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-09",
+  "cid": 45,
+  "name": "谢俊章",
+  "target": "830",
+  "block": "veto",
+  "excel": 100,
+  "sys": 100,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-10",
+  "cid": 46,
+  "name": "张华平",
+  "target": "883",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-10",
+  "cid": 46,
+  "name": "张华平",
+  "target": "883",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-10",
+  "cid": 46,
+  "name": "王臣祥",
+  "target": "867",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-10",
+  "cid": 46,
+  "name": "王臣祥",
+  "target": "867",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-10",
+  "cid": 46,
+  "name": "张卫新",
+  "target": "874",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-10",
+  "cid": 46,
+  "name": "张卫新",
+  "target": "874",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-10",
+  "cid": 46,
+  "name": "谢俊章",
+  "target": "892",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-10",
+  "cid": 46,
+  "name": "谢俊章",
+  "target": "892",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-10",
+  "cid": 46,
+  "name": "郭志强",
+  "target": "913",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-10",
+  "cid": 46,
+  "name": "郭志强",
+  "target": "913",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-10",
+  "cid": 46,
+  "name": "张和祥",
+  "target": "896",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-10",
+  "cid": 46,
+  "name": "张和祥",
+  "target": "896",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-10",
+  "cid": 46,
+  "name": "张万恒",
+  "target": "862",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-10",
+  "cid": 46,
+  "name": "张万恒",
+  "target": "862",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-10",
+  "cid": 46,
+  "name": "李振恒",
+  "target": "900",
+  "block": "driver",
+  "excel": 2,
+  "sys": 0,
+  "delta": 2,
+  "action": "ADD",
+  "recs": []
+ },
+ {
+  "cyc": "2025-10",
+  "cid": 46,
+  "name": "李振恒",
+  "target": "900",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-10",
+  "cid": 46,
+  "name": "李振恒",
+  "target": "900",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-10",
+  "cid": 46,
+  "name": "杨清华",
+  "target": "908",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-10",
+  "cid": 46,
+  "name": "杨清华",
+  "target": "908",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-11",
+  "cid": 47,
+  "name": "郭志强",
+  "target": "975",
+  "block": "driver",
+  "excel": 0,
+  "sys": 2,
+  "delta": -2,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "294",
+    "s": 2
+   }
+  ]
+ },
+ {
+  "cyc": "2025-11",
+  "cid": 47,
+  "name": "郭志强",
+  "target": "975",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-11",
+  "cid": 47,
+  "name": "郭志强",
+  "target": "975",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-11",
+  "cid": 47,
+  "name": "谢俊章",
+  "target": "954",
+  "block": "driver",
+  "excel": 0,
+  "sys": 1,
+  "delta": -1,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "289",
+    "s": 1
+   }
+  ]
+ },
+ {
+  "cyc": "2025-11",
+  "cid": 47,
+  "name": "谢俊章",
+  "target": "954",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-11",
+  "cid": 47,
+  "name": "谢俊章",
+  "target": "954",
+  "block": "sanwei",
+  "excel": 0,
+  "sys": 1,
+  "delta": -1,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "626",
+    "s": 1
+   }
+  ]
+ },
+ {
+  "cyc": "2025-11",
+  "cid": 47,
+  "name": "谢俊章",
+  "target": "954",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-11",
+  "cid": 47,
+  "name": "张华平",
+  "target": "945",
+  "block": "culture",
+  "excel": 0,
+  "sys": 10,
+  "delta": -10,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "295",
+    "s": 10
+   }
+  ]
+ },
+ {
+  "cyc": "2025-11",
+  "cid": 47,
+  "name": "张华平",
+  "target": "945",
+  "block": "driver",
+  "excel": 0,
+  "sys": 3,
+  "delta": -3,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "287",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2025-11",
+  "cid": 47,
+  "name": "张华平",
+  "target": "945",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-11",
+  "cid": 47,
+  "name": "张华平",
+  "target": "945",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-11",
+  "cid": 47,
+  "name": "王臣祥",
+  "target": "929",
+  "block": "culture",
+  "excel": 0,
+  "sys": 20,
+  "delta": -20,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "297",
+    "s": 20
+   }
+  ]
+ },
+ {
+  "cyc": "2025-11",
+  "cid": 47,
+  "name": "王臣祥",
+  "target": "929",
+  "block": "driver",
+  "excel": 1,
+  "sys": 4,
+  "delta": -3,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "285",
+    "s": 4
+   }
+  ]
+ },
+ {
+  "cyc": "2025-11",
+  "cid": 47,
+  "name": "王臣祥",
+  "target": "929",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-11",
+  "cid": 47,
+  "name": "王臣祥",
+  "target": "929",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-11",
+  "cid": 47,
+  "name": "张万恒",
+  "target": "924",
+  "block": "driver",
+  "excel": 0,
+  "sys": 3,
+  "delta": -3,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "283",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2025-11",
+  "cid": 47,
+  "name": "张万恒",
+  "target": "924",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-11",
+  "cid": 47,
+  "name": "张万恒",
+  "target": "924",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-11",
+  "cid": 47,
+  "name": "张卫新",
+  "target": "936",
+  "block": "culture",
+  "excel": 0,
+  "sys": 10,
+  "delta": -10,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "298",
+    "s": 10
+   }
+  ]
+ },
+ {
+  "cyc": "2025-11",
+  "cid": 47,
+  "name": "张卫新",
+  "target": "936",
+  "block": "training",
+  "excel": 1,
+  "sys": 0,
+  "delta": 1,
+  "action": "ADD",
+  "recs": []
+ },
+ {
+  "cyc": "2025-11",
+  "cid": 47,
+  "name": "张卫新",
+  "target": "936",
+  "block": "driver",
+  "excel": 2,
+  "sys": 3,
+  "delta": -1,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "286",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2025-11",
+  "cid": 47,
+  "name": "张卫新",
+  "target": "936",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-11",
+  "cid": 47,
+  "name": "张卫新",
+  "target": "936",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-11",
+  "cid": 47,
+  "name": "张和祥",
+  "target": "958",
+  "block": "driver",
+  "excel": 0,
+  "sys": 2,
+  "delta": -2,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "290",
+    "s": 2
+   }
+  ]
+ },
+ {
+  "cyc": "2025-11",
+  "cid": 47,
+  "name": "张和祥",
+  "target": "958",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-11",
+  "cid": 47,
+  "name": "张和祥",
+  "target": "958",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-11",
+  "cid": 47,
+  "name": "李振恒",
+  "target": "962",
+  "block": "culture",
+  "excel": 0,
+  "sys": 10,
+  "delta": -10,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "299",
+    "s": 10
+   }
+  ]
+ },
+ {
+  "cyc": "2025-11",
+  "cid": 47,
+  "name": "李振恒",
+  "target": "962",
+  "block": "training",
+  "excel": 18,
+  "sys": 0,
+  "delta": 18,
+  "action": "ADD",
+  "recs": []
+ },
+ {
+  "cyc": "2025-11",
+  "cid": 47,
+  "name": "李振恒",
+  "target": "962",
+  "block": "driver",
+  "excel": 0,
+  "sys": 3,
+  "delta": -3,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "291",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2025-11",
+  "cid": 47,
+  "name": "李振恒",
+  "target": "962",
+  "block": "transfer",
+  "excel": 0,
+  "sys": 2,
+  "delta": -2,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "457",
+    "s": 2
+   }
+  ]
+ },
+ {
+  "cyc": "2025-11",
+  "cid": 47,
+  "name": "李振恒",
+  "target": "962",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-11",
+  "cid": 47,
+  "name": "李振恒",
+  "target": "962",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-11",
+  "cid": 47,
+  "name": "杨清华",
+  "target": "970",
+  "block": "culture",
+  "excel": 0,
+  "sys": 20,
+  "delta": -20,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "296",
+    "s": 20
+   }
+  ]
+ },
+ {
+  "cyc": "2025-11",
+  "cid": 47,
+  "name": "杨清华",
+  "target": "970",
+  "block": "training",
+  "excel": 18,
+  "sys": 0,
+  "delta": 18,
+  "action": "ADD",
+  "recs": []
+ },
+ {
+  "cyc": "2025-11",
+  "cid": 47,
+  "name": "杨清华",
+  "target": "970",
+  "block": "driver",
+  "excel": 6,
+  "sys": 3,
+  "delta": 3,
+  "action": "ADD",
+  "recs": [
+   {
+    "id": "293",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2025-11",
+  "cid": 47,
+  "name": "杨清华",
+  "target": "970",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-11",
+  "cid": 47,
+  "name": "杨清华",
+  "target": "970",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-12",
+  "cid": 48,
+  "name": "张华平",
+  "target": "1007",
+  "block": "driver",
+  "excel": 0,
+  "sys": 3,
+  "delta": -3,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "307",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2025-12",
+  "cid": 48,
+  "name": "张华平",
+  "target": "1007",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-12",
+  "cid": 48,
+  "name": "张华平",
+  "target": "1007",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-12",
+  "cid": 48,
+  "name": "张万恒",
+  "target": "986",
+  "block": "driver",
+  "excel": 0,
+  "sys": 3,
+  "delta": -3,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "303",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2025-12",
+  "cid": 48,
+  "name": "张万恒",
+  "target": "986",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-12",
+  "cid": 48,
+  "name": "张万恒",
+  "target": "986",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-12",
+  "cid": 48,
+  "name": "张和祥",
+  "target": "1020",
+  "block": "driver",
+  "excel": 0,
+  "sys": 2,
+  "delta": -2,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "310",
+    "s": 2
+   }
+  ]
+ },
+ {
+  "cyc": "2025-12",
+  "cid": 48,
+  "name": "张和祥",
+  "target": "1020",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-12",
+  "cid": 48,
+  "name": "张和祥",
+  "target": "1020",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-12",
+  "cid": 48,
+  "name": "谢俊章",
+  "target": "1016",
+  "block": "driver",
+  "excel": 0,
+  "sys": 1,
+  "delta": -1,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "309",
+    "s": 1
+   }
+  ]
+ },
+ {
+  "cyc": "2025-12",
+  "cid": 48,
+  "name": "谢俊章",
+  "target": "1016",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-12",
+  "cid": 48,
+  "name": "谢俊章",
+  "target": "1016",
+  "block": "sanwei",
+  "excel": 2,
+  "sys": 3,
+  "delta": -1,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "415",
+    "s": 2
+   },
+   {
+    "id": "633",
+    "s": 1
+   }
+  ]
+ },
+ {
+  "cyc": "2025-12",
+  "cid": 48,
+  "name": "谢俊章",
+  "target": "1016",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-12",
+  "cid": 48,
+  "name": "郭志强",
+  "target": "1037",
+  "block": "driver",
+  "excel": 1,
+  "sys": 2,
+  "delta": -1,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "314",
+    "s": 2
+   }
+  ]
+ },
+ {
+  "cyc": "2025-12",
+  "cid": 48,
+  "name": "郭志强",
+  "target": "1037",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-12",
+  "cid": 48,
+  "name": "郭志强",
+  "target": "1037",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-12",
+  "cid": 48,
+  "name": "张卫新",
+  "target": "998",
+  "block": "training",
+  "excel": 1,
+  "sys": 0,
+  "delta": 1,
+  "action": "ADD",
+  "recs": []
+ },
+ {
+  "cyc": "2025-12",
+  "cid": 48,
+  "name": "张卫新",
+  "target": "998",
+  "block": "driver",
+  "excel": 4,
+  "sys": 3,
+  "delta": 1,
+  "action": "ADD",
+  "recs": [
+   {
+    "id": "306",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2025-12",
+  "cid": 48,
+  "name": "张卫新",
+  "target": "998",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-12",
+  "cid": 48,
+  "name": "张卫新",
+  "target": "998",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-12",
+  "cid": 48,
+  "name": "王臣祥",
+  "target": "991",
+  "block": "driver",
+  "excel": 1,
+  "sys": 4,
+  "delta": -3,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "305",
+    "s": 4
+   }
+  ]
+ },
+ {
+  "cyc": "2025-12",
+  "cid": 48,
+  "name": "王臣祥",
+  "target": "991",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-12",
+  "cid": 48,
+  "name": "王臣祥",
+  "target": "991",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-12",
+  "cid": 48,
+  "name": "杨清华",
+  "target": "1032",
+  "block": "training",
+  "excel": 18,
+  "sys": 0,
+  "delta": 18,
+  "action": "ADD",
+  "recs": []
+ },
+ {
+  "cyc": "2025-12",
+  "cid": 48,
+  "name": "杨清华",
+  "target": "1032",
+  "block": "driver",
+  "excel": 1,
+  "sys": 3,
+  "delta": -2,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "313",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2025-12",
+  "cid": 48,
+  "name": "杨清华",
+  "target": "1032",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-12",
+  "cid": 48,
+  "name": "杨清华",
+  "target": "1032",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-12",
+  "cid": 48,
+  "name": "靳洪刚",
+  "target": "1012",
+  "block": "training",
+  "excel": 21,
+  "sys": 30,
+  "delta": -9,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "300",
+    "s": 30
+   }
+  ]
+ },
+ {
+  "cyc": "2025-12",
+  "cid": 48,
+  "name": "靳洪刚",
+  "target": "1012",
+  "block": "driver",
+  "excel": 20,
+  "sys": 2,
+  "delta": 18,
+  "action": "ADD",
+  "recs": [
+   {
+    "id": "308",
+    "s": 2
+   }
+  ]
+ },
+ {
+  "cyc": "2025-12",
+  "cid": 48,
+  "name": "靳洪刚",
+  "target": "1012",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-12",
+  "cid": 48,
+  "name": "靳洪刚",
+  "target": "1012",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2025-12",
+  "cid": 48,
+  "name": "李振恒",
+  "target": "1024",
+  "block": "driver",
+  "excel": 0,
+  "sys": 3,
+  "delta": -3,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "311",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2025-12",
+  "cid": 48,
+  "name": "李振恒",
+  "target": "1024",
+  "block": "fire",
+  "excel": 2,
+  "sys": 0,
+  "delta": 2,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2025-12",
+  "cid": 48,
+  "name": "李振恒",
+  "target": "1024",
+  "block": "veto",
+  "excel": 100,
+  "sys": 0,
+  "delta": 100,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-01",
+  "cid": 49,
+  "name": "孙建栋",
+  "target": "1090",
+  "block": "driver",
+  "excel": 0,
+  "sys": 2,
+  "delta": -2,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "324",
+    "s": 2
+   }
+  ]
+ },
+ {
+  "cyc": "2026-01",
+  "cid": 49,
+  "name": "孙建栋",
+  "target": "1090",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-01",
+  "cid": 49,
+  "name": "孙建栋",
+  "target": "1090",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-01",
+  "cid": 49,
+  "name": "张和祥",
+  "target": "1082",
+  "block": "driver",
+  "excel": 0,
+  "sys": 2,
+  "delta": -2,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "322",
+    "s": 2
+   }
+  ]
+ },
+ {
+  "cyc": "2026-01",
+  "cid": 49,
+  "name": "张和祥",
+  "target": "1082",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-01",
+  "cid": 49,
+  "name": "张和祥",
+  "target": "1082",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-01",
+  "cid": 49,
+  "name": "谢俊章",
+  "target": "1078",
+  "block": "driver",
+  "excel": 0,
+  "sys": 1,
+  "delta": -1,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "321",
+    "s": 1
+   }
+  ]
+ },
+ {
+  "cyc": "2026-01",
+  "cid": 49,
+  "name": "谢俊章",
+  "target": "1078",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-01",
+  "cid": 49,
+  "name": "谢俊章",
+  "target": "1078",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-01",
+  "cid": 49,
+  "name": "张万恒",
+  "target": "1048",
+  "block": "driver",
+  "excel": 0,
+  "sys": 3,
+  "delta": -3,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "315",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2026-01",
+  "cid": 49,
+  "name": "张万恒",
+  "target": "1048",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-01",
+  "cid": 49,
+  "name": "张万恒",
+  "target": "1048",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-01",
+  "cid": 49,
+  "name": "郭志强",
+  "target": "1099",
+  "block": "driver",
+  "excel": 0,
+  "sys": 2,
+  "delta": -2,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "326",
+    "s": 2
+   }
+  ]
+ },
+ {
+  "cyc": "2026-01",
+  "cid": 49,
+  "name": "郭志强",
+  "target": "1099",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-01",
+  "cid": 49,
+  "name": "郭志强",
+  "target": "1099",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-01",
+  "cid": 49,
+  "name": "张卫新",
+  "target": "1060",
+  "block": "driver",
+  "excel": 2,
+  "sys": 3,
+  "delta": -1,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "318",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2026-01",
+  "cid": 49,
+  "name": "张卫新",
+  "target": "1060",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-01",
+  "cid": 49,
+  "name": "张卫新",
+  "target": "1060",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-01",
+  "cid": 49,
+  "name": "李振恒",
+  "target": "1086",
+  "block": "driver",
+  "excel": 0,
+  "sys": 3,
+  "delta": -3,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "323",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2026-01",
+  "cid": 49,
+  "name": "李振恒",
+  "target": "1086",
+  "block": "fire",
+  "excel": 2,
+  "sys": 0,
+  "delta": 2,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-01",
+  "cid": 49,
+  "name": "李振恒",
+  "target": "1086",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-01",
+  "cid": 49,
+  "name": "张华平",
+  "target": "1069",
+  "block": "driver",
+  "excel": 2,
+  "sys": 3,
+  "delta": -1,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "319",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2026-01",
+  "cid": 49,
+  "name": "张华平",
+  "target": "1069",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-01",
+  "cid": 49,
+  "name": "张华平",
+  "target": "1069",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-01",
+  "cid": 49,
+  "name": "王臣祥",
+  "target": "1053",
+  "block": "driver",
+  "excel": 1,
+  "sys": 4,
+  "delta": -3,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "317",
+    "s": 4
+   }
+  ]
+ },
+ {
+  "cyc": "2026-01",
+  "cid": 49,
+  "name": "王臣祥",
+  "target": "1053",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-01",
+  "cid": 49,
+  "name": "王臣祥",
+  "target": "1053",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-01",
+  "cid": 49,
+  "name": "杨清华",
+  "target": "1094",
+  "block": "driver",
+  "excel": 0,
+  "sys": 3,
+  "delta": -3,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "325",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2026-01",
+  "cid": 49,
+  "name": "杨清华",
+  "target": "1094",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-01",
+  "cid": 49,
+  "name": "杨清华",
+  "target": "1094",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-01",
+  "cid": 49,
+  "name": "靳洪刚",
+  "target": "1074",
+  "block": "training",
+  "excel": 2,
+  "sys": 0,
+  "delta": 2,
+  "action": "ADD",
+  "recs": []
+ },
+ {
+  "cyc": "2026-01",
+  "cid": 49,
+  "name": "靳洪刚",
+  "target": "1074",
+  "block": "driver",
+  "excel": 7,
+  "sys": 3,
+  "delta": 4,
+  "action": "ADD",
+  "recs": [
+   {
+    "id": "320",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2026-01",
+  "cid": 49,
+  "name": "靳洪刚",
+  "target": "1074",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-01",
+  "cid": 49,
+  "name": "靳洪刚",
+  "target": "1074",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-02",
+  "cid": 50,
+  "name": "孙建栋",
+  "target": "1152",
+  "block": "driver",
+  "excel": 0,
+  "sys": 2,
+  "delta": -2,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "336",
+    "s": 2
+   }
+  ]
+ },
+ {
+  "cyc": "2026-02",
+  "cid": 50,
+  "name": "孙建栋",
+  "target": "1152",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-02",
+  "cid": 50,
+  "name": "孙建栋",
+  "target": "1152",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-02",
+  "cid": 50,
+  "name": "郭志强",
+  "target": "1161",
+  "block": "driver",
+  "excel": 0,
+  "sys": 2,
+  "delta": -2,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "338",
+    "s": 2
+   }
+  ]
+ },
+ {
+  "cyc": "2026-02",
+  "cid": 50,
+  "name": "郭志强",
+  "target": "1161",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-02",
+  "cid": 50,
+  "name": "郭志强",
+  "target": "1161",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-02",
+  "cid": 50,
+  "name": "谢俊章",
+  "target": "1140",
+  "block": "driver",
+  "excel": 0,
+  "sys": 1,
+  "delta": -1,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "333",
+    "s": 1
+   }
+  ]
+ },
+ {
+  "cyc": "2026-02",
+  "cid": 50,
+  "name": "谢俊章",
+  "target": "1140",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-02",
+  "cid": 50,
+  "name": "谢俊章",
+  "target": "1140",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-02",
+  "cid": 50,
+  "name": "李振恒",
+  "target": "1148",
+  "block": "driver",
+  "excel": 0,
+  "sys": 3,
+  "delta": -3,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "335",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2026-02",
+  "cid": 50,
+  "name": "李振恒",
+  "target": "1148",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-02",
+  "cid": 50,
+  "name": "李振恒",
+  "target": "1148",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-02",
+  "cid": 50,
+  "name": "张卫新",
+  "target": "1122",
+  "block": "driver",
+  "excel": 1,
+  "sys": 3,
+  "delta": -2,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "330",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2026-02",
+  "cid": 50,
+  "name": "张卫新",
+  "target": "1122",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-02",
+  "cid": 50,
+  "name": "张卫新",
+  "target": "1122",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-02",
+  "cid": 50,
+  "name": "靳洪刚",
+  "target": "1136",
+  "block": "driver",
+  "excel": 1,
+  "sys": 3,
+  "delta": -2,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "332",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2026-02",
+  "cid": 50,
+  "name": "靳洪刚",
+  "target": "1136",
+  "block": "fire",
+  "excel": 1,
+  "sys": 0,
+  "delta": 1,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-02",
+  "cid": 50,
+  "name": "靳洪刚",
+  "target": "1136",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-02",
+  "cid": 50,
+  "name": "张万恒",
+  "target": "1110",
+  "block": "driver",
+  "excel": 2,
+  "sys": 3,
+  "delta": -1,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "327",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2026-02",
+  "cid": 50,
+  "name": "张万恒",
+  "target": "1110",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-02",
+  "cid": 50,
+  "name": "张万恒",
+  "target": "1110",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-02",
+  "cid": 50,
+  "name": "张和祥",
+  "target": "1144",
+  "block": "training",
+  "excel": 7,
+  "sys": 0,
+  "delta": 7,
+  "action": "ADD",
+  "recs": []
+ },
+ {
+  "cyc": "2026-02",
+  "cid": 50,
+  "name": "张和祥",
+  "target": "1144",
+  "block": "driver",
+  "excel": 0,
+  "sys": 2,
+  "delta": -2,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "334",
+    "s": 2
+   }
+  ]
+ },
+ {
+  "cyc": "2026-02",
+  "cid": 50,
+  "name": "张和祥",
+  "target": "1144",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-02",
+  "cid": 50,
+  "name": "张和祥",
+  "target": "1144",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-02",
+  "cid": 50,
+  "name": "王臣祥",
+  "target": "1115",
+  "block": "driver",
+  "excel": 0,
+  "sys": 4,
+  "delta": -4,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "329",
+    "s": 4
+   }
+  ]
+ },
+ {
+  "cyc": "2026-02",
+  "cid": 50,
+  "name": "王臣祥",
+  "target": "1115",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-02",
+  "cid": 50,
+  "name": "王臣祥",
+  "target": "1115",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-02",
+  "cid": 50,
+  "name": "杨清华",
+  "target": "1156",
+  "block": "training",
+  "excel": 3,
+  "sys": 0,
+  "delta": 3,
+  "action": "ADD",
+  "recs": []
+ },
+ {
+  "cyc": "2026-02",
+  "cid": 50,
+  "name": "杨清华",
+  "target": "1156",
+  "block": "driver",
+  "excel": 6,
+  "sys": 3,
+  "delta": 3,
+  "action": "ADD",
+  "recs": [
+   {
+    "id": "337",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2026-02",
+  "cid": 50,
+  "name": "杨清华",
+  "target": "1156",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-02",
+  "cid": 50,
+  "name": "杨清华",
+  "target": "1156",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-02",
+  "cid": 50,
+  "name": "张华平",
+  "target": "1131",
+  "block": "driver",
+  "excel": 0,
+  "sys": 3,
+  "delta": -3,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "331",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2026-02",
+  "cid": 50,
+  "name": "张华平",
+  "target": "1131",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-02",
+  "cid": 50,
+  "name": "张华平",
+  "target": "1131",
+  "block": "veto",
+  "excel": 100,
+  "sys": 0,
+  "delta": 100,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-03",
+  "cid": 51,
+  "name": "张万恒",
+  "target": "1172",
+  "block": "driver",
+  "excel": 0,
+  "sys": 3,
+  "delta": -3,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "342",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2026-03",
+  "cid": 51,
+  "name": "张万恒",
+  "target": "1172",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-03",
+  "cid": 51,
+  "name": "张万恒",
+  "target": "1172",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-03",
+  "cid": 51,
+  "name": "郭志强",
+  "target": "1223",
+  "block": "driver",
+  "excel": 0,
+  "sys": 2,
+  "delta": -2,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "353",
+    "s": 2
+   }
+  ]
+ },
+ {
+  "cyc": "2026-03",
+  "cid": 51,
+  "name": "郭志强",
+  "target": "1223",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-03",
+  "cid": 51,
+  "name": "郭志强",
+  "target": "1223",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-03",
+  "cid": 51,
+  "name": "张卫新",
+  "target": "1184",
+  "block": "driver",
+  "excel": 1,
+  "sys": 3,
+  "delta": -2,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "345",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2026-03",
+  "cid": 51,
+  "name": "张卫新",
+  "target": "1184",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-03",
+  "cid": 51,
+  "name": "张卫新",
+  "target": "1184",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-03",
+  "cid": 51,
+  "name": "杨清华",
+  "target": "1218",
+  "block": "driver",
+  "excel": 1,
+  "sys": 3,
+  "delta": -2,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "352",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2026-03",
+  "cid": 51,
+  "name": "杨清华",
+  "target": "1218",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-03",
+  "cid": 51,
+  "name": "杨清华",
+  "target": "1218",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-03",
+  "cid": 51,
+  "name": "孙建栋",
+  "target": "1214",
+  "block": "driver",
+  "excel": 3,
+  "sys": 2,
+  "delta": 1,
+  "action": "ADD",
+  "recs": [
+   {
+    "id": "351",
+    "s": 2
+   }
+  ]
+ },
+ {
+  "cyc": "2026-03",
+  "cid": 51,
+  "name": "孙建栋",
+  "target": "1214",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-03",
+  "cid": 51,
+  "name": "孙建栋",
+  "target": "1214",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-03",
+  "cid": 51,
+  "name": "王臣祥",
+  "target": "1177",
+  "block": "driver",
+  "excel": 1,
+  "sys": 4,
+  "delta": -3,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "344",
+    "s": 4
+   }
+  ]
+ },
+ {
+  "cyc": "2026-03",
+  "cid": 51,
+  "name": "王臣祥",
+  "target": "1177",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-03",
+  "cid": 51,
+  "name": "王臣祥",
+  "target": "1177",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-03",
+  "cid": 51,
+  "name": "张和祥",
+  "target": "1206",
+  "block": "training",
+  "excel": 8,
+  "sys": 2,
+  "delta": 6,
+  "action": "ADD",
+  "recs": [
+   {
+    "id": "340",
+    "s": 2
+   }
+  ]
+ },
+ {
+  "cyc": "2026-03",
+  "cid": 51,
+  "name": "张和祥",
+  "target": "1206",
+  "block": "driver",
+  "excel": 0,
+  "sys": 2,
+  "delta": -2,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "349",
+    "s": 2
+   }
+  ]
+ },
+ {
+  "cyc": "2026-03",
+  "cid": 51,
+  "name": "张和祥",
+  "target": "1206",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-03",
+  "cid": 51,
+  "name": "张和祥",
+  "target": "1206",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-03",
+  "cid": 51,
+  "name": "张华平",
+  "target": "1193",
+  "block": "driver",
+  "excel": 0,
+  "sys": 3,
+  "delta": -3,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "346",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2026-03",
+  "cid": 51,
+  "name": "张华平",
+  "target": "1193",
+  "block": "fire",
+  "excel": 4,
+  "sys": 0,
+  "delta": 4,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-03",
+  "cid": 51,
+  "name": "张华平",
+  "target": "1193",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-03",
+  "cid": 51,
+  "name": "谢俊章",
+  "target": "1202",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-03",
+  "cid": 51,
+  "name": "谢俊章",
+  "target": "1202",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-03",
+  "cid": 51,
+  "name": "靳洪刚",
+  "target": "1198",
+  "block": "training",
+  "excel": 18,
+  "sys": 5,
+  "delta": 13,
+  "action": "ADD",
+  "recs": [
+   {
+    "id": "339",
+    "s": 5
+   }
+  ]
+ },
+ {
+  "cyc": "2026-03",
+  "cid": 51,
+  "name": "靳洪刚",
+  "target": "1198",
+  "block": "driver",
+  "excel": 0,
+  "sys": 3,
+  "delta": -3,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "347",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2026-03",
+  "cid": 51,
+  "name": "靳洪刚",
+  "target": "1198",
+  "block": "transfer",
+  "excel": 2,
+  "sys": 4,
+  "delta": -2,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "459",
+    "s": 4
+   }
+  ]
+ },
+ {
+  "cyc": "2026-03",
+  "cid": 51,
+  "name": "靳洪刚",
+  "target": "1198",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-03",
+  "cid": 51,
+  "name": "靳洪刚",
+  "target": "1198",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-03",
+  "cid": 51,
+  "name": "李振恒",
+  "target": "1210",
+  "block": "driver",
+  "excel": 0,
+  "sys": 3,
+  "delta": -3,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "350",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2026-03",
+  "cid": 51,
+  "name": "李振恒",
+  "target": "1210",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-03",
+  "cid": 51,
+  "name": "李振恒",
+  "target": "1210",
+  "block": "sanwei",
+  "excel": 18,
+  "sys": 15,
+  "delta": 3,
+  "action": "ADD",
+  "recs": [
+   {
+    "id": "428",
+    "s": 15
+   }
+  ]
+ },
+ {
+  "cyc": "2026-03",
+  "cid": 51,
+  "name": "李振恒",
+  "target": "1210",
+  "block": "veto",
+  "excel": 100,
+  "sys": 100,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "孙建栋",
+  "target": "1276",
+  "block": "training",
+  "excel": 1,
+  "sys": 0,
+  "delta": 1,
+  "action": "ADD",
+  "recs": []
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "孙建栋",
+  "target": "1276",
+  "block": "driver",
+  "excel": 0,
+  "sys": 2,
+  "delta": -2,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "367",
+    "s": 2
+   }
+  ]
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "孙建栋",
+  "target": "1276",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "孙建栋",
+  "target": "1276",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "张和祥",
+  "target": "1268",
+  "block": "driver",
+  "excel": 0,
+  "sys": 2,
+  "delta": -2,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "365",
+    "s": 2
+   }
+  ]
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "张和祥",
+  "target": "1268",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "张和祥",
+  "target": "1268",
+  "block": "sanwei",
+  "excel": 1,
+  "sys": 0,
+  "delta": 1,
+  "action": "ADD",
+  "recs": []
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "张和祥",
+  "target": "1268",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "谢俊章",
+  "target": "1264",
+  "block": "driver",
+  "excel": 0,
+  "sys": 1,
+  "delta": -1,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "364",
+    "s": 1
+   }
+  ]
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "谢俊章",
+  "target": "1264",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "谢俊章",
+  "target": "1264",
+  "block": "sanwei",
+  "excel": 6,
+  "sys": 1,
+  "delta": 5,
+  "action": "ADD",
+  "recs": [
+   {
+    "id": "664",
+    "s": 1
+   }
+  ]
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "谢俊章",
+  "target": "1264",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "张万恒",
+  "target": "1234",
+  "block": "training",
+  "excel": 1,
+  "sys": 0,
+  "delta": 1,
+  "action": "ADD",
+  "recs": []
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "张万恒",
+  "target": "1234",
+  "block": "driver",
+  "excel": 0,
+  "sys": 3,
+  "delta": -3,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "358",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "张万恒",
+  "target": "1234",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "张万恒",
+  "target": "1234",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "郭志强",
+  "target": "1285",
+  "block": "driver",
+  "excel": 0,
+  "sys": 2,
+  "delta": -2,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "369",
+    "s": 2
+   }
+  ]
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "郭志强",
+  "target": "1285",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "郭志强",
+  "target": "1285",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "张卫新",
+  "target": "1246",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "张卫新",
+  "target": "1246",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "李振恒",
+  "target": "1272",
+  "block": "driver",
+  "excel": 0,
+  "sys": 3,
+  "delta": -3,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "366",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "李振恒",
+  "target": "1272",
+  "block": "transfer",
+  "excel": 0.5,
+  "sys": 0,
+  "delta": 0.5,
+  "action": "ADD",
+  "recs": []
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "李振恒",
+  "target": "1272",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "李振恒",
+  "target": "1272",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "张华平",
+  "target": "1255",
+  "block": "driver",
+  "excel": 0,
+  "sys": 3,
+  "delta": -3,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "362",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "张华平",
+  "target": "1255",
+  "block": "fire",
+  "excel": 4,
+  "sys": 0,
+  "delta": 4,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "张华平",
+  "target": "1255",
+  "block": "sanwei",
+  "excel": 12,
+  "sys": 2,
+  "delta": 10,
+  "action": "ADD",
+  "recs": [
+   {
+    "id": "661",
+    "s": 2
+   }
+  ]
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "张华平",
+  "target": "1255",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "王臣祥",
+  "target": "1239",
+  "block": "driver",
+  "excel": 0,
+  "sys": 4,
+  "delta": -4,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "360",
+    "s": 4
+   }
+  ]
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "王臣祥",
+  "target": "1239",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "王臣祥",
+  "target": "1239",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "杨清华",
+  "target": "1280",
+  "block": "training",
+  "excel": 2,
+  "sys": 0,
+  "delta": 2,
+  "action": "ADD",
+  "recs": []
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "杨清华",
+  "target": "1280",
+  "block": "driver",
+  "excel": 0,
+  "sys": 3,
+  "delta": -3,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "368",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "杨清华",
+  "target": "1280",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "杨清华",
+  "target": "1280",
+  "block": "sanwei",
+  "excel": 1,
+  "sys": 0,
+  "delta": 1,
+  "action": "ADD",
+  "recs": []
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "杨清华",
+  "target": "1280",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "靳洪刚",
+  "target": "1260",
+  "block": "driver",
+  "excel": 0,
+  "sys": 3,
+  "delta": -3,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "363",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "靳洪刚",
+  "target": "1260",
+  "block": "transfer",
+  "excel": 2,
+  "sys": 0,
+  "delta": 2,
+  "action": "ADD",
+  "recs": []
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "靳洪刚",
+  "target": "1260",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "靳洪刚",
+  "target": "1260",
+  "block": "sanwei",
+  "excel": 5,
+  "sys": 3,
+  "delta": 2,
+  "action": "ADD",
+  "recs": [
+   {
+    "id": "432",
+    "s": 2
+   },
+   {
+    "id": "662",
+    "s": 1
+   }
+  ]
+ },
+ {
+  "cyc": "2026-04",
+  "cid": 52,
+  "name": "靳洪刚",
+  "target": "1260",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "孙建栋",
+  "target": "1338",
+  "block": "driver",
+  "excel": 0,
+  "sys": 2,
+  "delta": -2,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "384",
+    "s": 2
+   }
+  ]
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "孙建栋",
+  "target": "1338",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "孙建栋",
+  "target": "1338",
+  "block": "sanwei",
+  "excel": 0,
+  "sys": 1,
+  "delta": -1,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "668",
+    "s": 1
+   }
+  ]
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "孙建栋",
+  "target": "1338",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "张和祥",
+  "target": "1330",
+  "block": "driver",
+  "excel": 0,
+  "sys": 2,
+  "delta": -2,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "382",
+    "s": 2
+   }
+  ]
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "张和祥",
+  "target": "1330",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "张和祥",
+  "target": "1330",
+  "block": "sanwei",
+  "excel": 0,
+  "sys": 1,
+  "delta": -1,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "675",
+    "s": 1
+   }
+  ]
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "张和祥",
+  "target": "1330",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "张万恒",
+  "target": "1296",
+  "block": "driver",
+  "excel": 0.5,
+  "sys": 2,
+  "delta": -1.5,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "375",
+    "s": 2
+   }
+  ]
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "张万恒",
+  "target": "1296",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "张万恒",
+  "target": "1296",
+  "block": "sanwei",
+  "excel": 0,
+  "sys": 1,
+  "delta": -1,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "671",
+    "s": 1
+   }
+  ]
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "张万恒",
+  "target": "1296",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "王臣祥",
+  "target": "1301",
+  "block": "driver",
+  "excel": 1,
+  "sys": 4,
+  "delta": -3,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "377",
+    "s": 4
+   }
+  ]
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "王臣祥",
+  "target": "1301",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "王臣祥",
+  "target": "1301",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "张华平",
+  "target": "1317",
+  "block": "driver",
+  "excel": 0,
+  "sys": 3,
+  "delta": -3,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "379",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "张华平",
+  "target": "1317",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "张华平",
+  "target": "1317",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "靳洪刚",
+  "target": "1322",
+  "block": "training",
+  "excel": 2,
+  "sys": 0,
+  "delta": 2,
+  "action": "ADD",
+  "recs": []
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "靳洪刚",
+  "target": "1322",
+  "block": "driver",
+  "excel": 0,
+  "sys": 3,
+  "delta": -3,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "380",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "靳洪刚",
+  "target": "1322",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "靳洪刚",
+  "target": "1322",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "张卫新",
+  "target": "1308",
+  "block": "driver",
+  "excel": 2.5,
+  "sys": 3,
+  "delta": -0.5,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "378",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "张卫新",
+  "target": "1308",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "张卫新",
+  "target": "1308",
+  "block": "sanwei",
+  "excel": 0,
+  "sys": 2,
+  "delta": -2,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "670",
+    "s": 2
+   }
+  ]
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "张卫新",
+  "target": "1308",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "郭志强",
+  "target": "1347",
+  "block": "driver",
+  "excel": 1,
+  "sys": 0,
+  "delta": 1,
+  "action": "ADD",
+  "recs": []
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "郭志强",
+  "target": "1347",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "郭志强",
+  "target": "1347",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "杨清华",
+  "target": "1342",
+  "block": "training",
+  "excel": 3,
+  "sys": 0,
+  "delta": 3,
+  "action": "ADD",
+  "recs": []
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "杨清华",
+  "target": "1342",
+  "block": "driver",
+  "excel": 1,
+  "sys": 3,
+  "delta": -2,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "385",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "杨清华",
+  "target": "1342",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "杨清华",
+  "target": "1342",
+  "block": "sanwei",
+  "excel": 2,
+  "sys": 3,
+  "delta": -1,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "433",
+    "s": 2
+   },
+   {
+    "id": "666",
+    "s": 1
+   }
+  ]
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "杨清华",
+  "target": "1342",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "谢俊章",
+  "target": "1326",
+  "block": "training",
+  "excel": 0,
+  "sys": 3,
+  "delta": -3,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "370",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "谢俊章",
+  "target": "1326",
+  "block": "driver",
+  "excel": 1.5,
+  "sys": 1,
+  "delta": 0.5,
+  "action": "ADD",
+  "recs": [
+   {
+    "id": "381",
+    "s": 1
+   }
+  ]
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "谢俊章",
+  "target": "1326",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "谢俊章",
+  "target": "1326",
+  "block": "sanwei",
+  "excel": 5,
+  "sys": 1,
+  "delta": 4,
+  "action": "ADD",
+  "recs": [
+   {
+    "id": "673",
+    "s": 1
+   }
+  ]
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "谢俊章",
+  "target": "1326",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "李振恒",
+  "target": "1334",
+  "block": "training",
+  "excel": 1,
+  "sys": 3,
+  "delta": -2,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "371",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "李振恒",
+  "target": "1334",
+  "block": "driver",
+  "excel": 0,
+  "sys": 3,
+  "delta": -3,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "383",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "李振恒",
+  "target": "1334",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-05",
+  "cid": 53,
+  "name": "李振恒",
+  "target": "1334",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-06",
+  "cid": 28,
+  "name": "张万恒",
+  "target": "600",
+  "block": "driver",
+  "excel": 0,
+  "sys": 2,
+  "delta": -2,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "268",
+    "s": 2
+   }
+  ]
+ },
+ {
+  "cyc": "2026-06",
+  "cid": 28,
+  "name": "张万恒",
+  "target": "600",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-06",
+  "cid": 28,
+  "name": "张万恒",
+  "target": "600",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-06",
+  "cid": 28,
+  "name": "郭志强",
+  "target": "651",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-06",
+  "cid": 28,
+  "name": "郭志强",
+  "target": "651",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-06",
+  "cid": 28,
+  "name": "张卫新",
+  "target": "612",
+  "block": "driver",
+  "excel": 0,
+  "sys": 3,
+  "delta": -3,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "271",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2026-06",
+  "cid": 28,
+  "name": "张卫新",
+  "target": "612",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-06",
+  "cid": 28,
+  "name": "张卫新",
+  "target": "612",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-06",
+  "cid": 28,
+  "name": "杨清华",
+  "target": "646",
+  "block": "driver",
+  "excel": 0,
+  "sys": 3,
+  "delta": -3,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "278",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2026-06",
+  "cid": 28,
+  "name": "杨清华",
+  "target": "646",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-06",
+  "cid": 28,
+  "name": "杨清华",
+  "target": "646",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-06",
+  "cid": 28,
+  "name": "孙建栋",
+  "target": "642",
+  "block": "driver",
+  "excel": 0,
+  "sys": 2,
+  "delta": -2,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "277",
+    "s": 2
+   }
+  ]
+ },
+ {
+  "cyc": "2026-06",
+  "cid": 28,
+  "name": "孙建栋",
+  "target": "642",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-06",
+  "cid": 28,
+  "name": "孙建栋",
+  "target": "642",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-06",
+  "cid": 28,
+  "name": "张华平",
+  "target": "621",
+  "block": "driver",
+  "excel": 0,
+  "sys": 3,
+  "delta": -3,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "272",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2026-06",
+  "cid": 28,
+  "name": "张华平",
+  "target": "621",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-06",
+  "cid": 28,
+  "name": "张华平",
+  "target": "621",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-06",
+  "cid": 28,
+  "name": "谢俊章",
+  "target": "630",
+  "block": "driver",
+  "excel": 0,
+  "sys": 1,
+  "delta": -1,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "274",
+    "s": 1
+   }
+  ]
+ },
+ {
+  "cyc": "2026-06",
+  "cid": 28,
+  "name": "谢俊章",
+  "target": "630",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-06",
+  "cid": 28,
+  "name": "谢俊章",
+  "target": "630",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-06",
+  "cid": 28,
+  "name": "靳洪刚",
+  "target": "626",
+  "block": "driver",
+  "excel": 1,
+  "sys": 3,
+  "delta": -2,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "273",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2026-06",
+  "cid": 28,
+  "name": "靳洪刚",
+  "target": "626",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-06",
+  "cid": 28,
+  "name": "靳洪刚",
+  "target": "626",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-06",
+  "cid": 28,
+  "name": "李振恒",
+  "target": "638",
+  "block": "driver",
+  "excel": 0,
+  "sys": 3,
+  "delta": -3,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "276",
+    "s": 3
+   }
+  ]
+ },
+ {
+  "cyc": "2026-06",
+  "cid": 28,
+  "name": "李振恒",
+  "target": "638",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-06",
+  "cid": 28,
+  "name": "李振恒",
+  "target": "638",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-06",
+  "cid": 28,
+  "name": "张和祥",
+  "target": "634",
+  "block": "driver",
+  "excel": 0,
+  "sys": 2,
+  "delta": -2,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "275",
+    "s": 2
+   }
+  ]
+ },
+ {
+  "cyc": "2026-06",
+  "cid": 28,
+  "name": "张和祥",
+  "target": "634",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-06",
+  "cid": 28,
+  "name": "张和祥",
+  "target": "634",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-06",
+  "cid": 28,
+  "name": "王臣祥",
+  "target": "605",
+  "block": "driver",
+  "excel": 0,
+  "sys": 4,
+  "delta": -4,
+  "action": "REMOVE",
+  "recs": [
+   {
+    "id": "270",
+    "s": 4
+   }
+  ]
+ },
+ {
+  "cyc": "2026-06",
+  "cid": 28,
+  "name": "王臣祥",
+  "target": "605",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-06",
+  "cid": 28,
+  "name": "王臣祥",
+  "target": "605",
+  "block": "veto",
+  "excel": 100,
+  "sys": 0,
+  "delta": 100,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-07",
+  "cid": 27,
+  "name": "孙建栋",
+  "target": "580",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-07",
+  "cid": 27,
+  "name": "孙建栋",
+  "target": "580",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-07",
+  "cid": 27,
+  "name": "张和祥",
+  "target": "572",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-07",
+  "cid": 27,
+  "name": "张和祥",
+  "target": "572",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-07",
+  "cid": 27,
+  "name": "谢俊章",
+  "target": "568",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-07",
+  "cid": 27,
+  "name": "谢俊章",
+  "target": "568",
+  "block": "veto",
+  "excel": 100,
+  "sys": 0,
+  "delta": 100,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-07",
+  "cid": 27,
+  "name": "张万恒",
+  "target": "538",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-07",
+  "cid": 27,
+  "name": "张万恒",
+  "target": "538",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-07",
+  "cid": 27,
+  "name": "郭志强",
+  "target": "589",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-07",
+  "cid": 27,
+  "name": "郭志强",
+  "target": "589",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-07",
+  "cid": 27,
+  "name": "张卫新",
+  "target": "550",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-07",
+  "cid": 27,
+  "name": "张卫新",
+  "target": "550",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-07",
+  "cid": 27,
+  "name": "李振恒",
+  "target": "576",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-07",
+  "cid": 27,
+  "name": "李振恒",
+  "target": "576",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-07",
+  "cid": 27,
+  "name": "张华平",
+  "target": "559",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-07",
+  "cid": 27,
+  "name": "张华平",
+  "target": "559",
+  "block": "veto",
+  "excel": 100,
+  "sys": 0,
+  "delta": 100,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-07",
+  "cid": 27,
+  "name": "王臣祥",
+  "target": "543",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-07",
+  "cid": 27,
+  "name": "王臣祥",
+  "target": "543",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-07",
+  "cid": 27,
+  "name": "杨清华",
+  "target": "584",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-07",
+  "cid": 27,
+  "name": "杨清华",
+  "target": "584",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ },
+ {
+  "cyc": "2026-07",
+  "cid": 27,
+  "name": "靳洪刚",
+  "target": "564",
+  "block": "fire",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "FIRE-UNMAPPED"
+ },
+ {
+  "cyc": "2026-07",
+  "cid": 27,
+  "name": "靳洪刚",
+  "target": "564",
+  "block": "veto",
+  "excel": 0,
+  "sys": 0,
+  "delta": 0,
+  "action": "VETO-SKIP"
+ }
+]

@@ -1,0 +1,201 @@
+# ============================================================
+# docker-compose.production.yml — HSE 安全管理系统 生产环境编排
+# 宁津环卫 HSE 安全管理系统 v4.1
+#
+# 使用方式:
+#   cd deploy/
+#   docker compose -f docker-compose.production.yml --env-file ../.env.production up -d
+#   docker compose -f docker-compose.production.yml --env-file ../.env.production logs -f
+#   docker compose -f docker-compose.production.yml down
+#
+# 注意事项:
+#   1. 启动前请确保 .env.production 文件已正确配置
+#   2. 首次启动需等待数据库初始化完成（约 10-30 秒）
+#   3. 生产环境建议配合 Nginx 反向代理使用
+# ============================================================
+
+services:
+
+  # ---- 前端服务 (Nginx 静态文件服务) ----
+  hse-frontend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.frontend
+    container_name: hse-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"                  # 映射宿主机 80 端口到容器 80 端口
+    depends_on:
+      hse-backend:
+        condition: service_healthy
+      hse-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/ || exit 1"]
+      interval: 30s              # 每 30 秒检查一次
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'             # 最多使用 0.5 个 CPU 核心
+          memory: 256M           # 内存上限 256MB
+        reservations:
+          memory: 64M             # 预留 64MB
+    networks:
+      - hse-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # ---- 后端服务 (Node.js API) ----
+  hse-backend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.backend
+    container_name: hse-backend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"    # 仅绑定本地回环地址，不暴露到宿主机外部
+    depends_on:
+      hse-db:
+        condition: service_healthy
+    env_file:
+      - ../.env.production        # 从 .env.production 读取环境变量
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DB_HOST=hse-db            # Docker 内部网络使用服务名作为主机名
+      - DB_PORT=5432
+    volumes:
+      - uploads_data:/app/uploads  # 上传文件持久化
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health || exit 1"]
+      interval: 15s                # 每 15 秒检查一次
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'             # 最多使用 1 个 CPU 核心
+          memory: 512M            # 内存上限 512MB
+        reservations:
+          memory: 128M            # 预留 128MB
+    networks:
+      - hse-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # ---- PostgreSQL 数据库 ----
+  hse-db:
+    image: postgres:17-alpine
+    container_name: hse-db
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5432:5432"    # 仅本地访问，外部不可直接连接
+    environment:
+      - POSTGRES_DB=safety_dashboard
+      - POSTGRES_USER=hse_app
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-hse_prod_password_2024}
+      - POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale=C.UTF-8
+      # PostgreSQL 性能调优参数
+      - POSTGRES_SHARED_BUFFERS=256MB
+      - POSTGRES_EFFECTIVE_CACHE_SIZE=768MB
+      - POSTGRES_MAX_CONNECTIONS=100
+      - POSTGRES_WORK_MEM=4MB
+    volumes:
+      - postgres_data:/var/lib/postgresql/data          # 数据持久化
+      - ../scripts/import_schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro  # 初始化 SQL
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hse_app -d safety_dashboard"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'             # 最多使用 1 个 CPU 核心
+          memory: 1G              # 内存上限 1GB
+        reservations:
+          memory: 512M            # 预留 512MB
+    networks:
+      - hse-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+# ---- 持久化数据卷 ----
+volumes:
+  postgres_data:
+    driver: local
+    name: hse_postgres_data
+  uploads_data:
+    driver: local
+    name: hse_uploads_data
+
+  # ---- 数据库备份服务（一次性执行） ----
+  # 使用方式:
+  #   docker compose -f docker-compose.production.yml --profile backup run --rm backup
+  #   或配合 crontab 定时执行:
+  #   0 3 * * * cd /path/to/deploy && docker compose -f docker-compose.production.yml --profile backup run --rm backup
+  # 生成的备份文件保存在 ./backups/ 目录下
+  backup:
+    image: postgres:17-alpine
+    container_name: hse-backup
+    depends_on:
+      hse-db:
+        condition: service_healthy
+    volumes:
+      - ../backups:/backups
+      - ../server/scripts:/scripts:ro
+    environment:
+      - PGHOST=hse-db
+      - PGPORT=5432
+      - PGDATABASE=safety_dashboard
+      - PGUSER=hse_app
+      - PGPASSWORD=${DB_PASSWORD}
+    entrypoint: >
+      sh -c "
+        TIMESTAMP=$$(date +%Y%m%d_%H%M%S);
+        echo \"[$$(date '+%Y-%m-%d %H:%M:%S')] 开始数据库备份...\";
+        pg_dump --format=custom --no-owner --no-privileges -f /backups/hse_backup_full_$${TIMESTAMP}.dump;
+        if [ $$? -eq 0 ]; then
+          pg_restore --list /backups/hse_backup_full_$${TIMESTAMP}.dump > /dev/null 2>&1;
+          if [ $$? -eq 0 ]; then
+            SIZE=$$(du -h /backups/hse_backup_full_$${TIMESTAMP}.dump | cut -f1);
+            echo \"[$$(date '+%Y-%m-%d %H:%M:%S')] 备份完成: hse_backup_full_$${TIMESTAMP}.dump ($$SIZE)\";
+            echo '{\"status\":\"success\",\"file\":\"/backups/hse_backup_full_$${TIMESTAMP}.dump\",\"size\":\"'$$SIZE'\"}';
+          else
+            echo \"[$$(date '+%Y-%m-%d %H:%M:%S')] 备份验证失败\";
+            exit 1;
+          fi;
+        else
+          echo \"[$$(date '+%Y-%m-%d %H:%M:%S')] 备份执行失败\";
+          exit 1;
+        fi
+      "
+    profiles:
+      - backup
+    networks:
+      - hse-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+# ---- 自定义桥接网络 ----
+networks:
+  hse-network:
+    driver: bridge
+    name: hse-network

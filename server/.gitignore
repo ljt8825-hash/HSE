@@ -1,0 +1,23 @@
+# 环境
+.env
+.env.*
+!.env.example
+
+# 依赖
+node_modules/
+
+# 上传与运行时
+uploads/
+export/
+*.log
+
+# 临时与一次性脚本（建议迁到 scripts/adhoc）
+_tmp_*/
+_debug*/
+_verify*/
+_shot*/
+scripts/adhoc/
+
+# 本地数据库或缓存（如有）
+*.sqlite
+*.db

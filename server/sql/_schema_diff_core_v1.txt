@@ -1,0 +1,190 @@
+================================================================
+hse_core_v1_migration.sql 全量列 diff（声明列 vs 实际列）
+提示词-70 ｜ 2026-07-30 ｜ 只读审计
+DB: safety_dashboard @ 127.0.0.1:5432 ｜ 实勘方式: information_schema.columns
+================================================================
+
+图例:
+  [OK]  一致   声明列 = 实际列（名称/类型均存在）
+  [MISS] 缺失  声明有、实际无 → 任务C 补列
+  [EXTRA] 多余 声明无、实际有 → 后续迁移新增，合法，保留不删
+  [TYPE] 类型漂移 同名但类型/可空性不同 → 超红线(不 ALTER)，仅记录
+
+================================================================
+1. hse_events（声明 17 列，实际 29 列）
+----------------------------------------------------------------
+[OK]   id                        bigint
+[OK]   event_code                varchar(64)
+[OK]   event_type                varchar(32)
+[OK]   source_table              varchar(64)
+[OK]   source_id                 bigint
+[OK]   title                     varchar(255)
+[OK]   severity                  varchar(16)
+[OK]   status                    varchar(32)
+[OK]   occurred_at               timestamptz   ([TYPE] 声明 NOT NULL，实际可空)
+[OK]   department_id             bigint
+[OK]   personnel_id              bigint
+[OK]   vehicle_id                bigint        (提示词-69 已补)
+[OK]   risk_source_id            bigint
+[OK]   parent_event_id           bigint
+[OK]   created_at                timestamptz
+[OK]   updated_at                timestamptz
+[OK]   is_deleted                boolean
+[EXTRA] description              text          (后续迁移新增)
+[EXTRA] business_area           varchar        (后续迁移新增)
+[EXTRA] risk_level_snapshot     varchar        (后续迁移新增)
+[EXTRA] location                varchar        (后续迁移新增)
+[EXTRA] impacted_persons        integer        (后续迁移新增)
+[EXTRA] property_damage         numeric        (后续迁移新增)
+[EXTRA] root_cause              text          (后续迁移新增)
+[EXTRA] created_by              bigint        (后续迁移新增)
+[EXTRA] task_id                 bigint        (后续迁移新增)
+[EXTRA] auto_generated          boolean       (后续迁移新增)
+=> 缺失: 0 ｜ 多余: 10 ｜ 声明一致: 17/17 ✅
+
+================================================================
+2. hse_event_links（声明 7 列，实际 6 列）
+----------------------------------------------------------------
+[OK]   id                        bigserial
+[OK]   from_event_id            bigint
+[OK]   to_event_id              bigint
+[OK]   link_type                varchar(32)
+[OK]   description              text
+[MISS] created_by               bigint        (声明 L60，实际无)
+[OK]   created_at                timestamptz
+=> 缺失: 1 (created_by) ｜ 多余: 0 ｜ 声明一致: 6/7
+
+================================================================
+3. hse_event_timeline（声明 9 列，实际 14 列）
+----------------------------------------------------------------
+[OK]   id                        bigserial
+[OK]   event_id                  bigint
+[OK]   action                    varchar(64)
+[OK]   actor_id                  bigint
+[OK]   actor_name                varchar(64)
+[OK]   from_status              varchar(32)   (提示词-69 已补)
+[OK]   to_status                varchar(32)   (提示词-69 已补)
+[OK]   comment                  text          (提示词-69 已补)
+[OK]   occurred_at              timestamptz   (提示词-69 已补)
+[EXTRA] timestamp               timestamptz   (漂移旧列，待清理)
+[EXTRA] status_from             varchar        (漂移旧列，待清理)
+[EXTRA] status_to               varchar        (漂移旧列，待清理)
+[EXTRA] description             text          (漂移旧列，待清理)
+[EXTRA] created_at              timestamptz   (漂移旧列/后续新增)
+=> 缺失: 0 ｜ 多余: 5 ｜ 声明一致: 9/9 ✅ (提示词-69 已闭环)
+
+================================================================
+4. hse_risk_factors（声明 16 列，实际 14 列）
+----------------------------------------------------------------
+[OK]   id                        bigserial
+[OK]   factor_code              varchar(64)
+[OK]   risk_source_id           bigint
+[OK]   name                     varchar(255)
+[OK]   category                 varchar(64)
+[OK]   description              text
+[MISS] possibility              varchar(16)    (声明 L100，实际无)
+[MISS] severity_level          varchar(16)    (声明 L101，实际无)
+[MISS] exposure                varchar(16)    (声明 L102，实际无)
+[TYPE] risk_value              integer        (声明 NUMERIC(6,2)，实际 integer)
+[OK]   risk_level               varchar(16)
+[OK]   is_controlled            boolean
+[OK]   created_by               bigint
+[OK]   created_at               timestamptz
+[OK]   updated_at               timestamptz
+[OK]   is_deleted               boolean
+[EXTRA] risk_object_id          bigint        (后续迁移新增)
+=> 缺失: 3 (possibility/severity_level/exposure) ｜ 多余: 1 ｜ 声明一致: 13/16
+
+================================================================
+5. hse_control_measures（声明 16 列，实际 17 列）
+----------------------------------------------------------------
+[OK]   id                        bigserial
+[OK]   measure_code             varchar(64)
+[OK]   risk_factor_id           bigint
+[OK]   type                     varchar(32)
+[OK]   name                     varchar(255)
+[OK]   content                  text
+[OK]   responsible_person_id    bigint
+[OK]   responsible_person_name  varchar(64)
+[OK]   department_id            bigint
+[OK]   frequency                varchar(32)
+[OK]   is_active                boolean
+[TYPE] effectiveness_score      integer        (声明 NUMERIC(4,2)，实际 integer)
+[OK]   created_by               bigint
+[OK]   created_at               timestamptz
+[OK]   updated_at               timestamptz
+[OK]   is_deleted               boolean
+[EXTRA] inspection_plan_id      bigint        (后续迁移新增)
+=> 缺失: 0 ｜ 多余: 1 ｜ 声明一致: 16/16 ✅
+
+================================================================
+6. hse_rectifications（声明 18 列，实际 18 列）
+----------------------------------------------------------------
+[OK]   id                        bigserial
+[OK]   rect_code                varchar(64)
+[OK]   hazard_id                bigint
+[OK]   measure                  text
+[OK]   status                   varchar(32)
+[TYPE] deadline                 date           (声明 TIMESTAMPTZ，实际 date)
+[OK]   responsible_person_id    bigint
+[OK]   responsible_person_name  varchar(64)
+[OK]   department_id            bigint
+[MISS] event_id                 bigint        (声明 L153，实际无)
+[MISS] plan_type                varchar(32)    (声明 L155，实际无)
+[OK]   started_at               timestamptz
+[OK]   completed_at             timestamptz
+[OK]   is_overdue               boolean
+[OK]   created_by               bigint
+[OK]   created_at               timestamptz
+[OK]   updated_at               timestamptz
+[OK]   is_deleted               boolean
+[EXTRA] inspection_plan_id      bigint        (后续迁移新增)
+[EXTRA] task_id                 bigint        (后续迁移新增)
+=> 缺失: 2 (event_id/plan_type) ｜ 多余: 2 ｜ 声明一致: 16/18
+
+================================================================
+7. hse_reviews（声明 16 列，实际 17 列）
+----------------------------------------------------------------
+[OK]   id                        bigserial
+[OK]   review_code              varchar(64)
+[OK]   rectification_id         bigint
+[OK]   reviewer_id              bigint        (提示词-68 C-1 已写)
+[OK]   reviewer_name            varchar(64)
+[OK]   review_date              timestamptz
+[OK]   result                   varchar(32)
+[OK]   score                    integer        ([TYPE] 声明 NUMERIC(4,2)，实际 integer)
+[OK]   comment                  text
+[OK]   is_recurred              boolean
+[OK]   new_hazard_id            bigint
+[OK]   created_by               bigint
+[OK]   created_at               timestamptz
+[OK]   updated_at               timestamptz
+[OK]   is_deleted               boolean
+[MISS] hazard_id                bigint        (声明 L183，实际无)
+[EXTRA] risk_source_id          bigint        (后续迁移新增)
+[EXTRA] task_id                 bigint        (后续迁移新增)
+=> 缺失: 1 (hazard_id) ｜ 多余: 2 ｜ 声明一致: 15/16
+
+================================================================
+汇总
+----------------------------------------------------------------
+缺失(⚠️ 需补列) 共 7 列:
+  1. hse_event_links.created_by        BIGINT
+  2. hse_risk_factors.possibility      VARCHAR(16)
+  3. hse_risk_factors.severity_level   VARCHAR(16)
+  4. hse_risk_factors.exposure         VARCHAR(16)
+  5. hse_rectifications.event_id        BIGINT
+  6. hse_rectifications.plan_type       VARCHAR(32)
+  7. hse_reviews.hazard_id             BIGINT
+
+多余(📌 保留) 共 17 列: 各表后续迁移新增列（含 hse_event_timeline 5 个漂移旧列）。
+
+类型漂移([TYPE] 仅记录，不 ALTER，超红线): 4 处
+  - hse_risk_factors.risk_value      NUMERIC(6,2) vs integer
+  - hse_control_measures.effectiveness_score NUMERIC(4,2) vs integer
+  - hse_reviews.score                NUMERIC(4,2) vs integer
+  - hse_rectifications.deadline      TIMESTAMPTZ vs date
+  （另有 hse_events 部分 NOT NULL 列实际可空，低风险）
+
+声明一致率: 92/93 列一致（缺失 7 / 总声明 93）。
+================================================================

@@ -1,0 +1,3042 @@
+/**
+ * HSE 智能导入 API 路由
+ * 文件: server/routes/import.js
+ * 接口:
+ *   POST /api/import/parse     — 解析文件（调 Python 引擎）
+ *   POST /api/import/confirm   — 确认入库
+ *   POST /api/import/rollback  — 回滚
+ *   GET  /api/import/logs      — 查询导入日志
+ *   GET  /api/import/config    — 查询字段映射配置
+ */
+
+const express = require('express');
+const router = express.Router();
+const { auditLog } = require('./audit');
+const { execFile } = require('child_process');
+const path = require('path');
+const crypto = require('crypto');
+const { pool, isConnected } = require('../config/db');
+const { success, error } = require('../middleware/response');
+const { uploadExcel } = require('../middleware/upload');
+const { requireRole } = require('../middleware/auth');
+const { camelKeys } = require('../utils/commonResponse');
+const XLSX = require('xlsx');
+const fs = require('fs');
+const os = require('os');
+// 任务四：网格完成率计算服务（导入检查记录后触发重算）
+const gridCompletionService = require('../services/gridCompletionService');
+// 任务2（提示词08）：共享人员主数据解析器（单条创建/直接导入/通用导入复用同一生产模块）
+const { resolveEmployee, isNameConsistent } = require('../services/employeeResolver');
+// 任务9：当前有效保单冲突服务（通用导入与单条创建/直接导入/规则生成共享同一规则）
+const { findActivePolicyConflict, isPolicyActiveOnBusinessDay } = require('../services/personnelInsurancePolicyService');
+// 任务4（提示词08）：险种字典规范化（唯一生产字典）
+const { normalizeInsuranceType, SUPPORTED_INSURANCE_TYPES } = require('../services/insuranceTypeDict');
+// 任务9：唯一业务日 SQL 常量（带括号表达式，集中管理）
+const { BUSINESS_DAY_SQL } = require('../services/businessDay');
+
+// Python 解释器路径 — 必须通过环境变量配置，禁止硬编码本地路径
+const PYTHON_PATH = process.env.PYTHON_PATH;
+if (!PYTHON_PATH) {
+  console.error('[FATAL] import.js: PYTHON_PATH 环境变量未设置，智能导入功能不可用');
+}
+// 解析脚本路径
+const PARSER_SCRIPT = path.join(__dirname, '..', '..', 'scripts', 'import_parser.py');
+const EXTRACT_IMG_SCRIPT = path.join(__dirname, '..', '..', 'scripts', 'extract_violation_images.py');
+
+// ============================================================
+// Node.js 原生导入模块配置（用于 Python 不可用时的 fallback）
+// 直接解析 Excel 并写入标准业务表
+// ============================================================
+
+/**
+ * 金额值解析（雇主险清单常见"80万"/"10万"中文单位格式）。
+ * 规则：支持 "80万"/"80万 元"/"800000"/"800,000"/"800000元"；
+ * 无法识别返回 NaN（调用方据此报行级类型错误）。
+ */
+function parseAmountToNumber(v) {
+  if (v === null || v === undefined || v === '') return null;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : NaN;
+  const s = String(v).trim().replace(/,/g, '').replace(/，/g, '');
+  if (!s) return null;
+  const wan = s.match(/^(\d+(?:\.\d+)?)\s*万\s*(?:元|块)?$/);
+  if (wan) return Math.round(parseFloat(wan[1]) * 10000);
+  const plain = s.match(/^(\d+(?:\.\d+)?)\s*(?:元|块)?$/);
+  if (plain) return parseFloat(plain[1]);
+  return NaN;
+}
+
+const NATIVE_IMPORT_MODULES = {
+  regulations: {
+    targetTable: 'regulations',
+    moduleName: '规章制度',
+    conflictKey: 'name',
+    memoryMode: false,
+    // 表含 title 列，允许 name/title 双向互补（titleFromName 由写库前 title 互补逻辑读取）
+    titleFromName: true,
+    dateFields: ['issue_date', 'effective_date'],
+    fieldMapping: {
+      '制度名称': 'name',
+      '制度标题': 'title',
+      '标题': 'title',
+      '名称': 'name',
+      '制度编号': 'document_no',
+      '文号': 'document_no',
+      '编号': 'document_no',
+      '文件号': 'document_no',
+      '制度类型': 'category',
+      '分类': 'category',
+      '类型': 'type',
+      '制度类别': 'type',
+      '类别': 'type',
+      '版本': 'version',
+      '版本号': 'version',
+      '状态': 'status',
+      '发布日期': 'issue_date',
+      '发布时间': 'issue_date',
+      '公布日期': 'issue_date',
+      '生效日期': 'effective_date',
+      '实施日期': 'effective_date',
+      '生效时间': 'effective_date',
+      '实施时间': 'effective_date',
+      '有效期': 'validity_period',
+      '有效期月': 'validity_period',
+      '有效期(月)': 'validity_period',
+      '制定部门': 'department',
+      '发布机构': 'issuer',
+      '发布部门': 'department',
+      '责任部门': 'department',
+      '部门': 'department',
+      '发文单位': 'issuer',
+      '发布单位': 'issuer',
+      '摘要': 'summary',
+      '内容摘要': 'summary',
+      '内容': 'content',
+      '制度内容': 'content',
+      '正文': 'content',
+      '备注': 'remark',
+      '说明': 'remark',
+    },
+    statusMap: {
+      '已发布': 'published',
+      '发布': 'published',
+      '正式发布': 'published',
+      '有效': 'active',
+      '现行有效': 'active',
+      '在用': 'active',
+      '现行': 'active',
+      '修订中': 'revising',
+      '修订': 'revising',
+      '待更新': 'revising',
+      '待修订': 'revising',
+      '草稿': 'draft',
+      '草案': 'draft',
+      '待制定': 'draft',
+      '编制中': 'draft',
+      '作废': 'obsolete',
+      '废止': 'obsolete',
+      '已废止': 'obsolete',
+      '失效': 'obsolete',
+    },
+  },
+  hazards: {
+    targetTable: 'hazards',
+    moduleName: '隐患排查治理',
+    conflictKey: 'description',
+    fieldMapping: {
+      '序号': 'no',
+      '隐患描述': 'description',
+      '整改措施': 'measure',
+      '检查时间': 'hazard_date',
+      '检查人员': 'checker',
+      '整改人员': 'fixer',
+      '整改时间': 'fix_date',
+      '是否整改完成': 'status',
+      '备注': 'remark',
+    },
+    statusMap: {
+      '是': '已完成',
+      '否': '未完成',
+    },
+  },
+  'fire-facility': {
+    targetTable: 'memory_fire_equipment',
+    moduleName: '消防设施管理',
+    conflictKey: ['name', 'location'],
+    memoryMode: true,
+    fieldMapping: {
+      '设施名称': 'name',
+      '名称': 'name',
+      '器材名称': 'name',
+      '设施类型': 'type',
+      '类型': 'type',
+      '器材类型': 'type',
+      '型号规格': 'model',
+      '规格型号': 'model',
+      '型号': 'model',
+      '规格': 'model',
+      '安装位置': 'location',
+      '位置': 'location',
+      '配置地点': 'location',
+      '放置位置': 'location',
+      '转运站名称': 'siteName',
+      '设施状态': 'status',
+      '状态': 'status',
+      '数量': 'quantity',
+      '安装日期': 'installDate',
+      '购置日期': 'installDate',
+      '购置日期\n（维修日期）': 'installDate',
+      '购置日期（维修日期）': 'installDate',
+      '有效期至': 'expiryDate',
+      '有效期': 'expiryDate',
+      '下次维修日期': 'expiryDate',
+      '到期日期': 'expiryDate',
+      '上次检查': 'lastCheckDate',
+      '上次维修日期': 'lastCheckDate',
+      '维修日期': 'lastCheckDate',
+      '下次检查': 'nextCheckDate',
+      '负责人': 'manager',
+      '管理责任人': 'manager',
+      '联系电话': 'phone',
+      '电话': 'phone',
+      '手机号': 'phone',
+      '钢印号': 'serialNo',
+      '车牌号': 'plateNo',
+      '备注': 'remark',
+      '说明': 'remark',
+    },
+    statusMap: {
+      '正常': '正常',
+      '良好': '正常',
+      '过期': '过期',
+      '损坏': '损坏',
+      '维修中': '维修中',
+    },
+  },
+  violation: {
+    targetTable: 'violation_records',
+    moduleName: '三违管理',
+    conflictKey: ['area_team', 'upload_time', 'violator_name', 'violation_behavior', 'grid_level', 'inspector_name'],
+    memoryMode: false,
+    fieldMapping: {
+      '片区/班组': 'area_team',
+      '片区_班组': 'area_team',
+      '片区': 'area_team',
+      '班组': 'area_team',
+      '上传时间': 'upload_time',
+      '检查人姓名': 'inspector_name',
+      '检查人': 'inspector_name',
+      '发现人': 'inspector_name',
+      '网格等级': 'grid_level',
+      '网格层级': 'grid_level',
+      '所属岗位': 'position',
+      '岗位': 'position',
+      '职务': 'position',
+      '违章人姓名': 'violator_name',
+      '违章人': 'violator_name',
+      '违章人员': 'violator_name',
+      '违章人性别': 'violator_gender',
+      '性别': 'violator_gender',
+      '违章人年龄': 'violator_age',
+      '年龄': 'violator_age',
+      '车辆类型/保洁员': 'vehicle_type_or_cleaner',
+      '车辆类型_保洁员': 'vehicle_type_or_cleaner',
+      '车辆类型': 'vehicle_type_or_cleaner',
+      '保洁员': 'vehicle_type_or_cleaner',
+      '上报状态': 'report_status',
+      '状态': 'report_status',
+      '图片内容': 'image_content',
+      '图片': 'image_content',
+      '“三违”行为': 'violation_behavior',
+      '三违行为': 'violation_behavior',
+      '三违_行为': 'violation_behavior',
+      '违章描述': 'description',
+      '描述': 'description',
+      '三违类型.输出结果': 'violation_type_result',
+      '三违类型_输出结果': 'violation_type_result',
+      '三违类型输出结果': 'violation_type_result',
+      '违章类型': 'violation_type',
+      '类型': 'violation_type',
+      '违章级别': 'violation_level',
+      '级别': 'violation_level',
+      '严重程度': 'violation_level',
+      '需要整改': 'need_rectification',
+      '是否需要整改': 'need_rectification',
+      '整改执行人': 'rectification_executor',
+      '整改人': 'rectification_executor',
+      '整改后的照片': 'rectification_photos',
+      '整改照片': 'rectification_photos',
+      '示意图': 'schematic_diagram',
+      '违章日期': 'violation_date',
+      '发现日期': 'violation_date',
+      '日期': 'violation_date',
+      '发生地点': 'location',
+      '地点': 'location',
+      '整改措施': 'rectification',
+      '风险等级': 'risk_level',
+      '备注': 'remark',
+      // 每日"三违"检查汇总模板（2026.8.1-13.xlsx）表头映射
+      '昵称': 'nickname',
+      '分组名称': 'area_team',
+      '姓名': 'inspector_name',
+      '提交时间': 'upload_time',
+      '编号': 'no',
+      '三违照片：图片1': 'image_content',
+      '整改后照片：图片1': 'rectification_photos',
+      '当日是否报名': 'report_status',
+      '标记': 'mark',
+      '是否补交': 'is_supplementary',
+    },
+    statusMap: {
+      '待处理': '待处理',
+      '整改中': '整改中',
+      '待复查': '待复查',
+      '已关闭': '已关闭',
+      '已完成': '已关闭',
+    },
+    dateFields: ['violation_date', 'upload_time'],
+  },
+  // 任务四：grid 导入改为「网格检查（巡查）记录」，写入 grid_inspection_records
+  // 模板为上传的「三违检查记录表」17 列；完成率按 personnel_name(检查人姓名) 统计
+  grid: {
+    targetTable: 'grid_inspection_records',
+    moduleName: '网格管理',
+    // 去重键：同一 片区/班组 + 上传时间 + 检查人 + 三违行为 + 违章人 视为同一条记录
+    conflictKey: ['area_team', 'upload_time', 'personnel_name', 'violation_behavior', 'violator_name'],
+    memoryMode: false,
+    // Excel 中文表头 → DB snake_case 字段（对应 grid_inspection_records 表）
+    fieldMapping: {
+      '片区/班组': 'area_team',
+      '片区': 'area_team',
+      '班组': 'area_team',
+      '上传时间': 'upload_time',
+      '检查人姓名': 'personnel_name',
+      '网格等级': 'grid_level',
+      '网格层级': 'grid_level',
+      '所属岗位': 'position',
+      '岗位': 'position',
+      '违章人姓名': 'violator_name',
+      '违章人性别': 'violator_gender',
+      '违章人年龄': 'violator_age',
+      '车辆类型/保洁员': 'vehicle_type',
+      '车辆类型': 'vehicle_type',
+      '保洁员': 'vehicle_type',
+      '上报状态': 'report_status',
+      '图片内容': 'image_content',
+      '“三违”行为': 'violation_behavior',
+      '"三违"行为': 'violation_behavior',
+      '三违行为': 'violation_behavior',
+      '三违类型.输出结果': 'violation_type_result',
+      '三违类型': 'violation_type_result',
+      '需要整改': 'need_rectification',
+      '整改执行人': 'rectifier',
+      '整改后的照片': 'rectified_photo',
+      '示意图': 'schematic',
+    },
+    // upload_time 不当作 dateField（保留原始时间戳文本）；inspection_date 由导入逻辑派生
+    dateFields: [],
+    statusMap: {},
+  },
+  'over-age': {
+    targetTable: 'over_age_personnel',
+    moduleName: '超龄人员管控',
+    conflictKey: ['name', 'id_card'],
+    memoryMode: false,
+    dateFields: ['hire_date', 'birth_date', 'expire_date'],
+    fieldMapping: {
+      '员工编码': 'personnel_id',
+      '姓名': 'name',
+      '所属部门': 'dept',
+      '部门': 'dept',
+      '职位': 'position',
+      '岗位': 'position',
+      '入职日期': 'hire_date',
+      '身份证号码': 'id_card',
+      '身份证号': 'id_card',
+      '性别': 'gender',
+      '出生日期': 'birth_date',
+      '年龄': 'age',
+      '管控类型': 'control_type',
+      '人员类型': 'person_type',
+      '到期日期': 'expire_date',
+      '是否有工伤险': 'has_injury',
+      '工伤险': 'has_injury',
+      '是否有雇主险': 'has_employer',
+      '雇主险': 'has_employer',
+      '备注': 'remark',
+    },
+    statusMap: {},
+  },
+  objectives: {
+    targetTable: 'safety_goals',
+    moduleName: '目标职责',
+    conflictKey: ['title', 'year', 'department'],
+    memoryMode: false,
+    // 表含 title 列且为冲突键，必须保留 name/title 互补
+    titleFromName: true,
+    dateFields: ['deadline'],
+    fieldMapping: {
+      '目标标题': 'title', '标题': 'title', 'title': 'title', 'Title': 'title', '目标名称': 'title',
+      '责任部门': 'department', '部门': 'department', '所属部门': 'department', 'Department': 'department', 'department': 'department',
+      '目标状态': 'status', '状态': 'status', 'Status': 'status', 'status': 'status',
+      '年度': 'year', '年份': 'year', 'Year': 'year', 'year': 'year',
+      '目标类型': 'type', '类型': 'type', 'Type': 'type', 'type': 'type',
+      '目标值': 'target_value', '目标数值': 'target_value', 'targetValue': 'target_value', 'target_value': 'target_value',
+      '当前值': 'current_value', '当前数值': 'current_value', 'currentValue': 'current_value', 'current_value': 'current_value',
+      '单位': 'unit', 'Unit': 'unit', 'unit': 'unit',
+      '责任人': 'responsible_person', '负责人': 'responsible_person', 'responsiblePerson': 'responsible_person', 'responsible_person': 'responsible_person',
+      '截止日期': 'deadline', '截止时间': 'deadline', 'deadline': 'deadline', 'Deadline': 'deadline',
+      '描述': 'description', '目标描述': 'description', 'description': 'description',
+      '进度': 'progress', '完成进度': 'progress', 'progress': 'progress',
+      '备注': 'remark', 'remark': 'remark',
+    },
+    statusMap: {
+      '已完成': 'achieved', '达成': 'achieved', 'achieved': 'achieved',
+      '进行中': 'on_track', '正常': 'on_track', 'on_track': 'on_track', 'onTrack': 'on_track',
+      '有风险': 'at_risk', '预警': 'at_risk', 'at_risk': 'at_risk', 'atRisk': 'at_risk',
+      '滞后': 'behind', '落后': 'behind', 'behind': 'behind',
+      '已结束': 'achieved', '已签订': 'achieved', '生效': 'on_track', '待签': 'at_risk', '草稿': 'behind',
+    },
+  },
+  training: {
+    targetTable: 'training_records',
+    moduleName: '培训考核',
+    conflictKey: ['name', 'training_date', 'training_type'],
+    memoryMode: false,
+    dateFields: ['training_date'],
+    fieldMapping: {
+      '姓名': 'name', '参训人': 'name', '参训人姓名': 'name', '员工姓名': 'name',
+      '身份证号': 'id_card', '身份证': 'id_card', '证件号': 'id_card',
+      '部门': 'dept', '所属部门': 'dept',
+      '岗位': 'position', '职位': 'position',
+      '网格层级': 'grid_level', '层级': 'grid_level',
+      '培训频次': 'frequency', '频次': 'frequency',
+      '培训类型': 'training_type', '类型': 'training_type',
+      '培训日期': 'training_date', '日期': 'training_date',
+      '培训时长': 'duration_minutes', '时长': 'duration_minutes', '时长分钟': 'duration_minutes',
+      '培训内容': 'content', '内容': 'content',
+      '考核结果': 'result', '结果': 'result',
+      '分数': 'score', '考试分数': 'score',
+      '讲师': 'trainer', '培训讲师': 'trainer', '讲师姓名': 'trainer',
+      '备注': 'remark', '说明': 'remark',
+    },
+    statusMap: {
+      '合格': '合格', '不合格': '不合格', '优秀': '优秀',
+    },
+  },
+  emergency: {
+    targetTable: 'emergency_plans',
+    moduleName: '应急预案',
+    // 冲突键仅用 name：表无 version 列，含 version 的冲突查询/写库均会报「字段不存在」
+    conflictKey: ['name'],
+    memoryMode: false,
+    dateFields: ['effective_date'],
+    fieldMapping: {
+      '预案名称': 'name', '名称': 'name', 'name': 'name', 'title': 'name', '标题': 'name',
+      '预案类型': 'type', '类型': 'type', '类别': 'type',
+      '预案级别': 'level', '级别': 'level', '等级': 'level',
+      // 表无 version 列：版本映射移除（避免 INSERT 报「version 字段不存在」），
+      // 版本信息不落库（与 emergency_plans 真实列一致）
+      '状态': 'status', '预案状态': 'status',
+      // 责任部门/联系电话映射到 emergency_plans 真实列（responsible_dept / contact_phone），
+      // 避免 INSERT 报「department / phone 字段不存在」
+      '责任部门': 'responsible_dept', '所属部门': 'responsible_dept', '部门': 'responsible_dept',
+      '责任人': 'responsible_person', '负责人': 'responsible_person',
+      '联系电话': 'contact_phone', '电话': 'contact_phone', '联系方式': 'contact_phone',
+      '预案描述': 'description', '描述': 'description', '内容': 'description', '预案内容': 'description',
+      // 表无 created_date / last_review_date 列（真实为 created_at / last_drill_date），
+      // 移除这两项映射避免 INSERT 报「字段不存在」
+      '生效日期': 'effective_date', '实施日期': 'effective_date',
+      '备注': 'remark', '说明': 'remark',
+    },
+    statusMap: {
+      'active': 'active', '启用': 'active', '在用': 'active', '有效': 'active',
+      'draft': 'draft', '草稿': 'draft', '编制中': 'draft',
+      'archived': 'archived', '归档': 'archived', '已归档': 'archived',
+      'obsolete': 'obsolete', '作废': 'obsolete', '废止': 'obsolete',
+    },
+  },
+  drill: {
+    targetTable: 'emergency_drills',
+    moduleName: '应急演练',
+    conflictKey: ['plan_name', 'drill_date'],
+    memoryMode: false,
+    dateFields: ['drill_date'],
+    fieldMapping: {
+      '预案名称': 'plan_name', '演练预案': 'plan_name', '预案': 'plan_name',
+      '演练名称': 'name', '名称': 'name', '标题': 'title',
+      '演练类型': 'type', '类型': 'type', '演练方式': 'type',
+      '演练日期': 'drill_date', '演练时间': 'drill_date', '日期': 'drill_date',
+      '演练地点': 'location', '地点': 'location', '场所': 'location',
+      '参加人数': 'participants_count', '参训人数': 'participants_count', '人数': 'participants_count',
+      '演练时长': 'duration_minutes', '时长': 'duration_minutes', '时长分钟': 'duration_minutes',
+      '演练结果': 'result', '结果': 'result', '演练效果': 'result',
+      '评估人': 'evaluator', '评估人员': 'evaluator', '评审人': 'evaluator',
+      '演练总结': 'summary', '总结': 'summary', '演练报告': 'summary',
+      '改进建议': 'improvement_suggestions', '改进措施': 'improvement_suggestions', '建议': 'improvement_suggestions',
+      '备注': 'remark', '说明': 'remark',
+    },
+    statusMap: {
+      'excellent': '优秀', '优秀': '优秀', '好': '优秀',
+      'good': '良好', '良好': '良好',
+      'pass': '合格', '合格': '合格', '通过': '合格',
+      'fail': '不合格', '不合格': '不合格', '未通过': '不合格',
+    },
+  },
+  'risk-control': {
+    targetTable: 'risk_sources',
+    moduleName: '风险分级管控',
+    conflictKey: ['name', 'location'],
+    memoryMode: false,
+    dateFields: ['assessment_date', 'last_hazard_check_date'],
+    fieldMapping: {
+      '风险名称': 'name', '名称': 'name', '风险点': 'name', '风险源': 'name',
+      '风险描述': 'description', '描述': 'description', '风险内容': 'description',
+      '风险等级': 'level', '等级': 'level', '风险级别': 'level',
+      '风险类型': 'type', '类型': 'type', '风险类别': 'type', '类别': 'type',
+      '责任部门': 'responsible_dept', '部门': 'responsible_dept', '所属部门': 'responsible_dept',
+      '责任人': 'responsible_person', '负责人': 'responsible_person',
+      '所在区域': 'location', '区域': 'location', '位置': 'location',
+      // 管控措施映射到 measures（text 列）；control_measures 为 jsonb，直接写入文本会报
+      // 「类型json的输入语法无效」
+      '管控措施': 'measures', '控制措施': 'measures', '防控措施': 'measures',
+      '风险状态': 'status', '状态': 'status', '管控状态': 'status',
+      '评估日期': 'assessment_date', '评价日期': 'assessment_date',
+      '复评周期': 'review_cycle', '复评周期月': 'review_cycle',
+      '评价方法': 'assessment_method', '评估方法': 'assessment_method',
+      '评价分数': 'assessment_score', '评估分数': 'assessment_score',
+      '所属作业': 'job_name', '作业活动': 'job_name',
+      '作业类型': 'job_type',
+      '岗位': 'post_name',
+      '事故类型': 'accident_type',
+      '可能性': 'likelihood',
+      '严重性': 'severity',
+      '风险值': 'risk_value',
+      '备注': 'remark', '说明': 'remark',
+    },
+    statusMap: {
+      '管控中': 'active', '正常': 'active', '有效': 'active',
+      '已消除': 'eliminated', '消除': 'eliminated',
+      '需整改': 'pending', '待整改': 'pending',
+    },
+  },
+  accidents: {
+    targetTable: 'accidents',
+    moduleName: '事故管理',
+    conflictKey: ['accident_date', 'accident_type', 'location'],
+    validKey: ['accident_date', 'accident_type', 'description'], // 事故时间/事故类别/描述任一非空即真实事故行
+    validKeySkipErrors: true, // 宽容模式：真实事故行其他列空白不剔除
+    // 占位行过滤：「X 月份无事故」等非真实记录自动跳过（不计有效、不计错误）
+    placeholderField: '事故经过简要描述',
+    placeholderPattern: /^\s*\d{1,2}\s*月份?(无事故|没有事故|无事|无隐患)\s*$/,
+    // 排除非数据 sheet（数据字典/借款统计/单位关联等辅助 sheet；表2事故借款统计直接不需要）
+    excludeSheetPatterns: [/借款/, /单位$/, /关联/, /^Sheet\d*$/, /类别/],
+    // 序号列：表1 事故统计的「序号」列只有数字、其余列全空的行视为空占位行（跳过，不报错、不入库）
+    serialColumn: '序号',
+    // validKey 全空的行直接跳过（有辅助列如序号/区域但无事故时间/类别/描述 → 非事故行，不报缺字段错误）
+    skipRowsWithoutValidKey: true,
+    memoryMode: false,
+    dateFields: ['accident_date', 'report_date', 'close_date'],
+    fieldMapping: {
+      '事故日期': 'accident_date', '发生日期': 'accident_date', '事故时间': 'accident_date', '事故发生时间': 'accident_date', '日期': 'accident_date',
+      '事故类型': 'accident_type', '类型': 'accident_type', '类别': 'accident_type', '事故类别': 'accident_type',
+      // level 是 accidents 表真实等级列（severity 列不存在）
+      '事故等级': 'level', '等级': 'level', '严重程度': 'level',
+      '发生地点': 'location', '地点': 'location', '事故地点': 'location',
+      '事故描述': 'description', '描述': 'description', '事故经过': 'description', '经过': 'description', '事故经过简要描述': 'description',
+      '损失金额': 'loss_amount', '经济损失': 'loss_amount', '金额': 'loss_amount',
+      '直接经济损失/元': 'loss_amount', '实际经济损失/元': 'loss_amount', '保险理赔金额/元': 'compensation',
+      '处理状态': 'status', '状态': 'status', '事故状态': 'status', '是否结案': 'status',
+      // involved_person（不是 involved_persons）+ involved_vehicle
+      '涉事人员': 'involved_person', '相关人员': 'involved_person', '伤者姓名': 'involved_person', '伤者   姓名': 'involved_person',
+      '涉事车辆': 'involved_vehicle', '车牌': 'involved_vehicle',
+      '受伤人数': 'injuries', '受伤': 'injuries', '死亡人数': 'casualties', '死亡': 'casualties',
+      '报告日期': 'close_date', '上报日期': 'close_date',
+      '结案日期': 'close_date', '处理完成日期': 'close_date', '预计结案时间': 'close_date',
+      '处理措施': 'remark', '整改措施': 'remark',
+      // cause_analysis 是事故表真实「事故原因/性质」字段
+      '事故性质': 'cause_analysis', '事故原因': 'cause_analysis', '责任分析': 'responsibility', '定责依据': 'responsibility',
+      '预防措施': 'remark', '防范措施': 'remark',
+      '备注': 'remark', '说明': 'remark',
+      '月份': 'month', '年份': 'year',
+    },
+    statusMap: {
+      '待处理': 'pending', '未处理': 'pending', '待结案': 'pending',
+      '处理中': 'in_progress', '调查中': 'in_progress',
+      '已结案': 'closed', '已完成': 'closed', '已处理': 'closed', '是': 'closed', '否': 'pending',
+    },
+  },
+  committee: {
+    targetTable: 'hse_safety_committee',
+    moduleName: '安全人员',
+    conflictKey: ['name', 'position'],
+    memoryMode: false,
+    dateFields: ['appointment_date'],
+    fieldMapping: {
+      '姓名': 'name', '成员姓名': 'name', '人员姓名': 'name',
+      '部门': 'department', '所属部门': 'department',
+      '职务': 'position', '职位': 'position', '岗位': 'position',
+      '委员会类型': 'committee_type', '类型': 'committee_type', '安委会类型': 'committee_type',
+      '联系电话': 'phone', '电话': 'phone', '手机': 'phone', '联系方式': 'phone',
+      '任职日期': 'appointment_date', '任命日期': 'appointment_date', '入职日期': 'appointment_date',
+      '状态': 'status', '在职状态': 'status',
+      '备注': 'remark', '说明': 'remark',
+    },
+    statusMap: {
+      '在职': 'active', '在岗': 'active', '正常': 'active',
+      '离职': 'inactive', '离岗': 'inactive', '不在岗': 'inactive',
+    },
+  },
+  budget: {
+    targetTable: 'hse_safety_budget',
+    moduleName: '安全费用预算',
+    conflictKey: ['item_name', 'plan_time', 'serial_no'],
+    memoryMode: false,
+    dateFields: ['plan_time'],
+    numericFields: ['budget_amount', 'spent_amount', 'plan_quantity', 'plan_unit_price', 'plan_total', 'actual_quantity', 'actual_unit_price', 'actual_total', 'annual_plan_total', 'serial_no', 'actual_expenditure_quantity', 'actual_expenditure_unit_price', 'actual_expenditure_total'],
+    // 表头为两行：第一行是分组（2025: 计划/支出；2026: 预算计划/OA计划支出/实际支出），第二行是数量/单价/总价子列
+    // groupAlias 把 2026 的新分组标签归并到系统字段前缀：预算计划→计划(plan_*)、OA计划支出→支出(actual_*)、实际支出→actual_expenditure_*
+    multiRowHeader: {
+      groupLabels: ['计划', '预算计划', '支出', 'OA计划支出', '实际支出'],
+      groupAlias: { '预算计划': '计划', 'OA计划支出': '支出', '实际支出': '实际支出' },
+    },
+    // 序号列为非数字时视为汇总/空行，不计入错误
+    serialColumn: '序号',
+    skipSummaryRows: true,
+    fieldMapping: {
+      '预算年度': 'budget_year', '年度': 'budget_year',
+      '措施项目': 'measure_item', '预算项目': 'measure_item', '项目': 'measure_item',
+      '预算科目': 'budget_subject', '科目': 'budget_subject',
+      '名称': 'item_name', '项目名称': 'item_name',
+      '用途及依据': 'purpose', '用途': 'purpose', '依据': 'purpose',
+      '计划使用时间': 'plan_time', '使用时间': 'plan_time',
+      '使用部门/地点': 'location', '使用地点': 'location', '使用部门': 'department', '责任部门': 'department', '部门': 'department', '所属部门': 'department',
+      '规格/品牌': 'spec', '规格': 'spec', '品牌': 'spec',
+      '计划-数量': 'plan_quantity', '计划数量': 'plan_quantity', '数量': 'plan_quantity',
+      '计划-单价(万)': 'plan_unit_price', '计划单价(万)': 'plan_unit_price', '计划单价': 'plan_unit_price', '单价': 'plan_unit_price',
+      '计划-总价(万)': 'plan_total', '计划总价(万)': 'plan_total', '计划总价': 'plan_total', '总价': 'plan_total',
+      '支出-数量': 'actual_quantity', '实际数量': 'actual_quantity', '已用数量': 'actual_quantity',
+      '支出-单价(万)': 'actual_unit_price', '实际单价(万)': 'actual_unit_price', '实际单价': 'actual_unit_price',
+      '支出-总价(万)': 'actual_total', '支出总价(万)': 'actual_total', '实际总价(万)': 'actual_total', '支出总价': 'actual_total',
+      '实际支出-数量': 'actual_expenditure_quantity', '实际支出数量': 'actual_expenditure_quantity',
+      '实际支出-单价(万)': 'actual_expenditure_unit_price', '实际支出单价(万)': 'actual_expenditure_unit_price',
+      '实际支出-总价(万)': 'actual_expenditure_total', '实际支出总价(万)': 'actual_expenditure_total', '实际支出总价': 'actual_expenditure_total',
+      '预算金额': 'budget_amount', '金额': 'budget_amount',
+      '已用金额': 'spent_amount', '实际金额': 'spent_amount', '已支出': 'spent_amount',
+      '使用状态': 'use_status', '状态': 'status',
+      '预算类别': 'category', '类别': 'category', '类型': 'category',
+      '备注': 'remark', '说明': 'remark',
+      '序号': 'serial_no',
+    },
+    statusMap: {
+      '执行中': 'active', '进行中': 'active', '有效': 'active',
+      '已完成': 'completed', '已结束': 'completed',
+      '待审批': 'pending', '草稿': 'draft',
+    },
+  },
+  assessment: {
+    targetTable: 'hse_responsibility_assessment',
+    moduleName: '责任制考核',
+    conflictKey: ['assessment_name', 'period', 'department'],
+    memoryMode: false,
+    dateFields: ['assessment_date'],
+    fieldMapping: {
+      '考核名称': 'assessment_name', '名称': 'assessment_name', '标题': 'assessment_name',
+      '考核周期': 'period', '周期': 'period', '年度': 'period',
+      '被考核部门': 'department', '部门': 'department', '考核部门': 'department',
+      '考核分数': 'score', '分数': 'score', '得分': 'score',
+      '考核等级': 'grade', '等级': 'grade', '评级': 'grade',
+      '考核人': 'assessor', '考核人员': 'assessor', '评估人': 'assessor',
+      '考核日期': 'assessment_date', '日期': 'assessment_date', '评价日期': 'assessment_date',
+      '备注': 'remark', '说明': 'remark', '考核意见': 'remark',
+    },
+    statusMap: {
+      '优秀': 'excellent', '良好': 'good', '合格': 'pass', '不合格': 'fail',
+    },
+  },
+  personnel: {
+    targetTable: 'personnel_insurance',
+    moduleName: '人员保险',
+    // 冲突键：稳定员工 ID + 险种 + 保单号（任务4.2；name/id_card 非实际列，禁用）
+    conflictKey: ['employee_id', 'insurance_type', 'policy_no'],
+    memoryMode: false,
+    dateFields: ['start_date', 'expire_date'],
+    // 任务1（提示词08）：显式数据库列白名单（personnel_insurance 真实列，顺序即 INSERT 列顺序）。
+    // 批量 INSERT、逐条降级 INSERT、UPDATE 三条路径必须只使用这些列；
+    // _import_row_no / _import_error / employee_code 等内部元数据绝不进入写库 SQL。
+    dbColumns: [
+      'employee_id', 'personnel_id', 'person_name', 'department', 'position',
+      'insurance_type', 'coverage_amount', 'premium', 'start_date', 'expire_date',
+      'is_current', 'policy_no', 'remark',
+    ],
+    fieldMapping: {
+      '姓名': 'person_name', '员工姓名': 'person_name', '雇员姓名': 'person_name',
+      // 工号/员工编号 → 中间字段 employee_code（导入预处理唯一解析为 employee.id，禁止直接映射 employee_id）
+      '员工编号': 'employee_code', '员工号': 'employee_code', '工号': 'employee_code',
+      // 身份证（明文）→ 中间字段 id_card（confirm 阶段经 employeeResolver 按 id_card_hash 解析员工；不在 dbColumns 白名单，不落库）
+      '证件号码': 'id_card', '身份证号': 'id_card', '身份证号码': 'id_card', '身份证': 'id_card',
+      '保险类型': 'insurance_type', '险种': 'insurance_type',
+      '保单号': 'policy_no', '保险单号': 'policy_no',
+      '保险起期': 'start_date', '开始日期': 'start_date', '生效日期': 'start_date',
+      '保险到期': 'expire_date', '保险止期': 'expire_date', '结束日期': 'expire_date', '失效日期': 'expire_date',
+      '保费': 'premium', '保险费': 'premium', '保费金额': 'premium',
+      '保额': 'coverage_amount', '保额金额': 'coverage_amount', '保险金额': 'coverage_amount',
+      '雇主险保额': 'coverage_amount', '工伤险保额': 'coverage_amount',
+      '是否当前': 'is_current', '是否当前保单': 'is_current', '是否在保': 'is_current',
+      '岗位名称': 'position', '岗位': 'position',
+      '备注': 'remark', '说明': 'remark',
+    },
+    statusMap: {},
+    // ========== 解析健壮性（雇主险/工伤险清单通用） ==========
+    // 表头必填列（组内任一别名匹配即满足；全部组必须至少匹配一组，否则整表拒绝并给出明确错误）
+    requiredColumnGroups: [
+      ['姓名', '雇员姓名', '员工姓名'],
+      ['员工编号', '员工号', '工号', '证件号码', '身份证号', '身份证号码', '身份证'],
+    ],
+    // 单次导入最大数据行数（超出拒绝，保护后端与 PG）
+    maxRows: 5000,
+    // 行级字段类型校验（解析阶段即报错，不拖到确认入库）
+    fieldTypes: {
+      coverage_amount: 'number',
+      premium: 'number',
+      start_date: 'date',
+      expire_date: 'date',
+      is_current: 'boolean',
+    },
+    // 字段值转换（如 "80万" → 800000）
+    valueTransforms: {
+      coverage_amount: parseAmountToNumber,
+      premium: parseAmountToNumber,
+    },
+    // 解析阶段"有效行"判定键（upload/parse 时 employee_id/insurance_type/policy_no 尚未产生：
+    // employee_id 在 confirm 经 employeeResolver 解析、保险类型靠按钮注入、真实雇主险清单无保单号；
+    // conflictKey 仅用于 confirm 阶段 UPDATE 目标判定，不能作为解析阶段有效行门槛）
+    validKey: ['person_name', 'id_card', 'employee_code'],
+    // 重复识别说明：personnel 不启用解析阶段 dedupeKey 判重——同 employee+type+policy_no 的
+    // "批内同目标补位"是合法语义（第1行失败第2行独立校验 UPDATE 同一目标），解析阶段判重会误伤。
+    // 人员保险的重复识别由 confirm 阶段 active 冲突机制负责（duplicate_active_policy /
+    // duplicate_target_in_batch：识别会致重复投保的冲突行并返回行级错误）。
+    dedupeKey: null,
+  },
+  vehicle: {
+    targetTable: 'vehicles',
+    moduleName: '车辆保险',
+    conflictKey: ['plate'],
+    memoryMode: false,
+    // 软删记录重导时重新激活（is_deleted=false 并更新字段），避免撞 uk_vehicle_plate 被跳过
+    reactivateSoftDeleted: true,
+    dateFields: [
+      'reg_date', 'insurance_start', 'insurance_end',
+      'compulsory_start', 'compulsory_end',
+      'commercial_start', 'commercial_end'
+    ],
+    fieldMapping: {
+      '车牌号': 'plate', '车牌': 'plate', '号码': 'plate',
+      '车架号': 'vin', '车辆识别码': 'vin', 'VIN': 'vin',
+      '发动机号': 'engine_no', '引擎号': 'engine_no',
+      '注册日期': 'reg_date', '上牌日期': 'reg_date', '购置日期': 'reg_date', '初次登记年月': 'reg_date',
+      '车型': 'model', '车辆型号': 'model', '厂牌车型': 'model',
+      '车主': 'owner', '车辆所有人': 'owner', '行驶证车主': 'registered_owner',
+      '投保人、被保险人': 'policy_holder', '投保人': 'policy_holder', '被保险人': 'policy_holder',
+      '保险类型': 'insurance_type', '险种': 'insurance_type', '类型': 'insurance_type',
+      '保险起期': 'compulsory_start', '开始日期': 'insurance_start', '生效日期': 'insurance_start',
+      '保险止期': 'compulsory_end',
+      '保险起期_1': 'commercial_start', '保险止期_1': 'commercial_end',
+      '保险到期': 'insurance_end', '结束日期': 'insurance_end', '失效日期': 'insurance_end',
+      '保费': 'vehicle_damage_premium', '保险费': 'premium', '保费金额': 'premium',
+      '车辆类型': 'vehicle_type', '车辆种类': 'vehicle_type',
+      '状态': 'status', '车辆状态': 'status',
+      '交强险保险起期': 'compulsory_start', '交强险起期': 'compulsory_start',
+      '交强险保险止期': 'compulsory_end', '交强险止期': 'compulsory_end', '交强险到期': 'compulsory_end',
+      '商业险保险起期': 'commercial_start', '商业险起期': 'commercial_start',
+      '商业险保险止期': 'commercial_end', '商业险止期': 'commercial_end', '商业险到期': 'commercial_end',
+      '车损险保额': 'vehicle_damage_amount', '车损险-保额': 'vehicle_damage_amount',
+      '车损险保费': 'vehicle_damage_premium', '车损险-保费': 'vehicle_damage_premium',
+      '保额': 'vehicle_damage_amount', '保额_1': 'passenger_amount', '保额_2': 'passenger_amount',
+      '保费_1': 'passenger_premium', '保费_2': 'passenger_premium',
+      '三者险保额': 'third_party_amount', '三者险-保额': 'third_party_amount', '第三者责任险保额': 'third_party_amount', '商业险保额': 'third_party_amount',
+      '三者险保费': 'third_party_premium', '三者险-保费': 'third_party_premium', '第三者责任险保费': 'third_party_premium', '商业险保费': 'third_party_premium',
+      '司乘险保额': 'passenger_amount', '司乘险-保额': 'passenger_amount',
+      '司乘险保费': 'passenger_premium', '司乘险-保费': 'passenger_premium',
+      '商业险合计': 'commercial_total', '商业险保费合计': 'commercial_total',
+      '交强险': 'compulsory_premium', '交强险保费': 'compulsory_premium',
+      '车船税': 'vehicle_tax', '车船使用税': 'vehicle_tax',
+      '合计': 'total_premium', '总保费': 'total_premium', '保费合计': 'total_premium',
+      '备注': 'remark', '说明': 'remark',
+    },
+    statusMap: {},
+  },
+  audit: {
+    targetTable: 'audit_logs',
+    moduleName: '审计日志',
+    conflictKey: ['operator', 'action_type', 'action_time'],
+    memoryMode: false,
+    dateFields: ['action_time'],
+    fieldMapping: {
+      '操作人': 'operator', '操作人员': 'operator', '用户': 'operator',
+      '操作类型': 'action_type', '类型': 'action_type', '行为': 'action_type',
+      '操作对象': 'target', '对象': 'target', '操作模块': 'target',
+      '操作时间': 'action_time', '时间': 'action_time', '日期': 'action_time',
+      'IP地址': 'ip_address', 'IP': 'ip_address',
+      '操作结果': 'result', '结果': 'result', '状态': 'result',
+      '备注': 'remark', '详情': 'remark', '说明': 'remark',
+    },
+    statusMap: {
+      '成功': 'success', '正常': 'success', '通过': 'success',
+      '失败': 'failed', '错误': 'failed', '异常': 'failed',
+    },
+  },
+  workflow: {
+    targetTable: 'hse_workflows',
+    moduleName: '审批任务',
+    conflictKey: ['code', 'name'],
+    memoryMode: false,
+    dateFields: [],
+    fieldMapping: {
+      '流程编码': 'code', '编码': 'code', '流程编号': 'code', '编号': 'code',
+      '流程名称': 'name', '名称': 'name', '标题': 'title',
+      '流程描述': 'description', '描述': 'description', '说明': 'description',
+      '状态': 'status', '流程状态': 'status',
+      '排序': 'sort_order', '序号': 'sort_order', '优先级': 'sort_order',
+      '备注': 'remark',
+    },
+    statusMap: {
+      '启用': 'enabled', '启用中': 'enabled', '有效': 'enabled',
+      '禁用': 'disabled', '停用': 'disabled', '无效': 'disabled',
+    },
+  },
+  'new-employee': {
+    targetTable: 'new_employee_training',
+    moduleName: '新员工培训',
+    conflictKey: ['name', 'department', 'hire_date'],
+    memoryMode: false,
+    dateFields: ['hire_date', 'training_date'],
+    fieldMapping: {
+      '姓名': 'name', '员工姓名': 'name',
+      '员工编号': 'employee_id', '工号': 'employee_id',
+      '部门': 'department', '所属部门': 'department',
+      '岗位': 'position', '职位': 'position',
+      '入职日期': 'hire_date', '入职时间': 'hire_date',
+      '培训完成': 'training_completed', '是否培训': 'training_completed', '培训状态': 'training_completed',
+      '考试分数': 'exam_score', '分数': 'exam_score', '成绩': 'exam_score',
+      '师傅姓名': 'master_name', '带教师傅': 'master_name', '导师': 'master_name',
+      '考核结果': 'assessment_result', '结果': 'assessment_result',
+      '培训日期': 'training_date', '培训时间': 'training_date',
+      '备注': 'remark', '说明': 'remark',
+    },
+    statusMap: {
+      '合格': 'pass', '通过': 'pass', '达标': 'pass',
+      '不合格': 'fail', '未通过': 'fail', '不达标': 'fail',
+      '是': true, '已完成': true, '完成': true,
+      '否': false, '未完成': false,
+    },
+  },
+  ledger: {
+    targetTable: 'training_records',
+    moduleName: '培训台账',
+    conflictKey: ['name', 'training_date', 'training_type'],
+    memoryMode: false,
+    dateFields: ['training_date'],
+    fieldMapping: {
+      '姓名': 'name', '参训人': 'name', '参训人姓名': 'name', '员工姓名': 'name',
+      '培训人': 'name', '参训人员': 'name', '人员姓名': 'name',
+      '身份证号': 'id_card', '身份证': 'id_card', '证件号': 'id_card',
+      '部门': 'dept', '所属部门': 'dept', '培训部门': 'dept', '培训部门/班组': 'dept', '部门/班组': 'dept',
+      '岗位': 'position', '职位': 'position', '工种': 'position', '工种/岗位': 'position', '岗位/工种': 'position',
+      '网格层级': 'grid_level', '层级': 'grid_level',
+      '培训频次': 'frequency', '频次': 'frequency',
+      '培训类型': 'training_type', '类型': 'training_type',
+      '培训日期': 'training_date', '日期': 'training_date',
+      '培训时长': 'duration_minutes', '时长': 'duration_minutes', '时长分钟': 'duration_minutes',
+      '培训内容': 'content', '内容': 'content',
+      '考核结果': 'result', '结果': 'result',
+      '分数': 'score', '考试分数': 'score',
+      '讲师': 'trainer', '培训讲师': 'trainer', '讲师姓名': 'trainer',
+      '备注': 'remark', '说明': 'remark',
+    },
+    statusMap: {
+      '合格': '合格', '不合格': '不合格', '优秀': '优秀',
+    },
+  },
+  driver: {
+    targetTable: 'driver_assessment',
+    moduleName: '驾驶员实操',
+    conflictKey: ['name', 'department', 'license_no'],
+    memoryMode: false,
+    dateFields: ['hire_date', 'assessment_date'],
+    fieldMapping: {
+      '姓名': 'name', '驾驶员姓名': 'name', '司机姓名': 'name',
+      '员工编号': 'employee_id', '工号': 'employee_id',
+      '部门': 'department', '所属部门': 'department', '车队': 'department',
+      '岗位': 'position', '职位': 'position',
+      '驾驶证号': 'license_no', '驾照号': 'license_no', '驾驶证': 'license_no',
+      '准驾车型': 'license_type', '准驾': 'license_type', '驾照类型': 'license_type',
+      '入职日期': 'hire_date', '入职时间': 'hire_date', '上岗日期': 'hire_date',
+      '实操考核日期': 'assessment_date', '考核日期': 'assessment_date', '考核时间': 'assessment_date',
+      '考核结果': 'assessment_result', '结果': 'assessment_result', '考核等级': 'assessment_result',
+      '安全行驶里程': 'safe_mileage', '行驶里程': 'safe_mileage', '里程': 'safe_mileage',
+      '年龄': 'age',
+      '联系电话': 'phone', '电话': 'phone', '手机': 'phone',
+      '备注': 'remark', '说明': 'remark',
+    },
+    statusMap: {
+      '优秀': 'excellent', '良好': 'good', '合格': 'qualified', '不合格': 'unqualified',
+    },
+  },
+};
+
+// 将 Python 引擎的 ParseResult 转换为前端 preview 契约结构
+// （与 /upload 返回字段完全一致：jobId/totalRows/validRows/invalidRows/preview/moduleType/sheets...）
+// 这样前端在"勾选 sheet 重解"(/parse) 后拿到的结构与初次上传(/upload) 一致，
+// preview 模板可直接渲染，且 jobId 不丢失（confirm 依赖它）。
+function buildFrontendPreview(parseResult, jobId) {
+  const sampleData = parseResult.sample_data || [];
+  // 预览数据统一 camelCase 输出，与前端列表显示一致
+  const preview = sampleData.map((row, i) => ({
+    rowIndex: i + 1,
+    data: camelKeys(row),
+    errors: [],
+  }));
+  const totalRows = parseResult.total_rows || sampleData.length;
+  return {
+    jobId: jobId != null ? String(jobId) : undefined,
+    totalRows,
+    validRows: totalRows,
+    invalidRows: 0,
+    preview,
+    moduleType: parseResult.module_type,
+    moduleName: parseResult.module_name || parseResult.module_type,
+    targetTable: parseResult.target_table,
+    sheets: parseResult.sheets || [],
+  };
+}
+
+// ============================================================
+// POST /api/import/parse — 解析文件（管理员/安全管理）
+// ============================================================
+router.post('/parse', requireRole('admin', 'safety_manager'), async (req, res) => {
+  try {
+    const { fileRecordId, filePath, fileName, sheets } = req.body;
+
+    // 前端(ImportModal)勾选 sheet 重解时只传 fileRecordId + sheets，
+    // 这里从 file_records 反查 filePath/fileName，避免前端持有文件路径
+    let _filePath = filePath;
+    let _fileName = fileName;
+    if ((!_filePath || !_fileName) && fileRecordId) {
+      const fr = await pool.query(
+        `SELECT filepath, original_name, filename FROM file_records WHERE id = $1`,
+        [fileRecordId]
+      );
+      if (fr.rows.length) {
+        _filePath = fr.rows[0].filepath;
+        _fileName = fr.rows[0].original_name || fr.rows[0].filename;
+      }
+    }
+
+    if (!_filePath || !_fileName) {
+      return res.json(error(-1, '缺少必要参数: filePath, fileName (且 file_records 中无可用的记录)'));
+    }
+
+    // 原生导入模块优先使用 Node.js 解析
+    let moduleType = null;
+    if (fileRecordId) {
+      const fr = await pool.query(
+        'SELECT module_type FROM file_records WHERE id = $1',
+        [fileRecordId]
+      );
+      if (fr.rows.length) {
+        moduleType = fr.rows[0].module_type;
+      }
+    }
+
+    if (moduleType && NATIVE_IMPORT_MODULES[moduleType]) {
+      try {
+        const nativeConfig = NATIVE_IMPORT_MODULES[moduleType];
+        const parseResult = parseExcelNative(_filePath, nativeConfig, sheets);
+        if (!parseResult.success) {
+          return res.json(error(-2, parseResult.error || '文件解析失败', parseResult));
+        }
+        const payload = {
+          jobId: String(fileRecordId),
+          totalRows: parseResult.total_rows + (parseResult.error_count || 0),
+          validRows: parseResult.total_rows,
+          invalidRows: parseResult.error_count || 0,
+          errors: parseResult.errors || [],
+          preview: parseResult.preview,
+          moduleType,
+          moduleName: nativeConfig.moduleName,
+          targetTable: nativeConfig.targetTable,
+          sheets: parseResult.sheets || [],
+        };
+        return res.json(success(payload, `解析成功: 模块=${nativeConfig.moduleName}, 共${parseResult.total_rows}行${parseResult.error_count ? `，错误${parseResult.error_count}行` : ''}`));
+      } catch (nativeErr) {
+        console.error('[Import] native parse failed:', nativeErr.message);
+      }
+    }
+
+    // 调用 Python 解析引擎
+    const args = [
+      PARSER_SCRIPT,
+      '--action=parse',
+      `--file-path=${_filePath}`,
+      `--file-name=${_fileName}`,
+    ];
+
+    if (fileRecordId) {
+      args.push(`--file-record-id=${fileRecordId}`);
+    }
+    // 多 sheet 支持：前端勾选的工作表列表
+    if (sheets && Array.isArray(sheets) && sheets.length) {
+      args.push(`--sheets=${sheets.join(',')}`);
+    }
+
+    const result = await callPython(args);
+
+    if (result.success) {
+      const payload = buildFrontendPreview(result, fileRecordId);
+      res.json(success(payload, `解析成功: 模块=${result.module_name}, 表=${result.target_table}, 共${result.total_rows}行`));
+    } else {
+      res.json(error(-2, result.error || '解析失败', result));
+    }
+  } catch (err) {
+    console.error('[Import] parse error:', err.message);
+    res.json(error(-3, '解析异常: ' + err.message));
+  }
+});
+
+// ============================================================
+// POST /api/import/confirm — 确认入库（管理员/安全管理）
+// ============================================================
+router.post('/confirm', requireRole('admin', 'safety_manager'), async (req, res) => {
+  try {
+    const { fileRecordId, insuranceType } = req.body;
+    // 审计操作人必须来自已验证的 req.user，不得信任请求体中的 operator
+    const operator = req.user || null;
+
+    if (!fileRecordId) {
+      return res.json(error(-1, '缺少必要参数: fileRecordId'));
+    }
+
+    const jobId = crypto.randomUUID();
+
+    // 先检查 file_records 中的 module_type，判断是否使用原生导入
+    const fr = await pool.query(
+      'SELECT module_type FROM file_records WHERE id = $1',
+      [fileRecordId]
+    );
+    const moduleType = fr.rows[0]?.module_type;
+
+    if (moduleType && NATIVE_IMPORT_MODULES[moduleType]) {
+      const result = await confirmImportNative(fileRecordId, moduleType, operator, insuranceType);
+      if (result.success) {
+        const count = (result.inserted || 0) + (result.updated || 0);
+        auditLog({ userId: req.user?.id, username: req.user?.username, action: 'import', module: moduleType, description: `确认导入 ${count || ''} 条数据`, ip: req.ip }).catch(() => {});
+        // 任务4（提示词11）：消息按 outcome 区分，不得把 partial/failed 写成完整成功
+        const msg = result.outcome === 'imported'
+          ? `入库成功: 新增${result.inserted}, 更新${result.updated}`
+          : result.outcome === 'partial'
+            ? `部分入库完成: 新增${result.inserted}, 更新${result.updated}, 跳过${result.skipped}`
+            : '入库失败，未写入记录';
+        return res.json(success(result, msg));
+      } else {
+        return res.json(error(-2, result.error || '入库失败', result));
+      }
+    }
+
+    // 调用 Python 确认入库
+    const args = [
+      PARSER_SCRIPT,
+      '--action=confirm',
+      `--job-id=${jobId}`,
+      `--file-record-id=${fileRecordId}`,
+      `--operator=${operator || 'web-user'}`
+    ];
+
+    const result = await callPython(args);
+
+    if (result.success) {
+      const count = (result.inserted || 0) + (result.updated || 0);
+      auditLog({ userId: req.user?.id, username: req.user?.username, action: 'import', module: 'import', description: `确认导入 ${count || ''} 条数据`, ip: req.ip }).catch(() => {});
+      res.json(success(result, `入库成功: 新增${result.inserted}, 更新${result.updated}, 跳过${result.skipped}`));
+    } else {
+      res.json(error(-2, result.error || '入库失败', result));
+    }
+  } catch (err) {
+    console.error('[Import] confirm error:', err.message);
+    res.json(error(-3, '入库异常: ' + err.message));
+  }
+});
+
+// ============================================================
+// POST /api/import/rollback — 回滚（管理员/安全管理）
+// ============================================================
+router.post('/rollback', requireRole('admin', 'safety_manager'), async (req, res) => {
+  try {
+    const { jobId } = req.body;
+
+    if (!jobId) {
+      return res.json(error(-1, '缺少必要参数: jobId'));
+    }
+
+    // 调用 Python 回滚
+    const args = [
+      PARSER_SCRIPT,
+      '--action=rollback',
+      `--job-id=${jobId}`
+    ];
+
+    const result = await callPython(args);
+
+    if (result.success) {
+      auditLog({ userId: req.user?.id, username: req.user?.username, action: 'rollback', module: 'import', description: `回滚导入`, ip: req.ip }).catch(() => {});
+      res.json(success(result, `回滚成功: 删除${result.deleted_rows}行数据`));
+    } else {
+      res.json(error(-2, result.error || '回滚失败', result));
+    }
+  } catch (err) {
+    console.error('[Import] rollback error:', err.message);
+    res.json(error(-3, '回滚异常: ' + err.message));
+  }
+});
+
+// ============================================================
+// GET /api/import/logs — 查询导入日志
+// ============================================================
+router.get('/logs', requireRole('admin', 'safety_manager'), async (req, res) => {
+  try {
+    const { moduleType, status, page, limit } = req.query;
+    const pageNum = parseInt(page) || 1;
+    const limitNum = Math.min(parseInt(limit) || 50, 200);
+    const offset = (pageNum - 1) * limitNum;
+
+    let where = ['1=1'];
+    let params = [];
+    let idx = 1;
+
+    if (moduleType) {
+      where.push(`module_type = $${idx++}`);
+      params.push(moduleType);
+    }
+    if (status) {
+      where.push(`status = $${idx++}`);
+      params.push(status);
+    }
+
+    // 查询总数
+    const countResult = await pool.query(
+      `SELECT COUNT(*) as total FROM import_logs WHERE ${where.join(' AND ')}`,
+      params
+    );
+    const total = parseInt(countResult.rows[0].total);
+
+    // 查询数据
+    params.push(limitNum);
+    params.push(offset);
+    const result = await pool.query(
+      `SELECT l.*, f.original_name, f.file_type, f.size
+       FROM import_logs l
+       LEFT JOIN file_records f ON l.file_record_id = f.id
+       WHERE ${where.join(' AND ')}
+       ORDER BY l.created_at DESC
+       LIMIT $${idx++} OFFSET $${idx++}`,
+      params
+    );
+
+    res.json(success({
+      logs: result.rows,
+      total,
+      page: pageNum,
+      limit: limitNum
+    }, '查询成功'));
+  } catch (err) {
+    console.error('[Import] logs error:', err.message);
+    res.json(error(-1, '查询日志失败: ' + err.message));
+  }
+});
+
+// ============================================================
+// GET /api/import/config — 查询字段映射配置
+// ============================================================
+router.get('/config', requireRole('admin', 'safety_manager'), async (req, res) => {
+  try {
+    const { moduleType } = req.query;
+
+    let query = 'SELECT * FROM field_mapping_config WHERE is_active = true';
+    let params = [];
+
+    if (moduleType) {
+      query += ' AND module_type = $1';
+      params.push(moduleType);
+    }
+
+    query += ' ORDER BY module_type, id';
+
+    const result = await pool.query(query, params);
+
+    res.json(success({
+      configs: result.rows,
+      total: result.rows.length
+    }, '查询成功'));
+  } catch (err) {
+    console.error('[Import] config error:', err.message);
+    res.json(error(-1, '查询配置失败: ' + err.message));
+  }
+});
+
+// ============================================================
+// GET /api/import/template/:module — 下载模板
+// ============================================================
+router.get('/template/:module', requireRole('admin', 'safety_manager'), async (req, res) => {
+  try {
+    const { module } = req.params;
+    const moduleTemplates = {
+      hazards: [
+        { 序号: 1, 隐患描述: '柴胡店收运车570Q左刹车灯不亮、右转向不亮', 整改措施: '立即前往车辆维修厂修理', 检查时间: '2026.6.16', 检查人员: '刘金涛、刘菲、王明轩', 整改人员: '张康', 整改时间: '2026.6.18', 是否整改完成: '是' },
+      ],
+      accidents: [
+        { 事故日期: '2026-01-10', 事故类型: '交通事故', 事故等级: '一般', 发生地点: 'Highway 101', 事故描述: '车辆碰撞', 损失金额: 5000, 处理状态: '处理中' },
+      ],
+      training: [
+        { 姓名: '王五', 部门: '市政部', 岗位: '司机', 培训类型: '安全培训', 培训日期: '2026-01-05', 培训时长分钟: 120, 培训内容: '交通安全知识', 考核结果: '合格', 分数: 90, 讲师: '赵六' },
+      ],
+      personnel: [
+        // 任务7：模板表头必须与 personnel fieldMapping 一一对应（可被当前预处理成功解析）。
+        // 工号/员工编号为核心关联列；姓名仅附加校验；删除会误导用户依赖身份证/姓名关联的旧示例。
+        { 工号: 'E001', 姓名: '张三', 保险类型: '雇主责任险', 保单号: 'POL001', 保险起期: '2026-01-01', 保险到期: '2027-01-01', 保额: 800000, 保费: 500, 是否当前: '是', 备注: '示例行' },
+      ],
+      objectives: [
+        { 年度: 2026, 季度: 1, 部门: '市政部', 责任人: '张三', 考核分数: 95, 等级: '优秀', 状态: '有效' },
+      ],
+      emergency: [
+        { 预案名称: '火灾应急预案', 类型: 'fire', 级别: 'level1', 状态: 'active', 责任部门: '安全部', 责任人: '李四', 联系电话: '13900139000', 描述: '火灾应急处理流程', 版本: '1.0' },
+      ],
+      drill: [
+        { 预案名称: '火灾应急预案', 演练类型: 'tabletop', 演练日期: '2026-01-15', 演练地点: '厂区A区', 参加人数: 50, 时长分钟: 60, 演练结果: 'excellent', 评估人: '评估组-张组长', 总结: '演练组织有序，达到预期目标', 改进建议: '建议加强初期处置训练' },
+      ],
+      insurance: [
+        { 姓名: '张三', 身份证号: '110101199001011234', 部门: '市政部', 岗位: '司机', 保险状态: '已参保', 保险类型: '意外险', 保单号: 'POL001', 保险起期: '2026-01-01', 保险到期: '2027-01-01', 保费: 500 },
+      ],
+      vehicle: [
+        {
+          序号: 1,
+          '投保人、被保险人': '宁津北控城市环境服务有限公司',
+          '行驶证车主': '宁津北控城市环境服务有限公司',
+          车牌号: '鲁ND1021',
+          车架号: 'LZ0BFPD42J1017981',
+          发动机号: 'BD10143525',
+          初次登记年月: '2019-01-24',
+          厂牌车型: '飞碟FD5161GXWP63K5吸污车',
+          交强险保险起期: '2026-02-27',
+          交强险保险止期: '2027-02-26',
+          商业险保险起期: '2026-02-27',
+          商业险保险止期: '2027-02-26',
+          车损险保额: '200万',
+          车损险保费: 3826.53,
+          三者险保额: '200万',
+          三者险保费: 3826.53,
+          司乘险保额: '',
+          司乘险保费: 0,
+          商业险合计: 3826.53,
+          交强险: 1944,
+          车船税: 105.68,
+          合计: 5876.21,
+        },
+      ],
+      regulations: [
+        { 制度名称: '安全生产责任制', 制度编号: 'HSE-001', 制度类型: '管理制度', 发布日期: '2026-01-01', 实施日期: '2026-01-15', 制定部门: '安全管理部', 状态: '已发布', 版本: '1.0' },
+      ],
+      workflow: [
+        { 流程编码: 'WF001', 流程名称: '隐患整改审批', 流程描述: '隐患发现→整改→验收闭环', 状态: '启用', 排序: 1 },
+      ],
+      inspection: [
+        { 检查项目: '消防设施检查', 检查类型: '月度检查', 检查日期: '2026-01-15', 责任部门: '安全管理部', 检查结果: '合格', 整改期限: '2026-01-20', 备注: '' },
+      ],
+      audit: [
+        { 操作人: 'admin', 操作类型: '登录', 操作对象: '系统', 操作时间: '2026-01-15 08:30:00', IP地址: '127.0.0.1', 操作结果: '成功', 备注: '' },
+      ],
+      'risk-control': [
+        { 风险名称: '高处坠落', 风险等级: '重大', 风险类型: '作业风险', 责任部门: '安全管理部', 控制措施: '佩戴安全带、设置防护网', 状态: '管控中' },
+      ],
+      committee: [
+        { 姓名: '张三', 部门: '安全管理部', 职务: '主任', 联系电话: '13800138000', 委员会类型: '安委会', 任职日期: '2026-01-01', 状态: '在职' },
+      ],
+      assessment: [
+        { 考核名称: '年度安全考核', 考核周期: '2026年度', 被考核部门: '市政部', 考核分数: 95, 考核等级: '优秀', 考核人: '李四', 考核日期: '2026-12-25' },
+      ],
+      budget: [
+        { '预算年度': 2026, '措施项目': '安全培训费用', '预算科目': '费用化', '名称': '年度安全培训', '用途及依据': '年度培训计划', '计划使用时间': '2026-03-15', '使用部门/地点': '安全管理部', '规格/品牌': '', '计划-数量': 1, '计划-单价(万)': 5, '计划-总价(万)': 5, '支出-数量': 0, '支出-单价(万)': 0, '使用状态': '未支出', '备注': '' },
+      ],
+      ledger: [
+        { 姓名: '王五', 身份证号: '371422199001011234', 部门: '市政部', 岗位: '司机', 网格层级: '三级', 培训频次: '年度', 培训类型: '安全培训', 培训日期: '2026-01-05', 培训时长: 120, 培训内容: '交通安全知识', 考核结果: '合格', 分数: 90, 讲师: '赵六', 备注: '' },
+      ],
+      'new-employee': [
+        { 姓名: '王五', 部门: '运营一部', 岗位: '保洁员', 入职日期: '2026-01-01', 培训完成: '是', 考试分数: 92, 师傅姓名: '张师傅', 考核结果: '合格' },
+      ],
+      driver: [
+        { 姓名: '赵六', 部门: '车队', 岗位: '司机', 驾驶证号: '371422199001011234', 准驾车型: 'A2', 入职日期: '2020-01-01', 实操考核日期: '2026-01-10', 考核结果: '优秀', 安全行驶里程: 120000 },
+      ],
+      violation: [
+        { 违章标题: '未佩戴安全帽', 违章类型: '违章作业', 违章级别: '一般', 违章状态: '待整改', 违章人员: '张三', 所属部门: '生产运行部', 发现区域: '生产车间A', 发现人: '李四', 发现日期: '2026-01-15', 整改措施: '立即停止作业，进行安全教育', 整改期限: '2026-01-22', 整改人: '王五' },
+      ],
+      'fire-facility': [
+        { 设施名称: '灭火器-001', 设施类型: '灭火器', 型号规格: 'MFZ/ABC4', 安装位置: '办公楼1层', 设施状态: '正常', 数量: 4, 安装日期: '2025-01-01', 有效期至: '2027-01-01', 上次检查: '2026-01-10', 下次检查: '2026-02-10', 负责人: '赵消防', 联系电话: '13800001234' },
+      ],
+      // 网格管理导入模板（检查记录/三违检查记录表，依据用户上传 Excel 列结构定制）
+      // 用于任务四导入 grid_inspection_records 并计算完成率：
+      //   姓名(完成率统计) = 检查人姓名；检查日期(年月筛选/完成率) = 上传时间；网格关联 = 片区/班组 + 网格等级
+      grid: [
+        {
+          '片区/班组': '大柳镇',
+          '上传时间': '2026-07-01 07:09:12',
+          '检查人姓名': '李新国',
+          '网格等级': '三级网格长',
+          '所属岗位': '管理员',
+          '违章人姓名': '贾吨林',
+          '违章人性别': '男',
+          '违章人年龄': 65,
+          '车辆类型/保洁员': '',
+          '上报状态': '已完成',
+          '图片内容': '1782860835349.jpg',
+          '"三违"行为': '未穿工作服',
+          '三违类型.输出结果': '无',
+          '需要整改': '否',
+          '整改执行人': '无',
+          '整改后的照片': '1782860658027.jpg',
+          '示意图': '',
+        },
+      ],
+      'over-age': [
+        { 姓名: '张大爷', 身份证号: '371422196001011234', 部门: '运营一部', 岗位: '保洁员', 年龄: 66, 超龄年限: 6, 管控类型: '一般超龄', 审批状态: '已审批', 保险状态: '已参保' },
+      ],
+      cockpit: [
+        { 指标名称: '事故发生率', 指标值: 0.05, 目标值: 0.1, 单位: '‰', 状态: '达标', 同比变化: '-15%' },
+      ],
+      bi: [
+        { 报表名称: '安全趋势分析', 报表类型: '趋势图', 统计周期: '月度', 数据维度: '部门', 生成日期: '2026-01-15', 状态: '已生成' },
+      ],
+      'ai-analysis': [
+        { 分析名称: '隐患预测分析', 分析类型: '预测模型', 数据源: '隐患数据库', 模型版本: 'v2.0', 分析日期: '2026-01-15', 准确率: '92%', 状态: '完成' },
+      ],
+      iot: [
+        { 设备编号: 'IOT001', 设备名称: '温湿度传感器', 设备类型: '传感器', 安装位置: '转运站一号车间', 状态: '在线', 最后上报: '2026-01-15 10:30:00', 信号强度: '强' },
+      ],
+      'supply-chain': [
+        { 供应商名称: '劳保用品批发公司', 供应类型: '劳保用品', 评估日期: '2026-01-10', 评估结果: '合格', 风险等级: '低', 联系人: '王经理', 联系电话: '13900139000' },
+      ],
+      reports: [
+        { 报表名称: '月度安全报告', 报表类型: '定期报告', 统计周期: '2026年1月', 生成日期: '2026-02-01', 状态: '已生成', 负责人: '李四', 备注: '' },
+      ],
+    };
+
+    const templateData = moduleTemplates[module] || [
+      { 字段1: '', 字段2: '', 字段3: '', 字段4: '', 字段5: '' },
+    ];
+    const format = (req.query.format || 'xlsx').toLowerCase();
+
+    if (format === 'csv') {
+      const headers = Object.keys(templateData[0]).join(',') + '\n';
+      const rows = templateData.map(row =>
+        Object.values(row).map(v => {
+          if (typeof v === 'string') return `"${v}"`;
+          return v;
+        }).join(',')
+      ).join('\n');
+
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${module}_template.csv"`);
+      res.send('\uFEFF' + headers + rows);
+    } else {
+      const ws = XLSX.utils.json_to_sheet(templateData);
+      const colWidths = Object.keys(templateData[0]).map(k => ({ wch: Math.max(k.length * 2, 12) }));
+      ws['!cols'] = colWidths;
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+      const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      // 网格管理模板按需求特化文件名（任务三要求：网格管理导入模板_YYYYMMDD.xlsx）
+      const tplDateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      const tplFileName = module === 'grid' ? `网格管理导入模板_${tplDateStr}.xlsx` : `${module}_template.xlsx`;
+      res.setHeader('Content-Disposition', `attachment; filename="${tplFileName}"`);
+      res.send(buffer);
+    }
+  } catch (err) {
+    console.error('[Import] template error:', err.message);
+    res.json(error(-1, '下载模板失败: ' + err.message));
+  }
+});
+
+// ============================================================
+// POST /api/import/upload — 上传 Excel 文件并解析
+// 前端(ImportModal)仅调用此接口与 /confirm：
+//   1) multer 落盘
+//   2) 写入 file_records 记录（id 作为 jobId 回传前端，供 /confirm 使用）
+//   3) 调 Python 引擎解析（--file-record-id 使其回写 module_type/data_period/status）
+//   4) 将 sample_data 转换为前端 preview 结构并返回
+// 与旧 mock 的响应字段完全兼容（preview/totalRows/validRows/invalidRows/jobId/moduleType）
+// 上传为写操作，要求管理员/安全管理角色
+// ============================================================
+router.post('/upload', requireRole('admin', 'safety_manager'), (req, res, next) => {
+  console.log('[Upload Debug] === 收到上传请求 ===');
+  console.log('[Upload Debug] Content-Type:', req.headers['content-type']);
+  console.log('[Upload Debug] Content-Length:', req.headers['content-length']);
+  uploadExcel.single('file')(req, res, (err) => {
+    if (err) {
+      console.error('[Upload Debug] multer 错误:', err.message);
+      return res.json(error(-1, err.message || '文件上传失败'));
+    }
+    console.log('[Upload Debug] multer 完成, req.file:', req.file ? req.file.originalname + ' (' + req.file.size + ' bytes)' : 'undefined');
+    console.log('[Upload Debug] req.fileValidationError:', req.fileValidationError);
+    console.log('[Upload Debug] req.body.module:', req.body?.module);
+    next();
+  });
+}, async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.json(error(-1, '请选择要上传的文件'));
+    }
+
+    // 统一路径为正斜杠（Python 引擎要求）
+    const filePath = req.file.path.replace(/\\/g, '/');
+    let fileName = req.file.originalname;
+    const fileSize = req.file.size;
+
+    // ---- 中文文件名 Mojbibake（乱码）检测与修复 ----
+    // 某些客户端（非RFC 5987编码的FormData）中文文件名会被 busboy 按 Latin-1 解码，
+    // 导致 UTF-8 字节被错误解释为 å® ä¹‹ç‰ 乱码模式。
+    // 修复策略：检测乱码 → 尝试从原始字节重建 UTF-8 → 回退到表单字段 original_filename
+    const backupName = req.body.original_filename || req.body.originalFilename || '';
+    fileName = repairMojibakeFileName(fileName, backupName);
+
+    // 辅助函数：检测并修复 Mojibake 文件名
+    function repairMojibakeFileName(original, fallback) {
+      if (!original) return fallback || 'unknown.xlsx';
+
+      // 检测特征：含 â¤ çš å½ ç› ç‰ 典型 Mojibake 子串（UTF-8 被 Latin-1 解码的特征）
+      const mojibakePattern = /[â€¦â€°â€¡â€¢â€™â€œâ€â€œå¤§éˆ™©ç®¡æŽ§æ¸…å•]/;
+
+      if (mojibakePattern.test(original)) {
+        // 尝试 Latin-1 → UTF-8 反向转换
+        try {
+          const repaired = Buffer.from(original, 'latin1').toString('utf-8');
+          // 验证修复结果是否包含合理的中文字符（Unicode CJK 范围）
+          if (/[\u4e00-\u9fff\u3000-\u303f]/.test(repaired)) {
+            console.log('[Import] Mojibake 修复:', original.substring(0, 30), '→', repaired);
+            return repaired;
+          }
+        } catch (e) { /* 忽略 */ }
+      }
+
+      // 如果提供了回退名且当前名看起来不像正常的中文文件名，使用回退名
+      if (fallback && /[\x80-\xff]{2,}/.test(original) && !/[\u4e00-\u9fff]/.test(original)) {
+        console.log('[Import] 使用回退文件名:', fallback);
+        return fallback;
+      }
+
+      return original;
+    }
+
+    const fileType = (path.extname(fileName) || '').toLowerCase().replace(/^\./, '') || 'xlsx';
+
+    // 1) 写入 file_records（状态 uploaded），拿到自增 id 作为 jobId
+    const insertRes = await pool.query(
+      `INSERT INTO file_records (filename, filepath, original_name, file_type, size, status, created_at)
+       VALUES ($1, $2, $3, $4, $5, 'uploaded', NOW()) RETURNING id`,
+      [req.file.filename, filePath, fileName, fileType, fileSize]
+    );
+    const fileRecordId = insertRes.rows[0].id;
+
+    const module = req.body.module || '';
+    const nativeConfig = NATIVE_IMPORT_MODULES[module];
+
+    // 优先使用 Node.js 原生导入（如果配置了）
+    if (nativeConfig) {
+      try {
+        const parseResult = parseExcelNative(req.file.path, nativeConfig);
+        if (!parseResult.success) {
+          return res.json(error(-2, parseResult.error || '文件解析失败', parseResult));
+        }
+
+        await pool.query(
+          `UPDATE file_records SET module_type = $1, status = 'parsed' WHERE id = $2`,
+          [module, fileRecordId]
+        );
+
+        const payload = {
+          jobId: String(fileRecordId),
+          totalRows: parseResult.total_rows + (parseResult.error_count || 0),
+          validRows: parseResult.total_rows,
+          invalidRows: parseResult.error_count || 0,
+          errors: parseResult.errors || [],
+          preview: parseResult.preview,
+          moduleType: module,
+          moduleName: nativeConfig.moduleName,
+          targetTable: nativeConfig.targetTable,
+          sheets: parseResult.sheets || [],
+        };
+        return res.json(success(payload, `文件上传并解析成功: ${fileName}${parseResult.error_count ? `（错误${parseResult.error_count}行，已跳过）` : ''}`));
+      } catch (nativeErr) {
+        console.error('[Import] native parse failed:', nativeErr.message);
+      }
+    }
+
+    // 2) 调 Python 解析引擎（带 file_record_id，回写 module_type/data_period/status='parsed'）
+    const args = [
+      PARSER_SCRIPT,
+      '--action=parse',
+      `--file-path=${filePath}`,
+      `--file-name=${fileName}`,
+      `--file-record-id=${fileRecordId}`,
+    ];
+
+    let parseResult;
+    try {
+      parseResult = await callPython(args);
+    } catch (pyErr) {
+      console.error('[Import] parse spawn failed:', pyErr.message);
+      return res.json(error(-2, '文件解析失败（解析引擎异常）: ' + pyErr.message));
+    }
+
+    if (!parseResult || !parseResult.success) {
+      return res.json(error(-2, parseResult?.error || '文件解析失败', parseResult || null));
+    }
+
+    // 3) 转换为与前端契约一致的结构（与 /parse 共用 buildFrontendPreview）
+    const payload = buildFrontendPreview(parseResult, fileRecordId);
+
+    // 4) 返回与前端契约一致的响应（兼容旧 mock 字段）
+    res.json(success(payload, `文件上传并解析成功: ${fileName}`));
+  } catch (err) {
+    console.error('[Import] upload error:', err.message);
+    res.json(error(-1, '上传失败: ' + err.message));
+  }
+});
+
+// ============================================================
+// GET /api/import/stats — 导入统计
+// ============================================================
+router.get('/stats', requireRole('admin', 'safety_manager'), async (req, res) => {
+  try {
+    // 按模块统计
+    const moduleStats = await pool.query(`
+      SELECT module_type,
+             COUNT(*) as total_imports,
+             SUM(inserted_rows) as total_inserted,
+             SUM(updated_rows) as total_updated,
+             SUM(skipped_rows) as total_skipped,
+             SUM(error_count) as total_errors
+      FROM import_logs
+      WHERE status = 'completed'
+      GROUP BY module_type
+      ORDER BY total_imports DESC
+    `);
+
+    // 最近导入
+    const recent = await pool.query(`
+      SELECT l.*, f.original_name
+      FROM import_logs l
+      LEFT JOIN file_records f ON l.file_record_id = f.id
+      ORDER BY l.created_at DESC
+      LIMIT 10
+    `);
+
+    // 总计
+    const totals = await pool.query(`
+      SELECT COUNT(*) as total_jobs,
+             SUM(inserted_rows) as total_inserted,
+             SUM(updated_rows) as total_updated,
+             SUM(skipped_rows) as total_skipped
+      FROM import_logs WHERE status = 'completed'
+    `);
+
+    res.json(success({
+      byModule: moduleStats.rows,
+      recent: recent.rows,
+      totals: totals.rows[0]
+    }, '查询成功'));
+  } catch (err) {
+    console.error('[Import] stats error:', err.message);
+    res.json(error(-1, '查询统计失败: ' + err.message));
+  }
+});
+
+// ============================================================
+// 辅助函数: 调用 Python（通过 stdin 传递 JSON 参数，避免中文编码问题）
+// ============================================================
+function callPython(args) {
+  return new Promise((resolve, reject) => {
+    const startTime = Date.now();
+
+    // 将参数写入临时 JSON 文件，避免命令行中文编码问题
+    const os = require('os');
+    const tmpFile = path.join(os.tmpdir(), `hse_import_${Date.now()}.json`);
+    const argObj = {};
+    for (const a of args) {
+      if (a.startsWith('--')) {
+        const eqIdx = a.indexOf('=');
+        if (eqIdx > 0) {
+          const key = a.substring(2, eqIdx).replace(/-/g, '_');
+          argObj[key] = a.substring(eqIdx + 1);
+        }
+      }
+    }
+    // PARSER_SCRIPT 不写入 JSON
+    delete argObj['undefined'];
+
+    // 写入临时文件（必须在 spawn 之前完成）
+    const fs = require('fs');
+    fs.writeFileSync(tmpFile, JSON.stringify(argObj), 'utf-8');
+
+    const { spawn } = require('child_process');
+
+    // 安全校验: 仅允许已知的合法脚本和文件路径
+    const ALLOWED_SCRIPTS = new Set([
+      path.resolve(__dirname, '..', '..', 'scripts', 'import_parser.py'),
+    ]);
+    const resolvedScript = path.resolve(PARSER_SCRIPT);
+    if (!ALLOWED_SCRIPTS.has(resolvedScript)) {
+      return reject(new Error('不允许的脚本路径'));
+    }
+
+    const child = spawn(PYTHON_PATH, [
+      PARSER_SCRIPT,
+      '--json-input', tmpFile
+    ], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', (data) => { stdout += data.toString('utf-8'); });
+    child.stderr.on('data', (data) => { stderr += data.toString('utf-8'); });
+
+    // 超时保护：30秒
+    const PYTHON_TIMEOUT = parseInt(process.env.PYTHON_TIMEOUT) || 30000;
+    const timeoutId = setTimeout(() => {
+      console.error(`[Import] Python执行超时 (${PYTHON_TIMEOUT}ms)，强制终止`);
+      child.kill('SIGTERM');
+      // 给 3 秒优雅退出时间
+      setTimeout(() => {
+        try { child.kill('SIGKILL'); } catch(e) {}
+      }, 3000);
+    }, PYTHON_TIMEOUT);
+
+    child.on('close', (code) => {
+      clearTimeout(timeoutId);
+      const elapsed = Date.now() - startTime;
+
+      // 清理临时文件
+      try { fs.unlinkSync(tmpFile); } catch (e) {}
+
+      if (code !== 0) {
+        console.error(`[Import] Python执行失败 (${elapsed}ms, code=${code}):`, stderr);
+        return reject(new Error(stderr || `Python进程退出码: ${code}`));
+      }
+
+      try {
+        const result = JSON.parse(stdout.trim());
+        console.log(`[Import] Python执行完成 (${elapsed}ms)`);
+        resolve(result);
+      } catch (parseErr) {
+        console.error('[Import] JSON解析失败:', parseErr.message);
+        console.error('[Import] stdout:', stdout.substring(0, 500));
+        reject(new Error('Python输出JSON解析失败: ' + parseErr.message));
+      }
+    });
+
+    child.on('error', (err) => {
+      clearTimeout(timeoutId);
+      try { fs.unlinkSync(tmpFile); } catch (e) {}
+      reject(err);
+    });
+  });
+}
+
+// ============================================================
+// Node.js 原生导入 — 解析 Excel 文件
+// ============================================================
+function fixDateValue(value) {
+  if (!value) return null;
+  if (typeof value === 'number') {
+    const date = XLSX.SSF.parse_date_code(value);
+    if (date) {
+      return `${date.y}-${String(date.m).padStart(2, '0')}-${String(date.d).padStart(2, '0')}`;
+    }
+    return null;
+  }
+  if (typeof value === 'string') {
+    const cleaned = value.trim();
+    if (!cleaned) return null;
+    const dashMatch = cleaned.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (dashMatch) {
+      const y = parseInt(dashMatch[1], 10);
+      const m = parseInt(dashMatch[2], 10);
+      const d = parseInt(dashMatch[3], 10);
+      if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+        return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      }
+    }
+    const dotMatch = cleaned.match(/^(\d{4})\.(\d{1,2})\.(\d{1,2})/);
+    if (dotMatch) {
+      const y = parseInt(dotMatch[1], 10);
+      const m = parseInt(dotMatch[2], 10);
+      const d = parseInt(dotMatch[3], 10);
+      if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+        return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      }
+    }
+    const slashMatch = cleaned.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})/);
+    if (slashMatch) {
+      const y = parseInt(slashMatch[1], 10);
+      const m = parseInt(slashMatch[2], 10);
+      const d = parseInt(slashMatch[3], 10);
+      if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+        return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      }
+    }
+    const d = new Date(cleaned);
+    if (!isNaN(d.getTime())) {
+      return d.toISOString().split('T')[0];
+    }
+    return null;
+  }
+  return null;
+}
+
+function parseExcelNative(filePath, moduleConfig, selectedSheets = null) {
+  // 读文件失败：损坏 / 编码不受支持（如 GBK 编码 CSV）统一给出可操作提示
+  let workbook;
+  try {
+    workbook = XLSX.readFile(filePath);
+  } catch (e) {
+    return { success: false, error: `文件无法读取或编码不受支持：请将 CSV 另存为 UTF-8 编码，或重新导出 Excel（.xlsx）后重试${e && e.message ? '（' + e.message + '）' : ''}` };
+  }
+  const sheetNames = workbook.SheetNames;
+  if (!sheetNames.length) {
+    return { success: false, error: '文件为空：没有可解析的工作表' };
+  }
+  const fieldMapping = moduleConfig.fieldMapping;
+  const expectedHeaders = Object.keys(fieldMapping);
+  const maxRows = moduleConfig.maxRows || 0;
+  const fieldTypes = moduleConfig.fieldTypes || {};
+  const valueTransforms = moduleConfig.valueTransforms || {};
+  const requiredGroups = Array.isArray(moduleConfig.requiredColumnGroups) ? moduleConfig.requiredColumnGroups : [];
+  const dedupeKey = moduleConfig.dedupeKey ? (Array.isArray(moduleConfig.dedupeKey) ? moduleConfig.dedupeKey : [moduleConfig.dedupeKey]) : null;
+
+  function findHeaderRow(ws, maxScanRows = 20) {
+    const range = XLSX.utils.decode_range(ws['!ref'] || 'A1:A1');
+    const numCols = range.e.c - range.s.c + 1;
+    const numRows = Math.min(maxScanRows, range.e.r - range.s.r + 1);
+
+    let bestRow = 0;
+    let bestMatch = 0;
+
+    for (let r = 0; r < numRows; r++) {
+      const rowVals = [];
+      for (let c = 0; c < numCols; c++) {
+        const cellAddr = XLSX.utils.encode_cell({ r, c });
+        const cell = ws[cellAddr];
+        const v = cell ? String(cell.v).trim() : '';
+        rowVals.push(v);
+      }
+      const matched = expectedHeaders.filter(h => rowVals.includes(h)).length;
+      if (matched > bestMatch) {
+        bestMatch = matched;
+        bestRow = r;
+      }
+      if (matched >= Math.min(expectedHeaders.length, 3)) {
+        return r;
+      }
+    }
+    return bestMatch >= 2 ? bestRow : 0;
+  }
+
+  function parseSheet(ws) {
+    const headerRow = findHeaderRow(ws);
+    const multiHeader = moduleConfig.multiRowHeader;
+
+    if (multiHeader && Array.isArray(multiHeader.groupLabels) && multiHeader.groupLabels.length) {
+      const groupSet = new Set(multiHeader.groupLabels);
+      const groupAlias = multiHeader.groupAlias || {};
+      const range = XLSX.utils.decode_range(ws['!ref'] || 'A1:A1');
+      const readRowValues = (r) => {
+        const vals = [];
+        for (let c = range.s.c; c <= range.e.c; c++) {
+          const cell = ws[XLSX.utils.encode_cell({ r, c })];
+          vals.push(cell ? String(cell.v).trim() : '');
+        }
+        return vals;
+      };
+      const h1 = readRowValues(headerRow);
+      const h2 = readRowValues(headerRow + 1);
+      let currentGroup = '';
+      const subAlias = (b) => {
+        if (b === '单价/万元') return '单价(万)';
+        if (b === '总价/万元') return '总价(万)';
+        return b;
+      };
+      const combinedHeaders = h1.map((a, i) => {
+        const b = h2[i] || '';
+        if (a && groupSet.has(a)) {
+          currentGroup = groupAlias[a] || a;
+          if (b) return `${currentGroup}-${subAlias(b)}`;
+          return null;
+        }
+        if (a) { currentGroup = ''; return a; }
+        if (currentGroup && b) return `${currentGroup}-${subAlias(b)}`;
+        return b || '';
+      });
+      return XLSX.utils.sheet_to_json(ws, {
+        header: combinedHeaders,
+        range: headerRow + 2,
+        defval: '',
+      });
+    }
+
+    const jsonData = XLSX.utils.sheet_to_json(ws, {
+      defval: '',
+      range: headerRow,
+    });
+    return jsonData;
+  }
+
+  const statusMap = moduleConfig.statusMap;
+  const dateFields = moduleConfig.dateFields || [
+    'hazard_date', 'fix_date', 'issue_date', 'effective_date', 'deadline',
+    'installDate', 'expiryDate', 'lastCheckDate', 'nextCheckDate',
+  ];
+
+  function mapRows(jsonData, sheetName = '') {
+    const allErrors = [];
+    const seen = new Map(); // 文件内重复识别（按 dedupeKey 组合值）
+
+    // 预算表：预扫描汇总行"年度安全费用预算计划总额"，提取其右侧数值（万元）作为年度计划总额，
+    // 回填到本批所有有效数据行的 annual_plan_total，供统计"计划总额"卡片使用。
+    let sheetAnnualPlanTotal = null;
+    if (moduleConfig.moduleName === '安全费用预算') {
+      for (const row of jsonData) {
+        const keys = Object.keys(row);
+        const labelIdx = keys.findIndex(k => String(row[k] == null ? '' : row[k]).includes('年度安全费用预算计划总额'));
+        if (labelIdx >= 0) {
+          for (let j = labelIdx + 1; j < keys.length; j++) {
+            const v = parseFloat(row[keys[j]]);
+            if (!Number.isNaN(v) && String(row[keys[j]]).trim() !== '') { sheetAnnualPlanTotal = v; break; }
+          }
+          if (sheetAnnualPlanTotal !== null) break;
+        }
+      }
+    }
+
+    const mapped = jsonData.map((row, rowIdx) => {
+      const result = {};
+      const rowErrors = [];
+      const actualRowNum = rowIdx + 2;
+
+      // 占位行过滤：如「X 月份无事故」等非真实记录（moduleConfig.placeholderPattern 匹配指定字段），
+      // 直接跳过——不计入有效行、也不计入错误行
+      if (moduleConfig.placeholderField && moduleConfig.placeholderPattern) {
+        const pv = row[moduleConfig.placeholderField] != null ? String(row[moduleConfig.placeholderField]) : '';
+        if (moduleConfig.placeholderPattern.test(pv)) {
+          return { data: {}, errors: [], originalRow: row, rowIndex: actualRowNum };
+        }
+      }
+
+      // 预算表末尾常有"年度安全费用预算计划总额"等汇总行，直接跳过
+      if (moduleConfig.skipSummaryRows && moduleConfig.serialColumn) {
+        const serialValue = String(row[moduleConfig.serialColumn] || '').trim();
+        const summaryMarkers = /合计|汇总|总计|年度安全费用|结余|计划总额|支出总额/;
+        const isLikelySummary = (serialValue && !/^\d+$/.test(serialValue)) || Object.values(row).some(v => v && summaryMarkers.test(String(v)));
+        if (isLikelySummary) {
+          return { data: {}, errors: [] };
+        }
+      }
+
+      for (const [excelField, dbField] of Object.entries(fieldMapping)) {
+        if (row[excelField] !== undefined && row[excelField] !== '') {
+          let value = row[excelField];
+          // 值转换（如 "80万" → 800000；转换失败 → 行级类型错误）
+          const transform = valueTransforms[dbField];
+          if (transform) {
+            const transformed = transform(value);
+            if (Number.isNaN(transformed)) {
+              rowErrors.push({
+                field: excelField,
+                dbField,
+                reason: `数值格式错误："${value}"，无法识别为金额（支持 800000 或 80万 格式）`
+              });
+              continue;
+            }
+            value = transformed;
+          } else {
+            // 字段类型校验（number/boolean；date 走下方 dateFields 分支）
+            const ftype = fieldTypes[dbField];
+            if (ftype === 'number') {
+              const num = typeof value === 'number' ? value : parseFloat(String(value).trim().replace(/,/g, '').replace(/，/g, ''));
+              if (Number.isNaN(num)) {
+                rowErrors.push({ field: excelField, dbField, reason: `数值格式错误："${value}"，请输入数字` });
+                continue;
+              }
+              value = num;
+            } else if (ftype === 'boolean') {
+              const s = String(value).trim();
+              if (s === '是' || s === 'true' || s === 'TRUE' || s === '1' || s === 'yes' || s === 'YES') value = true;
+              else if (s === '否' || s === 'false' || s === 'FALSE' || s === '0' || s === 'no' || s === 'NO') value = false;
+              else value = (value === true || value === 1);
+            }
+          }
+          if (dbField === 'status' && statusMap && statusMap[value]) {
+            value = statusMap[value];
+          }
+          if (dateFields.includes(dbField)) {
+            const originalValue = value;
+            value = fixDateValue(value);
+            if (value === null || value === 'Invalid Date') {
+              rowErrors.push({
+                field: excelField,
+                dbField: dbField,
+                reason: `日期格式错误："${originalValue}"，请使用 YYYY-MM-DD 或 YYYY/MM/DD 格式`
+              });
+              value = originalValue;
+            }
+          }
+          if (value !== null && value !== '' && value !== 'Invalid Date') {
+            // 预算表 item_name 常因 Excel 换行显示为多行，统一压缩空格避免冲突键匹配失败
+            if (moduleConfig.moduleName === '安全费用预算' && dbField === 'item_name') {
+              value = String(value).replace(/\s+/g, ' ').trim();
+            }
+            result[dbField] = value;
+          }
+        }
+      }
+
+      // 预算表：回填年度计划总额（来自汇总行扫描），仅在有效数据行上生效
+      if (moduleConfig.moduleName === '安全费用预算' && sheetAnnualPlanTotal !== null) {
+        result.annual_plan_total = sheetAnnualPlanTotal;
+      }
+
+      const requiredField = moduleConfig.validKey || moduleConfig.conflictKey || 'name';
+      const requiredFields = Array.isArray(requiredField) ? requiredField : [requiredField];
+      const hasRequiredValue = requiredFields.some(f => result[f] && String(result[f]).trim() !== '');
+
+      if (!hasRequiredValue) {
+        const isEmptyRow = Object.keys(row).every(k => !row[k] || String(row[k]).trim() === '');
+        const serialValue = moduleConfig.serialColumn ? String(row[moduleConfig.serialColumn] || '').trim() : '';
+        const summaryMarkers = /合计|汇总|总计|年度安全费用|结余|计划总额|支出总额/;
+        const isSummaryLike = (serialValue && !/^\d+$/.test(serialValue)) || Object.values(row).some(v => v && summaryMarkers.test(String(v)));
+        // 只有序号列有数字、其余列为空或 0 的填充行，视为空行
+        let isFillerRow = false;
+        if (moduleConfig.serialColumn && /^\d+$/.test(serialValue)) {
+          isFillerRow = Object.keys(row).every(k => {
+            if (k === moduleConfig.serialColumn) return true;
+            const v = row[k];
+            if (v === null || v === undefined || String(v).trim() === '') return true;
+            return typeof v === 'number' && v === 0;
+          });
+        }
+        if (!isEmptyRow && !isFillerRow && !isSummaryLike) {
+          // 模块配置 skipRowsWithoutValidKey=true 时：validKey 字段全空的行视为非业务行直接跳过，
+          // 不报「缺少必填字段」（如事故管理，只有序号/区域等辅助列有值、事故时间/类别/描述为空的行）
+          if (moduleConfig.skipRowsWithoutValidKey) {
+            return { data: {}, errors: [], originalRow: row, rowIndex: actualRowNum };
+          }
+          const requiredLabels = requiredFields.map(f => {
+            const labelEntry = Object.entries(fieldMapping).find(([_, v]) => v === f);
+            return labelEntry ? labelEntry[0] : f;
+          });
+          rowErrors.push({
+            field: requiredLabels.join(' / '),
+            dbField: requiredFields.join(','),
+            reason: `缺少必填字段，至少需要填写：${requiredLabels.join('、')}`
+          });
+        }
+      }
+
+      // name/title 双向互补仅对明确声明 titleFromName 的模块生效
+      // （regulations / safety_goals 表含 title 列；其余目标表如 risk_sources /
+      //   emergency_plans 无 title 列，注入 title 会导致 INSERT 报「字段不存在」）
+      if (moduleConfig.titleFromName) {
+        if (!result.name && result.title) {
+          result.name = result.title;
+        }
+        if (!result.title && result.name) {
+          result.title = result.name;
+        }
+      }
+      if (moduleConfig.moduleName === '消防设施管理' && result.siteName) {
+        if (result.location) {
+          result.location = `${result.siteName} - ${result.location}`;
+        } else {
+          result.location = result.siteName;
+        }
+        delete result.siteName;
+      }
+      if (moduleConfig.moduleName === '目标职责') {
+        delete result.name;
+        const parts = [];
+        if (row['年度']) parts.push(`年度：${row['年度']}`);
+        if (row['目标值']) parts.push(`目标值：${row['目标值']}`);
+        if (row['完成值']) parts.push(`完成值：${row['完成值']}`);
+        if (row['考核周期']) parts.push(`考核周期：${row['考核周期']}`);
+        if (parts.length) result.content_summary = parts.join('；');
+      }
+
+      // 文件内重复识别：同 dedupeKey 组合值出现多次 → 标记重复行（避免重复投保/重复录入）
+      if (dedupeKey && rowErrors.length === 0) {
+        const keyStr = dedupeKey
+          .map(k => (result[k] !== undefined && result[k] !== null ? String(result[k]).trim() : ''))
+          .join('||');
+        if (keyStr && keyStr.replace(/\|\|/g, '')) {
+          if (seen.has(keyStr)) {
+            rowErrors.push({
+              field: dedupeKey.join('+'),
+              dbField: 'duplicate',
+              reason: `与第 ${seen.get(keyStr)} 行重复（${dedupeKey.join('+')} 相同），请检查清单`
+            });
+          } else {
+            seen.set(keyStr, actualRowNum);
+          }
+        }
+      }
+
+      if (rowErrors.length > 0) {
+        allErrors.push({
+          rowIndex: actualRowNum,
+          sheetName: sheetName,
+          errors: rowErrors
+        });
+      }
+
+      return { data: result, errors: rowErrors, originalRow: row, rowIndex: actualRowNum };
+    });
+    return { mapped, allErrors };
+  }
+
+  const sheets = [];
+  let allData = [];
+  let allRowErrors = [];
+  let globalRowOffset = 0;
+  let totalScannedRows = 0;
+  // 表头必填列检测：仅对第一个"数据表"（表头匹配 >=2）执行，避免封面/说明 sheet 误伤
+  let firstDataSheetChecked = false;
+
+  for (const sheetName of sheetNames) {
+    const ws = workbook.Sheets[sheetName];
+    const rawData = parseSheet(ws);
+
+    // 行数限制（累计所有 sheet 数据行）
+    totalScannedRows += rawData.length;
+    if (maxRows > 0 && totalScannedRows > maxRows) {
+      return {
+        success: false,
+        error: `数据行数超出限制（最多 ${maxRows} 行），请拆分文件后分批导入`,
+        sheets,
+      };
+    }
+
+    // 表头必填列检测（requiredColumnGroups 每组至少匹配一个别名）
+    if (!firstDataSheetChecked && requiredGroups.length && rawData.length > 0) {
+      const headerKeys = Object.keys(rawData[0]).map(h => String(h).trim());
+      const matchedColsCount = expectedHeaders.filter(h => headerKeys.includes(h)).length;
+      if (matchedColsCount >= 2) {
+        firstDataSheetChecked = true;
+        const missing = [];
+        for (const group of requiredGroups) {
+          const hasAny = group.some(alias => headerKeys.includes(alias) || headerKeys.some(k => k.includes(alias)));
+          if (!hasAny) missing.push(group.join('/'));
+        }
+        if (missing.length) {
+          return {
+            success: false,
+            error: `缺少必填列：${missing.join('、')}。请使用模板表头（如 ${requiredGroups.map(g => g[0]).join('、')}），当前表头：${headerKeys.join('、') || '（空）'}`,
+            sheets,
+          };
+        }
+      }
+    }
+
+    const { mapped, allErrors } = mapRows(rawData, sheetName);
+    const requiredField = moduleConfig.validKey || moduleConfig.conflictKey || 'name';
+    const requiredFields = Array.isArray(requiredField) ? requiredField : [requiredField];
+    // validKeySkipErrors：true 时只判断 requiredFields 是否非空，不再过滤 errors.length；
+    // 用于「描述非空即视为有效」的宽容导入场景（如事故统计表，行级日期/必填缺失不影响入库）
+    const validRows = mapped.filter((item) => {
+      const valid = requiredFields.some((f) => item.data[f] != null && String(item.data[f]).trim() !== '');
+      return moduleConfig.validKeySkipErrors ? valid : (valid && item.errors.length === 0);
+    });
+    const matchedCols = expectedHeaders.filter(h => {
+      if (rawData.length === 0) return false;
+      const firstRow = rawData[0];
+      return Object.keys(firstRow).includes(h);
+    }).length;
+    // 模块自定义的辅助 sheet 黑名单（如事故管理的「单位」「类别关联」等数据字典）
+    const excludedByName = Array.isArray(moduleConfig.excludeSheetPatterns)
+      && moduleConfig.excludeSheetPatterns.some((re) => re.test(sheetName));
+
+    const sheetInfo = {
+      name: sheetName,
+      row_count: rawData.length,
+      valid_count: validRows.length,
+      error_count: allErrors.length,
+      matched_cols: matchedCols,
+      is_data_sheet: !excludedByName && (validRows.length > 0 || allErrors.length > 0) && matchedCols >= 2,
+    };
+    sheets.push(sheetInfo);
+
+    // 默认仅合并真正的"数据 sheet"（matched_cols >= 2 且有数据/错误），
+    // 跳过分析摘要/数据来源清单等非数据 sheet（避免非结构化文本被误判为无效行）
+    const shouldMerge = excludedByName
+      ? false
+      : (selectedSheets === null
+        ? sheetInfo.is_data_sheet
+        : selectedSheets.includes(sheetName));
+    if (shouldMerge) {
+      allData = allData.concat(mapped);
+      allRowErrors = allRowErrors.concat(allErrors.map(e => ({ ...e, rowIndex: e.rowIndex + globalRowOffset })));
+      globalRowOffset += rawData.length;
+    }
+  }
+
+  const requiredField = moduleConfig.validKey || moduleConfig.conflictKey || 'name';
+  const requiredFields = Array.isArray(requiredField) ? requiredField : [requiredField];
+  // 与 per-sheet validRows 一致：validKeySkipErrors=true 时只看 requiredFields 非空，忽略 errors
+  const validItems = allData.filter((item) => {
+    const valid = requiredFields.some((f) => item.data[f] != null && String(item.data[f]).trim() !== '');
+    return moduleConfig.validKeySkipErrors ? valid : (valid && item.errors.length === 0);
+  });
+  const validData = validItems.map(item => item.data);
+  const errorItems = allData.filter(item => item.errors.length > 0);
+
+  // 编码异常启发式：所有 sheet 表头均无法匹配（matched_cols < 2）且首行含 UTF-8 解码失败特征（U+FFFD）
+  // → 提示编码问题（常见于 GBK 编码 CSV 被按 UTF-8 读取产生替换符乱码）
+  if (totalScannedRows > 0 && sheets.every((s) => s.matched_cols < 2)) {
+    const firstSheet = workbook.Sheets[sheetNames[0]];
+    const firstGrid = firstSheet ? XLSX.utils.sheet_to_json(firstSheet, { defval: '', header: 1, range: 0, limit: 1 }) : [];
+    const joined = JSON.stringify(firstGrid || []);
+    if (joined.includes('\uFFFD')) {
+      return {
+        success: false,
+        error: '文件编码异常：检测到无法识别的字符（常见于 GBK 编码的 CSV 文件）。请将文件另存为 UTF-8 编码后重试',
+        sheets,
+      };
+    }
+  }
+
+  if (!validData.length && errorItems.length === 0) {
+    return { success: false, error: '文件中没有有效数据，请检查表头是否匹配', sheets };
+  }
+
+  const preview = validData.slice(0, 10).map((row, i) => ({
+    rowIndex: i + 1,
+    data: camelKeys(row),
+    errors: [],
+  })).concat(
+    errorItems.slice(0, 5).map(item => ({
+      rowIndex: item.rowIndex,
+      data: camelKeys(item.data),
+      errors: item.errors,
+    }))
+  );
+
+  return {
+    success: true,
+    module_type: moduleConfig.moduleName,
+    target_table: moduleConfig.targetTable,
+    total_rows: validData.length,
+    error_count: errorItems.length,
+    errors: allRowErrors,
+    sample_data: validData,
+    preview,
+    sheets,
+  };
+}
+
+// ============================================================
+// Node.js 原生导入 — 确认入库
+// ============================================================
+// 厂牌车型清洗：去掉「吸污车/车厢可卸式垃圾车/自装卸式垃圾车/载货汽车」前方的文字/字母/数字，仅保留关键字及其后内容
+// 与 server/routes/insurance.js 的 cleanModel 保持一致，确保导入落库与列表展示/筛选逻辑统一
+function cleanModel(raw) {
+  if (!raw || typeof raw !== 'string') return raw;
+  const keywords = ['吸污车', '车厢可卸式垃圾车', '自装卸式垃圾车', '载货汽车'];
+  let cut = -1;
+  for (const kw of keywords) {
+    const i = raw.indexOf(kw);
+    if (i >= 0 && (cut === -1 || i < cut)) cut = i;
+  }
+  return cut >= 0 ? raw.slice(cut) : raw;
+}
+
+async function confirmImportNative(fileRecordId, moduleType, operator, insuranceType) {
+  const moduleConfig = NATIVE_IMPORT_MODULES[moduleType];
+  if (!moduleConfig) {
+    return { success: false, error: `不支持的模块: ${moduleType}` };
+  }
+
+  // ---- 内存模式模块（fire-facility / violation 等）：导入到内存存储 ----
+  if (moduleConfig.memoryMode) {
+    return confirmImportMemory(fileRecordId, moduleType, moduleConfig, operator);
+  }
+
+  // ---- 网格管理双模式：数据库不可用时降级到内存存储 ----
+  if (moduleType === 'grid' && !isConnected()) {
+    return confirmImportMemory(fileRecordId, moduleType, { ...moduleConfig, memoryMode: true }, operator);
+  }
+
+  const fr = await pool.query(
+    'SELECT filepath, original_name FROM file_records WHERE id = $1',
+    [fileRecordId]
+  );
+  if (!fr.rows.length) {
+    return { success: false, error: '文件记录不存在' };
+  }
+
+  const filePath = fr.rows[0].filepath;
+  const parseResult = parseExcelNative(filePath, moduleConfig);
+  if (!parseResult.success) {
+    return parseResult;
+  }
+
+  let data = parseResult.sample_data || [];
+  console.log('[NativeImport] 初始数据量:', data.length);
+
+  // 数据清洗：移除空值字段，转换数字字段类型
+  const numericFields = moduleConfig.numericFields || ['duration_minutes', 'score', 'premium', 'amount', 'quantity'];
+  data = data.map(row => {
+    const cleaned = {};
+    for (const [key, value] of Object.entries(row)) {
+      if (value === null || value === undefined || value === '') {
+        continue;
+      }
+      if (numericFields.includes(key)) {
+        const num = Number(value);
+        if (!isNaN(num)) {
+          cleaned[key] = num;
+        }
+      } else {
+        cleaned[key] = value;
+      }
+    }
+    return cleaned;
+  });
+
+  // 人员保险导入：若指定了保险类型（导入雇主险 / 导入工伤险），
+  // 对未填写保险类型的行自动补齐默认值，确保列表按险种 Tab 正确筛选。
+  if (moduleType === 'personnel' && insuranceType) {
+    data = data.map((row) => ({ ...row, insurance_type: row.insurance_type || insuranceType }));
+  }
+
+  // 安全费用预算：补齐必填/默认值，保证旧模板或无年度列也能正常写入。
+  if (moduleType === 'budget') {
+    const currentYear = new Date().getFullYear();
+    data = data.map((row) => {
+      const next = { ...row };
+      if (next.budget_year === undefined || next.budget_year === null || next.budget_year === '') {
+        let derivedYear = currentYear;
+        if (next.plan_time) {
+          const pt = String(next.plan_time);
+          const m = pt.match(/^(\d{4})/);
+          if (m) derivedYear = parseInt(m[1], 10);
+        }
+        next.budget_year = derivedYear;
+      }
+      if (next.use_status === undefined || next.use_status === null || next.use_status === '') {
+        next.use_status = '未支出';
+      }
+      // 计划总价未填写时自动计算（单价单位为万元）
+      if ((next.plan_total === undefined || next.plan_total === null) && typeof next.plan_quantity === 'number' && typeof next.plan_unit_price === 'number') {
+        next.plan_total = Number((next.plan_quantity * next.plan_unit_price).toFixed(4));
+      }
+      // 未提供预算金额/已用金额时，用计划/支出总价推导（单位均为万元）
+      if ((next.budget_amount === undefined || next.budget_amount === null) && typeof next.plan_total === 'number') {
+        next.budget_amount = next.plan_total;
+      }
+      if ((next.spent_amount === undefined || next.spent_amount === null) && typeof next.actual_quantity === 'number' && typeof next.actual_unit_price === 'number') {
+        next.spent_amount = Number((next.actual_quantity * next.actual_unit_price).toFixed(4));
+      }
+      return next;
+    });
+  }
+
+  // 过滤掉缺少必填字段（name）的记录，避免数据库 NOT NULL 报错
+  if (moduleType === 'ledger') {
+    const before = data.length;
+    data = data.filter(row => row.name && String(row.name).trim() !== '');
+    const filtered = before - data.length;
+    console.log('[NativeImport] name过滤前:', before, '过滤后:', data.length, '过滤掉:', filtered);
+    if (data.length > 0) {
+      console.log('[NativeImport] 第一条数据:', JSON.stringify(data[0]));
+      console.log('[NativeImport] 字段列表:', Object.keys(data[0]).join(', '));
+    }
+  }
+
+  // 网格管理（任务四）：写入 grid_inspection_records
+  // 1) 由 upload_time 派生 inspection_date（取日期部分）
+  // 2) 按 片区/班组 + 网格等级 模糊关联 grid_areas.id（匹配不上留空仍计入该检查人次数）
+  if (moduleType === 'grid') {
+    data = data.map((row) => {
+      let inspectionDate = null;
+      if (row.upload_time) {
+        const d = fixDateValue(row.upload_time);
+        if (d && d !== 'Invalid Date') inspectionDate = String(d).slice(0, 10);
+      }
+      return { ...row, inspection_date: inspectionDate };
+    });
+
+    // 预取去重的 (片区/班组, 网格等级) 组合，批量匹配网格，避免逐行查询
+    const distinctCombos = [...new Set(data.map((r) => `${r.area_team || ''}|||${r.grid_level || ''}`))];
+    const gridMatchMap = new Map();
+    for (const combo of distinctCombos) {
+      const [area, level] = combo.split('|||');
+      if (!area) { gridMatchMap.set(combo, null); continue; }
+      try {
+        const r = await pool.query(
+          `SELECT id FROM grid_areas
+           WHERE is_deleted = false AND grid_level = $1 AND (name = $2 OR name ILIKE $3)
+           ORDER BY id LIMIT 1`,
+          [level || '', area, `%${area}%`]
+        );
+        gridMatchMap.set(combo, r.rows.length ? r.rows[0].id : null);
+      } catch (e) {
+        gridMatchMap.set(combo, null);
+      }
+    }
+    data = data.map((row) => {
+      const combo = `${row.area_team || ''}|||${row.grid_level || ''}`;
+      return { ...row, grid_id: gridMatchMap.get(combo) ?? null };
+    });
+  }
+
+  // 人员保险（任务8）：共享 employeeResolver 解析 employee.id 并注入服务端快照。
+  // 姓名不单独自动匹配；ID/工号矛盾、姓名不一致、零/多候选、缺员工、日期错误、险种不支持、
+  // 重复当前保单均逐行标记 _import_error（保留原始行号供 rowErrors 定位），错误行不写入。
+  if (moduleType === 'personnel') {
+    const rows = [];
+    for (let idx = 0; idx < data.length; idx++) {
+      const row = { ...data[idx], _import_row_no: idx + 1 };
+      const fail = (reason) => { row._import_error = reason; };
+      // 日期起止顺序校验
+      if (row.start_date && row.expire_date && String(row.start_date) > String(row.expire_date)) {
+        fail('date_order_invalid');
+        rows.push(row);
+        continue;
+      }
+      // 险种规范化（任务4）：工伤险->工伤保险；意外伤害险/五险/未知 -> unsupported（阻止写库）
+      const canonicalType = normalizeInsuranceType(row.insurance_type);
+      if (!canonicalType) {
+        fail('unsupported_insurance_type');
+        rows.push(row);
+        continue;
+      }
+      row.insurance_type = canonicalType;
+      // 共享人员解析（任务2）：单条创建/直接导入/通用导入复用同一生产解析器。
+      // idCard（证件号码，明文）经 employeeResolver 按 id_card_hash 解析员工（雇主险清单无工号场景）
+      const resolved = await resolveEmployee({
+        employeeId: row.employee_id,
+        employeeCode: row.employee_code,
+        idCard: row.id_card,
+      });
+      if (!resolved.employee) {
+        fail(resolved.reason || 'employee_not_found');
+        rows.push(row);
+        continue;
+      }
+      const employee = resolved.employee;
+      // 姓名附加一致性校验：提供姓名且与主数据不一致 → 逐行失败（姓名不能单独命中）
+      if (!isNameConsistent(row.person_name, employee)) {
+        fail('name_mismatch');
+        rows.push(row);
+        continue;
+      }
+      // 险种必填（规范化后为空即未提供）
+      if (!row.insurance_type || String(row.insurance_type).trim() === '') { fail('missing_insurance_type'); rows.push(row); continue; }
+      // is_current 值规范化（'是'/'否'/true/false）
+      if (row.is_current !== undefined && row.is_current !== null) {
+        row.is_current = (row.is_current === true || row.is_current === 1 || String(row.is_current).trim() === '是' || String(row.is_current).trim() === '1');
+      } else {
+        row.is_current = true;
+      }
+      // 任务9：当前有效冲突检查不在预处理阶段执行——必须在确认 UPDATE 目标（employee_id+险种+保单号）
+      // 之后再以 excludeId=目标ID 检查，否则会把自己识别为冲突导致正常 UPDATE 不可达。
+      // 冲突检查由 confirmImportNative 的 personnel 专用阶段执行（见下方模块Type分支）。
+      row.employee_id = employee.employee_id;
+      row.person_name = employee.name;
+      row.department = employee.org_name || '';
+      row.position = employee.position_name || '';
+      // 内部元数据：_import_row_no / employee_code 仅用于错误定位，写库前由列白名单投影剔除（任务1）
+      rows.push(row);
+    }
+    data = rows;
+  }
+
+  // 三违管理：根据花名册岗位自动判断三违类型（仅当为空时填充）
+  if (moduleType === 'violation' && data.length > 0) {
+    const targetPositions = ['保洁员', '驾驶员', '挂桶工', '转运站操作工', '转运站管理员', '转运站操作员'];
+    const allNames = [...new Set(data.map(r => r.violator_name).filter(Boolean))];
+    const empMap = new Map();
+    if (allNames.length > 0) {
+      const placeholders = allNames.map((_, i) => `$${i + 1}`).join(',');
+      const empResult = await pool.query(
+        `SELECT name, org_name, position_name FROM v_employee_org_full
+         WHERE name = ANY($1) AND is_deleted = false AND is_current = true`,
+        [allNames]
+      );
+      empResult.rows.forEach(row => {
+        const key = `${row.name}|${row.org_name || ''}`;
+        if (!empMap.has(key)) empMap.set(key, row.position_name);
+        const shortKey = row.name;
+        if (!empMap.has(shortKey)) empMap.set(shortKey, row.position_name);
+      });
+    }
+    data = data.map(row => {
+      const currentType = row.violation_type_result;
+      if (currentType && currentType.trim() !== '') return row;
+      const name = row.violator_name || '';
+      const area = row.area_team || '';
+      let position = null;
+      if (area) {
+        for (const [key, pos] of empMap.entries()) {
+          const [n, org] = key.split('|');
+          if (n === name && org && org.includes(area)) { position = pos; break; }
+        }
+      }
+      if (!position) position = empMap.get(name) || null;
+      if (position && targetPositions.some(tp => position.includes(tp))) {
+        return { ...row, violation_type_result: '违反劳动纪律' };
+      }
+      return row;
+    });
+  }
+
+  // 三违管理：初始化可选字段键，确保 INSERT 列集合稳定（首行缺字段会导致后续行不写入）
+  // 并抽取 Excel 内嵌图片关联到数据行（通用化，复用 extract_violation_images.py）
+  if (moduleType === 'violation' && data.length > 0) {
+    for (const row of data) {
+      if (row.nickname === undefined) row.nickname = null;
+      if (row.mark === undefined) row.mark = null;
+      if (row.is_supplementary === undefined) row.is_supplementary = null;
+      if (row.image_content === undefined) row.image_content = '';
+      if (row.rectification_photos === undefined) row.rectification_photos = '';
+    }
+    try {
+      const imgResult = await attachViolationImages(filePath, data);
+      console.log('[NativeImport] 三违图片关联:', imgResult);
+    } catch (imgErr) {
+      console.warn('[NativeImport] 三违图片关联异常（不影响数据导入）:', imgErr.message);
+    }
+  }
+
+  // 车辆保险：导入落库前清洗厂牌车型 + 兜底商业险合计 + 兜底保费合计，保证重导后存储值与列表展示/筛选一致
+  if (moduleType === 'vehicle') {
+    for (const row of data) {
+      if (row.model) row.model = cleanModel(row.model);
+      // 源表无「商业险合计」列时，按商业险子项（三者/车损/司乘保费）汇总
+      const ct = parseFloat(row.commercial_total);
+      if (!(ct > 0)) {
+        row.commercial_total = (parseFloat(row.third_party_premium) || 0)
+          + (parseFloat(row.vehicle_damage_premium) || 0)
+          + (parseFloat(row.passenger_premium) || 0);
+      }
+      // 源表「合计」常仅含交强险+车船税（漏加商业险）；按 交强险+商业险合计+车船税 重算
+      const tp = parseFloat(row.total_premium);
+      const expectedTp = (parseFloat(row.compulsory_premium) || 0)
+                       + (parseFloat(row.commercial_total) || 0)
+                       + (parseFloat(row.vehicle_tax) || 0);
+      if (!(tp > 0) && expectedTp > 0) {
+        row.total_premium = expectedTp;
+      }
+    }
+  }
+
+  const tableName = moduleConfig.targetTable;
+  const conflictKey = moduleConfig.conflictKey;
+
+  let inserted = 0;
+  let updated = 0;
+  let skipped = 0;
+
+  // personnel 模块：预处理标记的错误行（missing/multiple/not_found/id_code_conflict/name_mismatch/
+  // date_order_invalid/missing_insurance_type 等）进入逐行错误结果（含原始行号与标识），不写入。
+  // 任务9：rowErrors 为稳定结构化对象 {row, reason, message, employeeCode}，不再返回自由文本数组。
+  const importRowErrors = [];
+  let totalRowsBeforeFilter = data.length;
+  if (moduleType === 'personnel') {
+    const valid = [];
+    for (const row of data) {
+      if (row._import_error) {
+        importRowErrors.push({
+          row: row._import_row_no != null ? row._import_row_no : null,
+          reason: row._import_error,
+          message: row._import_error,
+          employeeCode: row.employee_code != null ? String(row.employee_code) : null,
+        });
+        continue;
+      }
+      valid.push(row);
+    }
+    data = valid;
+  }
+
+  console.log('[NativeImport] data length:', data.length);
+  if (data.length > 0) {
+    console.log('[NativeImport] first row keys:', Object.keys(data[0]));
+  }
+
+  const conflictKeys = Array.isArray(conflictKey) ? conflictKey : conflictKey ? [conflictKey] : [];
+  console.log('[NativeImport] conflictKeys:', conflictKeys);
+
+  const rowsWithConflict = [];
+  const rowsWithoutConflict = [];
+  for (const row of data) {
+    const hasConflictValue = conflictKeys.length > 0 && conflictKeys.every((k) => row[k] !== undefined && row[k] !== '');
+    if (hasConflictValue) {
+      rowsWithConflict.push(row);
+    } else {
+      rowsWithoutConflict.push(row);
+    }
+  }
+  console.log('[NativeImport] 有冲突键数据:', rowsWithConflict.length, '无冲突键数据:', rowsWithoutConflict.length);
+
+  const existingMap = new Map();
+  if (rowsWithConflict.length > 0 && conflictKeys.length > 0) {
+    try {
+      const values = [];
+      const conditions = rowsWithConflict.map((row, rowIdx) => {
+        const rowConditions = conflictKeys.map((k, colIdx) => {
+          values.push(row[k]);
+          const paramIdx = rowIdx * conflictKeys.length + colIdx + 1;
+          return `${k} = $${paramIdx}`;
+        });
+        return `(${rowConditions.join(' AND ')})`;
+      }).join(' OR ');
+      const softDeletedClause = moduleConfig.reactivateSoftDeleted ? '' : ' AND is_deleted = false';
+      const existingResult = await pool.query(
+        `SELECT * FROM ${tableName} WHERE (${conditions})${softDeletedClause}`,
+        values
+      );
+      for (const row of existingResult.rows) {
+        const key = conflictKeys.map(k => String(row[k])).join('|||');
+        existingMap.set(key, row);
+      }
+    } catch (e) {
+      // 任务9：personnel 模块冲突目标批量查询失败必须 fail-closed——不得把 existingMap 当空继续
+      // INSERT（会绕过 UPDATE 目标识别产生重复记录）。其他模块保持原有降级行为。
+      if (moduleType === 'personnel') {
+        console.error('[NativeImport] 人员保险冲突目标批量查询失败（fail-closed，本次导入中止）:', e.message);
+        return {
+          success: false,
+          inserted: 0,
+          updated: 0,
+          skipped: data.length,
+          total: totalRowsBeforeFilter,
+          rowErrors: importRowErrors.concat([{ row: null, reason: 'duplicate_check_failed', message: '冲突目标查询失败，请稍后重试', employeeCode: null }]),
+        };
+      }
+      console.error('[NativeImport] 批量查询失败，降级为逐条处理:', e.message);
+    }
+  }
+
+  let toInsert = [];
+  let toUpdate = [];
+
+  // 任务1（提示词08）：写库对象由显式列白名单投影生成。
+  // dbColumns 存在时（如 personnel），批量/逐条/UPDATE 只用白名单列，内部元数据
+  // （_import_row_no/_import_error/employee_code 等）绝不进入 SQL 标识符；
+  // 列顺序稳定（不依赖第一行偶然拥有的 key），缺失可选字段以 NULL 占位。
+  // 任务9：行上下文（原始行号/安全员工标识）与 dbRow 分离，投影后不丢失。
+  const dbColumns = Array.isArray(moduleConfig.dbColumns) ? moduleConfig.dbColumns : null;
+
+  function projectToDbColumns(row) {
+    if (!dbColumns) return { ...row };
+    const out = {};
+    for (const col of dbColumns) {
+      const v = row[col];
+      // 空字符串/undefined/null 统一为 null 占位，保持列顺序与值位置稳定
+      out[col] = (v === undefined || v === null || v === '') ? null : v;
+    }
+    return out;
+  }
+
+  /** 构造带行上下文与 dbRow 的写库项（personnel 模块使用；其他模块保持 dbRow 直存） */
+  function buildWriteItem(row, extra = {}) {
+    const dbRow = projectToDbColumns(row);
+    if (!dbColumns) return dbRow;
+    return {
+      dbRow,
+      sourceRowNo: row._import_row_no != null ? row._import_row_no : null,
+      sourceEmployeeCode: row.employee_code != null ? String(row.employee_code) : null,
+      ...extra,
+    };
+  }
+
+  for (const row of rowsWithoutConflict) {
+    toInsert.push(buildWriteItem(row));
+  }
+
+  for (const row of rowsWithConflict) {
+    const key = conflictKeys.map(k => String(row[k])).join('|||');
+    const existing = existingMap.get(key);
+    if (existing) {
+      if (moduleType === 'violation') {
+        skipped++;
+      } else {
+        toUpdate.push(buildWriteItem(row, { id: existing.id, reactivate: existing.is_deleted === true }));
+      }
+    } else {
+      toInsert.push(buildWriteItem(row));
+    }
+  }
+
+  // 任务9：personnel 模块专用冲突检查阶段（必须在识别 UPDATE 目标之后执行）。
+  //  - 命中明确 UPDATE 目标（同 employee_id + 规范险种 + policy_no）→ 冲突查询 excludeId=目标ID
+  //  - 无 UPDATE 目标（INSERT）→ 检查全部当前有效保单（无 excludeId）
+  //  - 空保单号不能作为不稳定 UPDATE 标识 → 按 INSERT 场景查重并拒绝并行当前有效记录
+  //  - 查询异常 fail-closed（duplicate_check_failed），该行不写库
+  // 任务1（提示词11）：批内集合必须是"已接受最终事实"，不是"开始检查"：
+  //  - 统一候选列表 { operation, item, sourceRowNo } 按原始源行号稳定排序逐行校验，
+  //    不再先全部 INSERT 再全部 UPDATE（文件靠后的 INSERT 不得抢占靠前 UPDATE 的判定）
+  //  - active key 仅在全部通过（active 纯函数 true + 无已接受批内同 key + DB 冲突查询成功
+  //    + 无外部 active 冲突）后才加入；被 duplicate_active_policy/duplicate_check_failed/
+  //    duplicate_target_in_batch 拒绝的行不占用 accepted key，也不阻断后续独立校验
+  //  - 同一 UPDATE 目标以源行顺序为准只接受首个"完整通过"的行；首行失败不占位
+  //  - 预处理已把 is_current 规范为 boolean（未提供默认 true），此处直接传规范值，
+  //    禁止用 !== false 把 null/undefined 提升为 true
+  if (moduleType === 'personnel') {
+    const batchActiveKeys = new Set();       // 已接受且完整通过校验的 active 最终事实（employee_id + canonicalType）
+    const acceptedUpdateTargets = new Set(); // 已接受且完整通过校验的 UPDATE 目标（employee_id + type + policy_no）
+
+    const candidates = [
+      ...toInsert.map((item) => ({ operation: 'insert', item, sourceRowNo: item.sourceRowNo != null ? item.sourceRowNo : Number.MAX_SAFE_INTEGER })),
+      ...toUpdate.map((item) => ({ operation: 'update', item, sourceRowNo: item.sourceRowNo != null ? item.sourceRowNo : Number.MAX_SAFE_INTEGER })),
+    ].sort((a, b) => a.sourceRowNo - b.sourceRowNo);
+
+    const checkedInsert = [];
+    const checkedUpdate = [];
+    for (const cand of candidates) {
+      const { operation, item } = cand;
+      const r = item.dbRow || item;
+      const failRow = (reason, message) => {
+        importRowErrors.push({ row: item.sourceRowNo, reason, message, employeeCode: item.sourceEmployeeCode });
+        skipped++;
+      };
+      // UPDATE 目标重复：仅首个"完整通过"的目标占用；首行失败时后续行独立校验
+      if (operation === 'update') {
+        const targetKey = `${r.employee_id}|${r.insurance_type}|${String(r.policy_no || '')}`;
+        if (acceptedUpdateTargets.has(targetKey)) {
+          failRow('duplicate_target_in_batch', '同一续保/更新目标（员工+险种+保单号）在文件中重复出现，仅接受第一条');
+          continue;
+        }
+      }
+      const isActive = r.employee_id != null && r.insurance_type != null
+        && isPolicyActiveOnBusinessDay({ isCurrent: r.is_current, startDate: r.start_date, expireDate: r.expire_date });
+      if (isActive) {
+        const key = `${r.employee_id}|${r.insurance_type}`;
+        if (batchActiveKeys.has(key)) {
+          failRow('duplicate_active_policy_in_batch', `本批次已接受同一员工同险种（${r.insurance_type}）的当前有效保单`);
+          continue;
+        }
+        // 数据库冲突查询成功且无外部冲突后才可视为"已接受"（失败行不占 key）
+        const conflict = operation === 'update'
+          ? await findActivePolicyConflict({ employeeId: r.employee_id, insuranceType: r.insurance_type, excludeId: item.id })
+          : await findActivePolicyConflict({ employeeId: r.employee_id, insuranceType: r.insurance_type });
+        if (conflict.error) {
+          failRow('duplicate_check_failed', '重复保单检查失败，请稍后重试');
+          continue;
+        }
+        if (conflict.conflict) {
+          failRow('duplicate_active_policy', operation === 'update'
+            ? `排除更新目标后仍存在当前有效${r.insurance_type}（保单ID ${conflict.conflict.id}）`
+            : `已存在当前有效${r.insurance_type}（保单ID ${conflict.conflict.id}）`);
+          continue;
+        }
+        batchActiveKeys.add(key); // 完整通过后才占用 accepted key
+      }
+      if (operation === 'update') {
+        acceptedUpdateTargets.add(`${r.employee_id}|${r.insurance_type}|${String(r.policy_no || '')}`);
+        checkedUpdate.push(item);
+      } else {
+        checkedInsert.push(item);
+      }
+    }
+    toInsert = checkedInsert;
+    toUpdate = checkedUpdate;
+  }
+  console.log('[NativeImport] 待插入:', toInsert.length, '待更新:', toUpdate.length, '已跳过:', skipped);
+
+  const BATCH_SIZE = 100;
+
+  if (toInsert.length > 0) {
+    // 白名单优先：列顺序稳定；无白名单的模块保留旧行为（Object.keys 首行）
+    // 任务9：personnel 写库项为 { dbRow, sourceRowNo, sourceEmployeeCode }，取值用 item.dbRow
+    const firstItem = toInsert[0];
+    const columns = dbColumns || Object.keys(firstItem.dbRow || firstItem);
+    const getRow = (item) => (item && item.dbRow) ? item.dbRow : item;
+    for (let i = 0; i < toInsert.length; i += BATCH_SIZE) {
+      const batch = toInsert.slice(i, i + BATCH_SIZE);
+      const placeholders = [];
+      const values = [];
+      let paramIdx = 1;
+      for (const item of batch) {
+        const row = getRow(item);
+        const rowPlaceholders = columns.map((_, ci) => `$${paramIdx + ci}`).join(', ');
+        placeholders.push(`(${rowPlaceholders})`);
+        for (const col of columns) {
+          values.push(row[col] === undefined ? null : row[col]);
+        }
+        paramIdx += columns.length;
+      }
+      try {
+        await pool.query(
+          `INSERT INTO ${tableName} (${columns.join(', ')}) VALUES ${placeholders.join(', ')}`,
+          values
+        );
+        inserted += batch.length;
+      } catch (e) {
+        console.error(`[NativeImport] 批量插入失败 (batch ${i}-${i + batch.length}):`, e.message);
+        console.error('[NativeImport] 失败批次第一条数据:', JSON.stringify(batch[0]));
+        console.error('[NativeImport] 列名:', columns.join(', '));
+        let firstRowErrorLogged = false;
+        for (const item of batch) {
+          const row = getRow(item);
+          try {
+            // 逐条降级 INSERT 同样使用白名单列（与批量路径一致），内部元数据不泄漏
+            const cols = dbColumns || Object.keys(row);
+            const ph = cols.map((_, ci) => `$${ci + 1}`).join(', ');
+            await pool.query(
+              `INSERT INTO ${tableName} (${cols.join(', ')}) VALUES (${ph})`,
+              cols.map(c => (row[c] === undefined ? null : row[c]))
+            );
+            inserted++;
+          } catch (e2) {
+            if (!firstRowErrorLogged) {
+              console.error('[NativeImport] 逐条插入第一条失败数据:', JSON.stringify(row));
+              console.error('[NativeImport] 逐条插入错误:', e2.message);
+              firstRowErrorLogged = true;
+            }
+            // 任务9：保留原始行号并返回结构化安全错误（不泄漏 e2.message 的列名/连接信息）
+            if (moduleType === 'personnel') {
+              importRowErrors.push({ row: item.sourceRowNo, reason: 'write_failed', message: '写入失败，请稍后重试', employeeCode: item.sourceEmployeeCode });
+            } else {
+              importRowErrors.push(`${item.sourceRowNo != null ? `第${item.sourceRowNo}行` : ''} 逐条写入失败: ${e2.message}`);
+            }
+            skipped++;
+          }
+        }
+      }
+    }
+  }
+
+  for (const item of toUpdate) {
+    // 任务9：personnel 写库项为 { dbRow, sourceRowNo, id, reactivate }
+    const row = (item && item.dbRow) ? item.dbRow : item;
+    const id = item.id;
+    const reactivate = item.reactivate;
+    const sourceRowNo = item.sourceRowNo;
+    const sourceEmployeeCode = item.sourceEmployeeCode;
+    try {
+      const setClauses = [];
+      const values = [];
+      let idx = 0;
+      // UPDATE 同样只使用白名单列（personnel 等有 dbColumns 的模块）；
+      // 无白名单模块保留旧行为（Object.entries 全字段）
+      const updateKeys = dbColumns || Object.keys(row);
+      for (const key of updateKeys) {
+        const value = row[key];
+        if (key !== 'id' && value !== undefined && value !== null && value !== '') {
+          idx++;
+          setClauses.push(`${key} = $${idx}`);
+          values.push(value);
+        }
+      }
+      if (reactivate) {
+        idx++;
+        setClauses.push(`is_deleted = $${idx}`);
+        values.push(false);
+      }
+      if (setClauses.length) {
+        idx++;
+        values.push(id);
+        await pool.query(
+          `UPDATE ${tableName} SET ${setClauses.join(', ')}, updated_at = NOW() WHERE id = $${idx}`,
+          values
+        );
+      }
+      updated++;
+    } catch (e) {
+      // 任务9：UPDATE 失败保留行号并返回结构化安全错误（不泄漏 e.message）
+      console.error(`[NativeImport] 更新失败:`, e.message);
+      if (moduleType === 'personnel') {
+        importRowErrors.push({ row: sourceRowNo, reason: 'update_failed', message: '更新失败，请稍后重试', employeeCode: sourceEmployeeCode });
+      }
+      skipped++;
+    }
+  }
+
+  // 任务4（提示词11）：导入结果状态诚实表达 imported/partial/failed。
+  //  - imported：有成功写入且无跳过/错误
+  //  - partial：有成功写入且有跳过/错误
+  //  - failed：零成功写入（存在跳过/错误或空结果），不得虚报为完整成功
+  const wroteCount = inserted + updated;
+  const hasErrors = skipped > 0 || importRowErrors.length > 0;
+  const outcome = (!hasErrors && wroteCount > 0) ? 'imported' : (wroteCount > 0 ? 'partial' : 'failed');
+
+  try {
+    await pool.query(
+      `UPDATE file_records SET module_type = $1, status = $2 WHERE id = $3`,
+      [moduleType, outcome, fileRecordId]
+    );
+  } catch (e) {
+    // 文件状态更新失败：不得先返回成功；仅服务端日志 + 安全错误（不泄漏 SQL/host/port 文本）
+    console.error('[NativeImport] file_records 状态更新失败（不向前端泄漏）:', e.message);
+    return {
+      success: false,
+      error: '文件状态更新失败，请稍后重试',
+      inserted,
+      updated,
+      skipped,
+      total: totalRowsBeforeFilter,
+      outcome,
+      ...(importRowErrors.length > 0 ? { rowErrors: importRowErrors } : {}),
+    };
+  }
+
+  // 任务四：网格检查记录导入完成后，触发完成率重算（写回 grid_areas.completion_rate）
+  if (moduleType === 'grid' && isConnected()) {
+    try {
+      const recalc = await gridCompletionService.recalculateAllCompletionRates();
+      console.log(`[NativeImport] 网格完成率重算完成，影响 ${recalc.updated} 个网格`);
+    } catch (e) {
+      console.warn('[NativeImport] 网格完成率重算失败（不影响导入结果）:', e.message);
+    }
+  }
+
+  return {
+    success: true,
+    inserted,
+    updated,
+    skipped,
+    total: totalRowsBeforeFilter,
+    outcome,
+    ...(importRowErrors.length > 0 ? { rowErrors: importRowErrors } : {}),
+  };
+}
+
+// ============================================================
+// 三违图片通用抽取（被 confirmImportNative 调用）
+// ============================================================
+async function attachViolationImages(filePath, data) {
+  if (!data || data.length === 0) return { attached: 0, skipped: true };
+  const mapPath = path.join(os.tmpdir(), `violation_img_map_${Date.now()}_${Math.random().toString(36).slice(2)}.json`);
+  return new Promise((resolve) => {
+    const uploadsRoot = path.join(__dirname, '..', 'uploads');
+    const child = execFile(
+      PYTHON_PATH,
+      [EXTRACT_IMG_SCRIPT, '--xlsx', filePath, '--out', uploadsRoot, '--map', mapPath],
+      { timeout: 180000, maxBuffer: 64 * 1024 * 1024 },
+      (err, stdout, stderr) => {
+        try { fs.unlinkSync(mapPath); } catch (e) { /* ignore */ }
+        if (err) {
+          console.warn('[Import] 三违图片抽取失败（不影响数据导入）:', err.message);
+          if (stderr) console.warn('[Import] extract stderr:', stderr.slice(0, 500));
+          return resolve({ attached: 0, error: err.message });
+        }
+        try {
+          const map = JSON.parse(fs.readFileSync(mapPath, 'utf-8'));
+          const norm = (s) => (s == null ? '' : String(s).trim().replace(/\s+/g, ' '));
+          const noMap = new Map();
+          const keyMap = new Map();
+          for (const e of map) {
+            const urls = { threeViolation: e.threeViolation || [], rectification: e.rectification || [] };
+            if (e.no) noMap.set(norm(e.no), urls);
+            const k = [norm(e.area_team), norm(e.inspector_name), norm(e.violator_name), norm(e.violation_behavior), norm(e.grid_level), norm(e.violation_date)].join('\u0001');
+            if (k.replace(/\u0001/g, '')) keyMap.set(k, urls);
+          }
+          let attached = 0;
+          for (const row of data) {
+            const hit = noMap.get(norm(row.no)) || keyMap.get(
+              [norm(row.area_team), norm(row.inspector_name), norm(row.violator_name), norm(row.violation_behavior), norm(row.grid_level), norm(row.violation_date)].join('\u0001')
+            );
+            if (hit) {
+              row.image_content = hit.threeViolation.join(',');
+              row.rectification_photos = hit.rectification.join(',');
+              attached++;
+            }
+          }
+          console.log('[Import] 三违图片关联完成，命中', attached, '行（共', data.length, '行）');
+          resolve({ attached });
+        } catch (parseErr) {
+          console.warn('[Import] 三违图片映射解析失败（不影响数据导入）:', parseErr.message);
+          resolve({ attached: 0, error: parseErr.message });
+        }
+      }
+    );
+  });
+}
+
+// ============================================================
+// 内存模式导入（fire-facility / violation / grid / over-age 等模块）
+// ============================================================
+async function confirmImportMemory(fileRecordId, moduleType, moduleConfig, operator) {
+  let memoryStores, memoryCounters, initMemoryData;
+
+  if (moduleType === 'over-age') {
+    ({ memoryStores, memoryCounters } = require('./insurance'));
+    initMemoryData = () => {};
+  } else {
+    ({ memoryStores, memoryCounters, initMemoryData } = require('./site-mgmt'));
+  }
+
+  initMemoryData();
+
+  const storeMap = {
+    'fire-facility': 'fireEquipment',
+    'violation': 'violations',
+    'grid': 'gridInspectionRecords',
+    'over-age': 'overage',
+    'objectives': 'objectives',
+  };
+  const counterMap = {
+    'fire-facility': 'fireEquipment',
+    'violation': 'violations',
+    'grid': 'gridInspectionRecords',
+    'over-age': 'overage',
+    'objectives': 'objectives',
+  };
+  const storeKey = storeMap[moduleType];
+  const counterKey = counterMap[moduleType];
+  if (!storeKey || !counterKey) {
+    return { success: false, error: `不支持的内存模块: ${moduleType}` };
+  }
+
+  const fr = await pool.query(
+    'SELECT filepath, original_name FROM file_records WHERE id = $1',
+    [fileRecordId]
+  );
+  if (!fr.rows.length) {
+    return { success: false, error: '文件记录不存在' };
+  }
+
+  const filePath = fr.rows[0].filepath;
+  const parseResult = parseExcelNative(filePath, moduleConfig);
+  if (!parseResult.success) {
+    return parseResult;
+  }
+
+  let data = parseResult.sample_data || [];
+
+  // 网格管理内存降级：仅派生 inspection_date（grid_id 在内存模式无法关联，留空）
+  if (moduleType === 'grid') {
+    data = data.map((row) => {
+      let inspectionDate = null;
+      if (row.upload_time) {
+        const d = fixDateValue(row.upload_time);
+        if (d && d !== 'Invalid Date') inspectionDate = String(d).slice(0, 10);
+      }
+      return { ...row, inspection_date: inspectionDate, grid_id: null };
+    });
+  }
+
+  const conflictKey = moduleConfig.conflictKey;
+  const store = memoryStores[storeKey];
+  const counter = memoryCounters;
+
+  let inserted = 0;
+  let updated = 0;
+  let skipped = 0;
+
+  function matchConflictKey(r, row) {
+    if (!conflictKey) return false;
+    const keys = Array.isArray(conflictKey) ? conflictKey : [conflictKey];
+    return keys.every((k) => r[k] === row[k]);
+  }
+
+  for (const row of data) {
+    try {
+      const record = {
+        id: counter[counterKey],
+        is_deleted: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        ...row,
+      };
+
+      const conflictKeys = Array.isArray(conflictKey) ? conflictKey : conflictKey ? [conflictKey] : [];
+      const hasConflictValue = conflictKeys.length > 0 && conflictKeys.every((k) => row[k] !== undefined && row[k] !== '');
+
+      if (hasConflictValue) {
+        const existingIdx = store.findIndex(
+          (r) => matchConflictKey(r, row) && !r.is_deleted
+        );
+        if (existingIdx >= 0) {
+          store[existingIdx] = {
+            ...store[existingIdx],
+            ...row,
+            updatedAt: new Date().toISOString(),
+          };
+          updated++;
+        } else {
+          record.id = counter[counterKey];
+          store.push(record);
+          counter[counterKey]++;
+          inserted++;
+        }
+      } else {
+        record.id = counter[counterKey];
+        store.push(record);
+        counter[counterKey]++;
+        inserted++;
+      }
+    } catch (e) {
+      console.error(`[MemoryImport] 导入失败:`, e.message);
+      skipped++;
+    }
+  }
+
+
+  // 任务4（提示词12-残余风险收口）：内存导入 outcome 语义与原生导入对齐
+  //  - imported：有成功写入且无跳过/错误
+  //  - partial：有成功写入且有跳过/错误
+  //  - failed：零成功写入（存在跳过/错误或空结果），不得虚报为完整成功
+  const wroteCount = inserted + updated;
+  const hasErrors = skipped > 0;
+  const outcome = (!hasErrors && wroteCount > 0) ? 'imported' : (wroteCount > 0 ? 'partial' : 'failed');
+
+  try {
+    await pool.query(
+      `UPDATE file_records SET module_type = $1, status = $2 WHERE id = $3`,
+      [moduleType, outcome, fileRecordId]
+    );
+  } catch (e) {
+    // 文件状态更新失败：仅服务端日志 + 安全错误（不泄漏 SQL/host/port 文本）
+    console.error('[MemoryImport] file_records 状态更新失败（不向前端泄漏）:', e.message);
+    return {
+      success: false,
+      error: '文件状态更新失败，请稍后重试',
+      inserted,
+      updated,
+      skipped,
+      total: data.length,
+      outcome,
+    };
+  }
+
+  auditLog({
+    userId: operator?.id || null,
+    username: operator?.username || 'system',
+    action: 'import',
+    module: moduleType,
+    description: `导入 ${inserted + updated} 条数据（内存模式）`,
+    ip: '',
+  }).catch(() => {});
+
+  return {
+    success: true,
+    inserted,
+    updated,
+    skipped,
+    total: data.length,
+    outcome,
+  };
+}
+
+module.exports = router;

@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI应用案例报告 · 精简版</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:"Microsoft YaHei","PingFang SC",sans-serif; color:#1f2937; background:#f4f7fb; line-height:1.7; padding:28px 16px; }
+  .wrap { max-width:820px; margin:0 auto; background:#fff; border-radius:14px; box-shadow:0 8px 30px rgba(20,60,120,.10); overflow:hidden; }
+  .header { background:linear-gradient(120deg,#0f4c81,#1ea0a6); color:#fff; padding:22px 28px; }
+  .header h1 { font-size:20px; font-weight:700; }
+  .header p { font-size:13px; opacity:.92; margin-top:4px; }
+  .meta { font-size:12px; opacity:.85; margin-top:10px; border-top:1px solid rgba(255,255,255,.25); padding-top:8px; }
+  .body { padding:20px 28px 26px; }
+  h2 { font-size:15px; color:#0f4c81; margin:18px 0 8px; padding-left:9px; border-left:4px solid #1ea0a6; }
+  p, li { font-size:13px; }
+  .plist { margin:6px 0 4px 18px; }
+  .plist li { margin:3px 0; }
+  table { width:100%; border-collapse:collapse; margin:8px 0; font-size:12px; }
+  th, td { border:1px solid #d6e2ee; padding:6px 7px; text-align:left; vertical-align:top; }
+  th { background:#eaf3f8; color:#0f4c81; font-weight:600; }
+  .note { font-size:12px; color:#64748b; border-top:1px dashed #cdd9e5; margin-top:18px; padding-top:10px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="header">
+    <h1>我用 AI 造了一套 HSE 系统，安全管理彻底变了样</h1>
+    <p>—— 一名安全管理人员的智能化转型案例</p>
+    <div class="meta">
+      申报人：宁津环卫基层安全管理人员（系统创建者 + 每日使用者）　|　系统：宁津环卫 HSE 智能安全管理系统　|　建设周期：约 24 天（2026-06-20～07-14）
+    </div>
+  </div>
+  <div class="body">
+
+    <h2>一、场景概述：我作为安全管理人员，被什么困住</h2>
+    <p>我一个人要盯上千名职工的保险合规、上千条三违台账、隐患排查、事故、培训、应急演练、目标考核——全靠纸质台账加一堆散落的 Excel。</p>
+    <ul class="plist">
+      <li><b>数据凑不齐</b>：几十类数据散在各人电脑，领导一问"未整改隐患多少、超龄工伤险覆盖多少"，我要翻半天表、打几个电话。</li>
+      <li><b>隐患只能事后记账</b>：发现→整改→验证→销号靠脑子记，查而不改、改而不验，同类隐患反复出。</li>
+      <li><b>合规报送算到头晕还易错</b>：1330 人花名册要和工伤险 1146 人、雇主险 1324 人逐一比对找漏保，一次耗时数天。</li>
+      <li><b>海量数据用不起来</b>：1251 条三违、上千条培训全是沉睡表格，没有看板、没有预警。</li>
+      <li><b>上系统外包报数十万、周期数月</b>，基层等不起也掏不起。</li>
+    </ul>
+    <p><b>系统要替我做的</b>：把安全管理从"我一个人拿命扛的事后记账"，升级为"系统帮我看、帮我算、帮我盯的事前预警 + 过程闭环 + 数据决策"。</p>
+
+    <h2>二、创新做法：我怎么把系统造出来并用起来</h2>
+    <ul class="plist">
+      <li><b>用 AI 当全栈开发团队</b>：以"提示词工程 + 全栈 Agent"，24 天做出 30+ 页面、30 个接口、90 张表的生产级系统。不是程序员也能做到。</li>
+      <li><b>隐患闭环做成系统自动盯</b>：隐患一登记，系统自动派单、卡时限、到期提醒、验收销号，我不用靠微信催。</li>
+      <li><b>给系统装 AI 分析大脑</b>：每天推高风险点与异常趋势，我从等出事变事前防；AI 不可用时自动降级，业务不受影响。</li>
+      <li><b>配"秒级入库"智能导入</b>：Excel 一拖自动查重备份，读取提速约 14×、去重 10.7×、端到端 2.1×。</li>
+      <li><b>领导驾驶舱 + 智能报告中心</b>：一屏看全 9 大模块，月报台账自动生成，我从重复劳动里解放。</li>
+      <li><b>按企业级安全 + 永不掉线标准建</b>：JWT 双令牌、AES-256 加密隐私、36 处审计留痕、断库自动切内存零中断、Docker 一键部署回滚。</li>
+    </ul>
+
+    <h2>三、应用成效：用系统前后我的工作对比</h2>
+    <table>
+      <thead><tr><th style="width:18%">工作场景</th><th style="width:38%">用系统前</th><th style="width:44%">用系统后</th></tr></thead>
+      <tbody>
+        <tr><td>上系统</td><td>外包数十万、数月</td><td>我用 AI 24 天亲手造出</td></tr>
+        <tr><td>凑全局数据</td><td>翻表打电话半天</td><td>驾驶舱一屏看全 9 模块</td></tr>
+        <tr><td>隐患闭环</td><td>脑子记、微信催</td><td>系统自动派单销号闭环</td></tr>
+        <tr><td>保险比对</td><td>1330 人手工比对数天</td><td>导入即自动比对，分钟级</td></tr>
+        <tr><td>海量台账</td><td>1251 条逐条核导半天</td><td>Excel 一拖秒级入库</td></tr>
+        <tr><td>写月报</td><td>熬夜手工汇总</td><td>智能报告自动生成</td></tr>
+        <tr><td>风险预警</td><td>出事才发现</td><td>AI 每天推高风险点</td></tr>
+      </tbody>
+    </table>
+    <p><b>硬指标</b>：建设约 24 天；9 大模块 100% 覆盖；7 处安全漏洞 100% 清零；敏感数据 AES-256 加密、36 处审计；双模式降级零中断。<br>
+    <b>一句话</b>：我从"拿命扛、靠手工、总没底"的救火队员，变成"有看板、有预警、有闭环、有据可查"的管理者——统计从数天压到分钟，隐患从反复变闭环，风险从事后变事前。</p>
+
+    <h2>四、推广价值：这套做法别的安全管理人员也能复制</h2>
+    <ul class="plist">
+      <li><b>"安全管理人员 + AI 全栈开发"可复制</b>：零代码基础也能造贴合业务的系统，尤其适合表单多、统计重、合规压力大的政企场景。</li>
+      <li><b>不侵入官方框架的二次开发铁律</b>：既享升级红利，又沉淀自有资产。</li>
+      <li><b>双模式降级降门槛</b>：没数据库也能跑演示，基层试用零阻力。</li>
+      <li><b>智能导入引擎通用</b>：任何"Excel 台账 → 数据库"的电子化难题都可套用。</li>
+      <li><b>闭环 + 智能报告方法论</b>：可直接推广住建、交通、化工、物业等高危行业。</li>
+    </ul>
+    <p><b>下一步</b>：深化 AI 风险预测与智能识别、IoT 实时定位与视频违章识别、移动端随手拍上报、数据资产化与高可用部署。</p>
+
+    <div class="note">本报告以"安全管理人员用 AI 创建并使用系统"的第一人称视角撰写。</div>
+  </div>
+</div>
+</body>
+</html>

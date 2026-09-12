@@ -1,0 +1,293 @@
+## Hard Constraints
+- All middleware must use async/await, no callback style
+- Route files must not be modified during middleware refactors
+- Category deduction caps must be applied at the effective score aggregation layer, not during raw score generation
+- Source table availability assessment must include three tiers: table existence, presence of decision-making fields, and validity of decision-making field data
+- Rule configuration must include trigger_type (event/scheduled) and schedule details to distinguish between event-driven and batch scanning triggers
+- Each automatic rule must declare its idempotent key (rule_code + cycle + personnel + detail item) with a unique constraint
+- When source tables/data are missing, rules must skip execution and log the reason, with skip status reflected in the rule's integration_status column
+- Do not implement OCR functionality; do not create real database tables; do not integrate with the assessment engine; do not enforce strict verification of employee rosters
+- Do not modify code of other modules or login authentication-related code
+- The '类别扣分上限' table in '扣分规则库' must include a '扣分对象' column with three options: 本人（网格长）/ 乡镇作业中心经理 / 自定义
+- Driver deduction transmission must strictly target '乡镇作业中心经理' positions;津城街道作业中心 and 环卫作业中心 driver deductions enter automatic scoring directly
+- '安全文化建设' automatic deduction rule (SAFE_AUTO) is configured with 10 points per item/occurrence, category cap of 20 points, and adapter key=safety_culture
+- '安全文化建设' data source is the '专项活动台帐' sheet in Excel files from server directory `F:/宁津北控/27、HSE月度考核/<年>年/<月>月`, with monthly full overwrite and incremental append support
+- '安全文化建设' deduction objects are determined by '岗位' in the台账: 乡镇主管=二级网格长, 管理员=三级网格长
+- '安全文化建设' deduction logic prioritizes values in the '扣分' column; if empty, calculates as number of unchecked activities × 10 points
+- '安全文化建设' import uses server directory scanning by year/month instead of file upload; default path can be overridden by `SAFETY_CULTURE_SOURCE_DIR`
+- '三违管理' deduction in '自动评分' page uses dynamic category cap from `hse_assessment_category_limit` table (15 points for '三违管理') instead of hard-coded values
+- '否决项' uses category cap 100 from `hse_assessment_category_limit` table, making score_auto 0
+- 转运站扣分修复: transfer_station_check.check_date stored as 'YYYY-MM' varchar; transferCheckAdapter.monthRange must return 'YYYY-MM' prefix boundaries. transfer_station_check.area_team may store bare town names, requiring suffix matching with '镇/乡/街道作业中心' when exact match fails
+- 评分引擎上限读取按目标岗位position联动: categoryCap.js新增roleFromPosition(position) mapping (管理员→admin, others→manager); getCategoryCap queries hse_assessment_category_limit by target_role; engine.js builds targetRoleMap from hse_assessment_target.position; manual deduction routes pass role based on assessment object position; hse-assessment-category.js adds target_role column with (category, target_role) unique index
+- 花名册历史导入需追加4条别名映射: `身份证件号→身份证号`、`所属乡镇→所属部门`、`二级乡镇→班组`、`手机→联系电话`
+- 花名册历史导入中老体系部门 `所属乡镇` 需映射为 `XX作业中心`
+- 花名册历史导入中无身份证的8份文件仅按员工编码+姓名匹配
+- 花名册历史导入中历史离职日期通过相邻快照夹逼推断近似时间，不强要离职表
+- 花名册历史导入按员工编码/身份证归并，不重建重复数据
+- '三违管理' adapter uses '未按时整改' column values from '三违行为统计台账' sheet for 2026-02~2026-05; uses '总扣分' column for 2026-07 and '❌次数' for 2026-06
+- '三违管理' adapter skips non-assessment objects when importing deduction data
+- 'HSE教育培训' adapter must handle both '资料不完整' and '表头内容缺失' column headers to correctly import training record deductions
+- 'HSE教育培训' rule TRAINING001 has a deduction score of 3 points per person (previously 1 point), aligned with Excel master sheet and consistent with aligned months
+- '安全文化建设'列扣分在2025-11周期乡镇作业中心经理的目标职责-自动评分中仅用于显示，不计入考核总分
+- 三检表的评分规则已修改，需按新规则执行
+- 对比报告生成时，管理员、乡镇作业中心经理差值为0的记录无需显示，仅报告存在差异的记录
+- 一级菜单“事故管理”中9月份的事故记录需确保考核到张卫新、谢俊章
+- 2025-10周期三违考核分数系统显示6分，自动扣分结果应为7分，需修正分数计算逻辑
+- 2025-10周期乡镇作业中心经理列表中现场管理-驾驶员管理数据未读取，原因是三级菜单“月度考核”缺少2025-08至2025-10月份数据，需补充该时间段数据
+- 一线作业人员（驾驶员/保洁员）的直接上级仅为乡镇作业中心经理，管理员不再作为直接上级否决对象；事故否决适配器`SUPERVISOR_POSITIONS`已移除`管理员`
+- 2025-11周期乡镇作业中心经理的'三检表(驾驶员)'扣分仅用于显示，不计入考核总分
+- '现场管理-驾驶员管理'列数据来源于三级菜单“月度考核”维护的`driver_monthly`表（驾驶员月度考核台账），由`driverMonthlyAdapter`处理
+- 'driver_monthly'表导入规则：按“每镇合并一条”+“驾驶员+消防”模式,从Excel文件“月度安全生产检查表”解析数据，幂等键为`driver-monthly:{周期}:{经理}`
+- 'driver_monthly'表包含五子项列：`three_check_management`(三检表)、`lamp_dirty`(灯牌污损)、`lamp_failure`(灯具失效)、`safety_monitor`(安全监控)、`fire_management`(消防管理)
+- '现场管理-驾驶员管理'自动评分逻辑：按月读取`driver_monthly`表，按`department`定位乡镇作业中心经理，累加驾驶问题项次×1分，受20分上限钳制
+- 津城街道作业中心因无乡镇经理考核目标，其`driver_monthly`数据导入后不可考核，扣分计算时被跳过
+- 三检栏、消防栏在Excel表中无实际数值时，`driver_monthly`表记为0分
+- 数据导入仅写入台账（干跑`action=noop`），需执行最终扣分操作才会更新`score_total`和“现场管理-驾驶员管理”列显示
+- 2025-10月`driver_monthly`数据已导入，覆盖大柳镇、时集镇等7个乡镇，除长颈/刘营伍无驾驶扣分未导入
+- 2026-06（周期cyc28）乡镇作业中心经理李春福因班组保洁员事故需被扣100分，待事故管理模块录入后处理
+- '安全文化建设'规则配置当前为category='目标职责'、deduct_score=1、rule_name='签订目标责任书'，与安全文化建设口径（'安全文化建设'/10分每项）不符，需纠正配置才能避免重跑时扣分算入错误类别
+- 2025-08（cyc44）'安全文化建设'无台账行，需先从《专项活动台账》Excel导入才能参与评分
+- 2026-04（cyc52）'安全文化建设'台账已有孙建栋/王臣祥/杨清华「并桶更换点位=0」记录，但因规则配置错误导致dry-run实测affected=0，无法生成扣分
+- 2025-12李振恒、2026-02张华平、2026-06王臣祥、2026-07谢俊章/张华平的否决项（事故100分）需随事故管理录入，本轮不处理
+- 事故导入去重经验(2026-09-07)：系统现有事故 date 比 Excel 描述日期整体早2~5天（历史导入偏移，如李士珍 01-18 vs 01-23、于传峰 09-19 vs 09-24），精确日期去重会全部误判新增；须按「涉及人员+同月(±8天兜底)」去重
+- 2026-09-07 导入《宁津项目2025年事故统计(2).xlsx》：19条中12条已存在跳过，新增7条(id144-150)：逯泽德(交通/无责)、于鑫宁韩晓亮(交通/待认定/伤1)、吕玉兰(生产安全/责任)、李文美(意外)、李清珍(生产安全/责任/三级/伤1)、张东霞(交通/待认定/长官)、张和平(交通/待认定/私了)；导入脚本 server/scripts/_import_2025_accidents.cjs，accidents 表无 reporter 列；吕玉兰/李清珍为生产安全·责任，重跑评分将对大曹、大柳作业中心经理各否决100分
+- 2026-09-07 导入《宁津项目2026年事故统计.xlsx》：11条中3条(孙万龙id121/田青槐id123/李春东id124)已存在跳过，新增8条(id151-158)：李金水(突发疾病/相衙/处理中)、张建岗01-04(交通/无责)、杨安强(交通/无责/转运车)、郝殿明配电箱火灾(公众)、王同池(交通/待认定)、孙秀兰(交通/待认定/伤1)、张建岗07-16(交通/待认定/撞儿童/伤1/赔1500+500)、许兰军(生产安全/责任/津城街道)；导入脚本 server/scripts/_import_2026_accidents.cjs；许兰军为生产安全·责任，但津城街道无乡镇作业中心经理考核目标故否决不实际生效
+- 2026-09-07 运行 node backfill-accident-veto.js apply 重算否决项：新增2条否决——2025-09 #146吕玉兰(生产安全/责任)→孙建栋 扣100（孙建栋 2025-09 归0/E）；#148李清珍→谢俊章 capped-out(谢俊章已被#143否决/类别上限100)分数不变；2026-08 #158许兰军无目标不扣分。最终accident_veto共4条(#118→张卫新/#143→谢俊章/#146→孙建栋/#124→李振恒)
+- 一级菜单“事故管理”中，上传两个表之前的事故记录，其“报送集团”状态一律设为“上报集团”（true）；上传的两个表（《宁津项目2025年事故统计.xlsx》《宁津项目2026年事故统计.xlsx》）中的事故记录，按表内“是否上报集团”列取值（未报→false）
+- 10 specific assessment objects (徐凤山, 周福贵, 李永江, 张兴民, 盖志刚, 王新苹, 李恩富, 张世桥, 白庆元, 尤清林) have been added to `hse_assessment_target` with active position assignments to resolve missing考核对象 issues
+- HSE教育培训, 安全文化建设, and 转运站管理 automatic scores rely heavily on Excel backfill rather than source ledger data; 管理员级三违 lacks independent source ledgers
+- 2025-12李振恒, 2026-02张华平, 2026-06王臣祥, 2026-07谢俊章/张华平 have Excel veto scores (100 points) not reflected in the system due to unrecorded accidents（2026-09-07 已按 Excel 全部对齐为 score=0/grade=E，见下方会话补录条目）
+- 2025-09 管理员孙建栋 has a system veto score (100 points) not reflected in Excel due to post-backfill discrepancies
+- 2026-01李振恒, 2026-02靳洪刚, 2026-03/04张华平 have `driver_monthly` deductions in the system that are missing from Excel
+- 2025-08孙建栋/靳洪刚, 2025-10靳洪刚, 2025-11孙建栋/靳洪刚 have HSE教育培训 deductions only in Excel
+- 2025-08傅学武/谢洪胜/李新国 have 安全文化建设 deductions only in Excel
+- 2025-08孙建栋/靳洪刚, 2025-09/10/11孙建栋/靳洪刚, 2025-12孙建栋, 2026-02张东霞/商荣军 have 三违管理 score discrepancies between system and Excel
+- 2026-09-07 事故否决 8 条已按 Excel 全部对齐为 score=0/grade=E：周福贵(09/10)、李振恒(12)、张华平(02/07)、王臣祥(06)、李春福(06)、谢俊章(07)。其中引擎可自动生成的（交通/生产安全·责任事故）按适配器重跑：周福贵09(#146)、张华平07(#157)、谢俊章07(#156)、王臣祥06(#155)；另 4 条因事故性质为「无责任/意外」（周福贵10=#119、李振恒12=#120、张华平02=#123）或直接上级为管理员被排除（李春福06=#155），用补录脚本 `server/scripts/_apply_veto_excel.cjs` 写入 `review_status='approved'`（锁定，防适配器重跑撤销），script 保留供复跑
+- 2026-09-07 修事故否决适配器 `accidentVetoAdapter.js`：乡镇经理解析从责任班组 responsibility_team 兜底到 party_dept（例 #155 responsibility_team='柴胡店镇一班' 匹配不到经理，party_dept='柴胡店镇作业中心' 才能解析到王臣祥）。李春福(管理员)否决为定向补录，未放开 SUPERVISOR_POSITIONS 全局含管理员，避免回退 #118 张福梅式管理员否决
+- 2026-09-07 2025-10(cyc46) 转运站管理：徐凤山=10（早前手动补录，引擎不产，因其张大庄站值为0）、周福贵=10（大曹站50→上限10）、适配器重跑三行均无变化(noop)。注意：适配器按当前 v_employee_org_full 将保店站(52→10)解析到杨清华而非徐凤山，属「当前岗位快照」历史归因偏差，如需保店归徐凤山需历史岗位绑定，未改
+- 2026-09-07 保店归属结论（核权威Excel《10月乡镇作业中心经理月度考核.xlsx·考核总结》+employee_assignment）：保店站正确归属=杨清华（Excel转运站管理 杨清华=10，徐凤山=10 但来自张大庄镇站外人工补录，非保店站）；2025-10 转运站管理四项(徐凤山10/杨清华10/周福贵10/谢俊章0.5)系统与Excel完全一致，不做保店改挂。徐凤山=10 系站外Excel人工分，靠 manual backfill 持有，非适配器可再产
+- 孙建栋岗位调整：≤2025-12 的周期置 `position='管理员'`；≥2026-03 保持 `乡镇作业中心经理`；2026-01/02 过渡期只按经理岗位处理
+- 靳洪刚岗位调整：≤2025-11 的周期置 `position='管理员'`；≥2025-12 的周期保持 `乡镇作业中心经理`
+- 周福贵离职判定：2026年1月上旬离职（2025-12-29在册，2026-01-08不在花名册），2026年考核表未出现
+- 徐凤山离职判定：2025年11月中下旬离职（2025-11-10在册，2025-12-01不在花名册），2025-11起考核表未出现
+- 负向对冲作为对齐手段有脆性：依赖其它扣分行稳定不变；岗位变化导致源扣分行增删时，对冲行会失衡甚至让总分超100。建议优先用「岗位归位 + source扣分自然对齐」，仅缺失时补对冲，且需复核总分不越过0~100
+- 2025-08 ~ 2026-07 全部12周期乡镇作业中心经理与管理员数据已无差异（除孙建栋2026-01/02过渡期按经理处理的预期岗位形态差异）
+- 数据库中2026-09（cyc43）乡镇作业中心经理考核目标无周福贵、徐凤山
+- 三级菜单“网格长巡查台账”数据导入使用去重口径 `(人员, 片区, 日期)` 判定，仅导入系统缺失的断层/零星记录
+- 完成率重算脚本 `_recalc_aug_grid.cjs` 必须先调用 `await db.testConnection()` 再计算，否则会因 `isConnected()` 未置位触发服务 `fallback()`，导致网格完成率全部回写为0
+- WPS credentials must be stored in server environment variables and not appear in frontend code, Vue files, controllers, or source code
+- Frontend must not directly access WPS API; all WPS requests must go through HSE Express API → GridInspectionService → WpsDbsheetAdapter → WpsClient
+- WPS field IDs must not be scattered in business code; use centralized field mapping (WPS_FIELD_MAP)
+- Do not parse DISPIMG formulas to retrieve images; use WPS multi-dimensional table attachment fields/API instead
+- Do not migrate historical data or switch PC data sources during Sprint-WPS-01
+- Do not develop H5, GPS positioning, personnel selectors, image upload components, map components, or mobile components during Sprint-WPS-01
+- Do not modify login authentication, Vben Core code, or add new npm dependencies during Sprint-WPS-01
+- Test records must be clearly identifiable with 'WPS-INTEGRATION-TEST' prefix and cleaned up after testing
+- WpsClient must only handle basic WPS communication (authentication, token management, HTTP requests, error handling) and not contain business logic
+- WpsDbsheetAdapter must convert WPS API to unified internal data access interface with methods like getSchema(), listRecords(), getRecord(), createRecord(), updateRecord(), deleteRecord()
+- WPS integration layer must support schema reading to confirm data tables, views, fields, field types, and field IDs
+- WPS record snapshots for inspection personnel and violators must not replace PostgreSQL master data; historical records should not be rewritten if personnel information changes
+- Violation records must reserve violatorEmployeeId for future personnel selection functionality; do not use 'violator name' as the only关联 key
+- Reserve GPS fields (longitude, latitude, location address, grid, inspection area) in WPS data model for future mobile H5 development
+- WPS attachment fields must be processed into a unified data structure and not exposed to frontend in raw WPS format
+- WPS integration must handle six error types: authentication failure, permission failure, parameter error, network exception, WPS service exception, and data structure exception
+- Sensitive WPS information (tokens, secrets, authorization headers) must not be exposed to frontend; return only project-unified error messages
+- WPS grid data source mode must be three-state: false→PostgreSQL, true+complete credentials→WPS, true+incomplete credentials→explicit configuration error (no silent fallback to PostgreSQL)
+- WPS Record ID must be handled as string throughout the entire chain from backend to frontend; avoid numeric assumptions like Number(id), parseInt(id), id+1, or id>xxx
+- WPS field mapping must explicitly mark inspectorEmployeeId, reportStatus, vehicleType, violationTypeResult, needRectification, and rectifier as readwrite fields
+- Backend must ensure that inspectorEmployeeId is populated from currentEmployeeContext and cannot be overwritten by frontend input
+- WPS schema must include fields for inspectorEmployeeId (巡查人员ID), reportStatus (上报状态), vehicleType (车辆类型), violationTypeResult (违章类型结果), needRectification (是否需要整改), and rectifier (整改人) to support PC grid ledger functionality
+- Do not process violatorEmployeeId during Sprint-WPS-02-B; keep it as a reserved field
+- Do not establish final user→employee mapping during Sprint-WPS-02-B; continue using the existing realName→v_employee_current→employeeId resolution
+- Do not migrate historical data during Sprint-WPS-02-B
+- Do not enable WPS_GRID_DATA_SOURCE=true until all required fields are补齐, real CRUD tests pass, image tests pass, and PC regression is complete
+- Test records must use 'WPS-TEST' or 'WPS-TEST-IMAGE' prefixes and be deleted after testing
+- WPS filter-options must correctly return areaTeam, gridLevel, and reportStatus values when using WPS data source
+- WPS integration must ensure no dual-write to both WPS and PostgreSQL when WPS is enabled as the data source
+- PC grid ledger page must be regression tested with WPS data source enabled, including listing, filtering, pagination, sorting, creating, editing, deleting, batch deleting, clearing, and image viewing
+- WPS field mapping must be documented in docs/WPS-网格巡查字段映射表.md with PC business fields, PostgreSQL fields, WPS fields, types, read/write status, and sources
+- Sprint-WPS-02-B验收 report must be generated as docs/Sprint-WPS-02-B-字段补齐与真机验收报告.md including schema audit, field completion, CRUD tests, image tests, and上线判定
+- WPS real machine testing must include schema verification, CRUD operations, image handling, filter-options validation, and PC page regression
+- WPS credentials (WPS_APP_ID, WPS_APP_SECRET) must be configured in .env for real machine testing; do not hardcode or expose in frontend
+- If WPS credentials are not available, mark real machine testing as PENDING and complete static and offline checks only
+- WPS must not be enabled as the正式 data source if any required fields are missing, real CRUD tests fail, image handling is broken, or PC page functionality is compromised
+- WPS grid data source must not be enabled until the system has complete field support and basic operational capability to承载 current PC grid ledger business
+- Do not modify users table, JWT, login, or auth code during Sprint-WPS-02-B
+- Do not add new npm dependencies or custom UI components during Sprint-WPS-02-B
+- Do not refactor existing PC grid ledger page during Sprint-WPS-02-B
+- WPS field mapping must distinguish between readwrite, read/readonly, and reserved fields; only mark currently required PC business fields as readwrite
+- WPS image handling must not parse _xlfn.DISPIMG(...) formulas; use WPS attachment API and normalize attachments to URL format for PC page display
+- WPS create and update operations must correctly map and persist all required PC business fields including reportStatus, vehicleType, violationTypeResult, needRectification, and rectifier
+- WPS list and filter operations must support reportStatus filtering when using WPS data source
+- WPS integration must verify that employeeId is correctly saved to the WPS 巡查人员ID field and cannot be overwritten by frontend input
+- WPS integration must ensure no dual-write to PostgreSQL when WPS is enabled as the data source
+- WPS real machine testing must verify that test records are properly created, updated, and deleted, with no residual test data left in WPS
+- WPS image testing must verify thumbnail display, multi-image handling, click-to-view functionality, empty image handling, and absence of WPS token/secret exposure
+- WPS filter-options must return non-empty reportStatus values when using WPS data source
+- PC grid ledger page must correctly display and interact with WPS data including new fields and images
+- WPS integration must pass offline tests with 42/42 assertions after field completion
+- WPS field mapping must be updated to reflect readwrite status for inspectorEmployeeId, reportStatus, vehicleType, violationTypeResult, needRectification, and rectifier
+- WPS gridInspectionRepository must handle new field mapping for create, update, list, and filter operations
+- WPS integration must generate a field mapping table documenting PC business fields, PostgreSQL fields, WPS fields, types, read/write status, and sources
+- WPS integration must generate a验收 report documenting schema audit, field completion, CRUD tests, image tests, and上线判定
+- Employee roster cards must display four categories: 员工总数 (employees with current main position), 在职人员 (employment_relation='正式员工'), 离职人员 (employment_relation IN ('辞职','死亡')), and 超龄人员 (real-time age determination: male >60/female >50)
+- Employee roster must import resignation data from the '用工关系状态' column in the Excel source file (员工信息维护_xxx.xlsx)
+- The 'employment_relation' column must be added to the 'employee' table to store用工关系状态 values (正式员工/辞职/死亡)
+- Backend route /employees/stats must return listTotal, activeCount, leftCount, and overAgeCount fields
+- Employee count card logic must be implemented in hse-employee.js, employee.ts, and index.vue
+- 离职人员 count includes both employees with current main positions and historical resigned employees without current positions
+- 员工总数 count is based on employees with current main positions and does not equal 在职人员 + 离职人员
+- 超龄人员 count uses the same criteria as the over-age page (male >60/female >50)
+- 离职人员 calculation must include three conditions: person_type in (已离职/辞职/已辞职), remark LIKE '离职%', and status in (inactive/left/离职/辞职/解聘/不续聘等)
+- 花名册 Excel 导入 must update existing employees and create new records for those not in the database
+- 花名册 Excel 导入 must map '身份证件号' to '身份证号', '所属乡镇' to '所属部门', '二级乡镇' to '班组', and '手机' to '联系电话'
+- 花名册 Excel 导入 must map old department '所属乡镇' to 'XX作业中心'
+- 花名册 Excel 导入 must merge duplicate data by employee ID/ID card number
+- 花名册 Excel 导入 must handle files without ID cards by matching employee code + name
+- 超龄人员页面（人员管理 → 超龄人员）仅显示在职超龄人员，过滤条件为 employment_relation = '正式员工'
+- 超龄人员页面的超龄判定标准为年龄超过68周岁，与员工列表中的超龄人员（男>60/女>50）逻辑不同
+- 超龄人员页面的超龄年数计算方式为年龄 - 68，风险等级统一显示为高风险
+- 超龄人员页面的岗位排序规则为：乡镇作业中心经理 → 管理员 → 转运站管理员/转运站操作员 → 保洁员 → 其他，同级内按年龄降序
+- 超龄人员页面的后端接口（/over-age/auto-list, /over-age/auto-stats, /over-age/auto-export）使用独立的68岁口径函数（buildOptimizeOverAgeCondition / buildOptimizeOverAgeYearsExpr），不影响员工列表的超龄人员卡
+- 超龄人员页面的前端风险等级判定函数（getOverAgeRiskLevel）统一返回高风险（红色标签），不再按超龄年数分低/中/高/严重
+- 超龄人员页面的后端排序逻辑在 ORDER BY 中增加职位优先级：乡镇作业中心经理(1) → 管理员(2) → 中转站管理员/转运站操作员(3) → 保洁员(4) → 其他(5)
+- 超龄人员页面显示在职超68岁人员共46人，其中管理员3人、转运站操作员1人、保洁员42人（无乡镇作业中心经理）
+- 超龄人员页面的超龄规则说明同步显示68岁阈值
+- 超龄人员页面的导出功能同步应用68岁口径过滤和岗位排序
+- 超龄人员页面的详情接口同步使用68岁口径计算超龄年数
+- 超龄人员页面的统计卡片（总数/性别/年龄段/部门）同步过滤离职人员并使用68岁超龄标准
+- 超龄人员页面的年龄计算逻辑修复后，69岁人员统一显示超龄1年
+- 超龄人员页面的风险等级显示修复后，所有超龄人员均标记为高风险
+- 超龄人员页面的岗位排序修复后，符合乡镇作业中心经理、管理员、转运站管理员（操作员）、保洁员的顺序
+- 超龄人员页面的后端接口在修复后返回的 thresholds 为 {男:68,女:68}
+- 超龄人员页面的前端显示与后端数据口径保持一致，均以68岁为超龄标准
+- 超龄人员页面的离职人员过滤逻辑与员工列表“超龄人员”卡片口径一致
+- 超龄人员页面的超龄年数计算修复后，解决了同年龄不同超龄年数的显示错误
+- 超龄人员页面的风险等级统一后，解决了同年龄不同风险等级的显示错误
+- 超龄人员页面的岗位排序修复后，解决了岗位顺序不符合要求的问题
+- 超龄人员页面的所有修改仅作用于超龄优化管控页相关接口，不影响其他功能模块
+- 驾驶员违章记录的两个tab（驾驶证扣分记录、三违扣分记录）共用ViolationList.vue组件，改动自动应用到两个tab
+- 驾驶员违章记录的"人员匹配"和"保存"按钮已移至右上角工具栏，原底部操作栏已删除
+- 驾驶员违章记录的"人员匹配"功能仅显示在职驾驶员姓名，排除status为'离职'或存在leave_date的成员
+- 驾驶员违章记录的姓名列显示格式为姓名下方灰色小字展示所属部门，列宽从150调整为170
+- 驾驶员违章记录的部门名称映射规则：以"片区"结尾的乡镇名去掉"片区"后缀拼接"乡镇作业中心"，以"镇"结尾的乡镇名追加"乡镇作业中心"，部门名含"车队"保持不变
+- 驾驶员违章记录的姓名列仅显示在职驾驶员，离职人员（无论是否在花名册中）均不显示
+- 驾驶员违章记录的新增下拉选项仅提供在职驾驶员
+- 驾驶员违章记录的历史违章姓名若匹配不到当前在职驾驶员花名册，则视为离职人员不显示
+- 驾驶员违章记录的离职判定标准补充person_type === '已离职'，对齐员工中心口径
+- 驾驶员违章记录的花名册数据新增departed标记（status==='离职'或存在leave_date或person_type==='已离职'）
+- 驾驶员违章记录的regroup逻辑在拼装数据时剔除离职驾驶员，搜索功能也不返回离职人员
+- 驾驶员违章记录的花名册外历史姓名仍保留显示（维持"只增不删"设计）
+- 驾驶员违章记录的上方统计卡片已删除，相关状态与逻辑（statItems、activeStatKey等）同步移除
+- 驾驶员违章记录的提示文案已更新为"点右上角「保存」"
+- 驾驶员违章记录的花名册数据流新增dept字段，VGroup增加dept并在regroup和新增流程中同步填充
+- 驾驶员违章记录的部门映射在loadDriverOptions中通过mapRosterDept实现，并应用于花名册下拉标签与dept字段
+- 驾驶员违章记录的部门映射规则在交通安全档案的mapDept中同步补充，保证两页部门命名一致
+- 驾驶员违章记录的新增行下拉使用activeDriverOptions（过滤离职人员），confirmAddRow新建分组固定departed:false
+- 驾驶员违章记录的regroup逻辑在排序后最终拼装时再次剔除离职人员，覆盖"有历史违章但现已离职"的情况
+- 驾驶员违章记录的部门名称"xx镇片区"已统一改为"xx镇乡镇作业中心"
+- 驾驶员违章记录的部门名称"xx镇"已统一改为"xx镇乡镇作业中心"
+- 驾驶员违章记录的顶部工具栏采用左右两端布局，左侧保留刷新/下载模板/导入/导出/新增，右侧放置人员匹配、保存
+- 驾驶员违章记录的工具栏使用.dv-toolbar-row弹性布局（justify-content: space-between）
+- 驾驶员违章记录的花名册外历史姓名无部门时仅显示姓名
+- 驾驶员违章记录的类型检查显示改动文件无错误，报错均为其他模块既有问题
+- 驾驶员违章记录的离职人员王春堂、张海涛等已从姓名列中移除
+- When editing an employee's "用工关系状态" in the "人员主数据 → 员工" edit popup, the system must compare the entered value with the roster authority interface. If inconsistent, a confirmation dialog must appear: "Roster record is X, you entered Y. Still save with your input?"
+- Backend route /employees/profile/list with is_driver=true must use roster authority to determine employment status by matching via id_card_hash > employee_id > name to check for resignation/death status in other records, falling back to current row employment_relation if no match
+- Backend must be restarted with `node app.js` in server directory after modifying hse-employee.js to ensure new logic is loaded
+- Backend process must be completely terminated before restarting to avoid old code execution
+- Backend port is specified in .env as PORT=5876; ensure this port is used when restarting
+- After fixing driver violation records, the在职驾驶员 count should be 43, excluding Wang Chuntang, Zhang Haitao, Li Xiaomeng, and Wang Chunyi
+- ViolationList.vue's loadDriverOptions and loadRosterNames both call getProfileList({ is_driver: true }), so frontend doesn't need modification when backend logic is fixed
+- The backend API GET /api/hse/employee/employees/profile/list?is_driver=true&pageSize=9999 should return 43 active drivers after the fix
+- Backend modifications for driver status filtering must only affect the is_driver section of /employees/profile/list to avoid impacting other queries
+- Temporary backend processes started for verification should be replaced with正式启动方式 (PM2/script) to maintain new code execution
+- Violation records and safety files have different data sources (real-time roster vs. historical assessment archives), so their driver counts may differ even after fixes
+- 三级菜单“驾驶员违章记录.”的“违章明细”列名需居中显示，单元格内容保持左对齐
+- 三级菜单“驾驶员违章记录”的“违章明细”列需按内容排序：有内容的记录在前，无内容的记录在后，同组内保留原花名册顺序
+- 三级菜单“驾驶员违章记录”的花名册数据需以“花名册导入”为节点固定在页面：通过后端哈希接口（GET /employees/profile/roster-version）比对版本，版本不变时使用localStorage缓存（dv_roster_cache_v1），版本变化时重新拉取并更新缓存
+- 三级菜单“驾驶员违章记录”的花名册缓存逻辑：进入页面先比对版本号，版本一致则直接使用本地缓存，不再请求getProfileList；版本不一致则重新拉取数据并更新缓存；版本接口失败时回退使用本地缓存
+- 三级菜单“驾驶员违章记录”的花名册数据需在每次花名册导入后重新加载，以此类推
+- 三级菜单“驾驶员违章记录”的花名册数据需固定在页面，避免刷新后重新加载
+- 三级菜单“驾驶员违章记录”的花名册数据需使用稳定排序：regroup()分组后用ordered.sort((x,y)=>Number(y.total>0)-Number(x.total>0))确保有违章记录的大行排前，空行排后
+- 三级菜单“驾驶员违章记录”的“违章明细”列仅表头居中，单元格内的行子表编辑器保持左对齐以便输入
+- 三级菜单“驾驶员违章记录”的花名册数据需在localStorage中缓存，人员匹配复用这份名单
+- 三级菜单“交通安全档案”的“三违评估”驾驶员姓名从花名册动态导入，覆盖全部当前在册驾驶员
+- 三级菜单“交通安全档案”的“三违评估”累计扣分数据从“驾驶员违章记录”的“三违扣分记录”中按当前自然年度（系统年份）累加违章明细“计分”数据
+- 三级菜单“交通安全档案”的“三违评估”列表在“档案编号”前增加“序号”列，使用vxe-table原生seq类型从1递增
+- 三级菜单“交通安全档案”的“三违评估”累计扣分仅对assessmentType为“三违评估”的行显示，驾驶证评估行显示“-”
+- 三级菜单“交通安全档案”的“三违评估”等级分布图和“生成三违评估”预览使用融合名单，补入花名册中无扣分记录的驾驶员（0分/“较低”档）
+- 三级菜单“交通安全档案”的“三违评估”扣分排行Top10、类型占比TopN图表基于“有扣分记录者”统计，不融合0分行
+- 三级菜单“交通安全档案”的“三违评估”累计扣分年份通过new Date().getFullYear()硬编码获取，自动跟随系统年份变化
+- 三级菜单“交通安全档案”的“三违评估”花名册更新后重绘三违等级分布图
+- 三级菜单“交通安全档案”的“三违评估”生成预览源文字更新为“按花名册N名驾驶员生成，无扣分记录者按0分/较低档”
+- 三级菜单“交通安全档案”的“三违评估”空数据提示仅在花名册无驾驶员时出现
+- 三级菜单“交通安全档案”的“三违评估”累计扣分列在assessment/index.vue的columns定义中位于“评估类别”列之后
+- 三级菜单“三违管理考核”中通过“增加列”加入的人工列（未按时整改、违章指挥、劳保用品未佩戴、无证上岗、现场隐患未上报等）数值输入需居中对齐
+- 自动评分表格每个列头需新增问号帮助功能，包含图标和悬浮tooltip（目标应用为 web-naive，非 web-antd）
+- 自动评分表格（web-naive）使用 VXE Table（HseDataGrid），静态列（姓名/岗位/乡镇/网格级别/总分）通过 vxe 内建 titleHelp 实现问号帮助，与「三违管理考核」参考页一致
+- 自动评分表格（web-naive）动态维度列（类别扣分上限列）因自带双行表头 slot 会覆盖 titleHelp，改为在 dimHeader 模板内用 NTooltip + IconifyIcon lucide:circle-help 手动实现
+- 自动评分表格（web-naive）帮助文案基于接口字段语义编写（colHelp 映射 + dimHelpText()）
+- 自动评分表格（web-naive）问号帮助功能遵循「保持组件清爽」原则，不引入自定义组件
+- 自动评分表格（web-naive）dim-col-help 图标为灰色、cursor:help，悬浮展示说明
+- 不得修改 apps/web-antd（web-naive 迁移强制约束：目标应用仅为 apps/web-naive）
+- 三违台账自动聚合口径（2026-09-12 修复）：sanweiLedgerDerive.deriveMonth 的 area_team 与候选乡镇匹配改为双向互含 `areaTeam.includes(town) || town.includes(areaTeam)`，兼容「保店镇一班」→「保店镇」与「保店镇」→「保店镇作业中心」
+- 三违分析 /continue 聚合行 town 为候选名（「XX作业中心」），合并前需归一化为短名（`replace(/作业中心$/, '')`）再与源月延续行按同一 key 合并，避免同一乡镇两行且落库命名与历史一致
+- 2026-08 及此前月份三违分析自动聚合实际从未生效（单向匹配失效），8 月数据=延续 7 月 Excel 导入值；2026-09-12 修复后 9 月按真实台账重新生成（杜集/张大庄/长官 3 乡镇聚合各1分 + 9 乡镇延续 8 月），9 月延续乡镇需人工核对修正
+- 三违分析页面月份下拉对 ≥2026-08 的空月份由 POST /continue 自动生成（幂等），前端无需改动；服务端代码变更后须重启 `node app.js`（端口 5876）生效
+- 三级菜单“三违分析”乡镇作业中心经理列表的“姓名（经理）”列已更名为“姓名”
+- 三级菜单“三违分析”乡镇作业中心经理列表的“所属乡镇/作业中心”列已更名为“所属部门”
+- 三级菜单“三违分析”乡镇作业中心经理列表在“所属部门”列后新增“检查数量”列，数据来自后端接口的`inspectionCount`字段
+- 三级菜单“三违分析”乡镇作业中心经理列表的“所属部门”列数据从花名册拉取，显示格式为“xx镇乡镇作业中心”
+- 三级菜单“三违分析”乡镇作业中心经理列表的“所属部门”列仅对花名册中`org_type='town_center'`级组织在“作业中心”前插入“乡镇”，`环卫作业中心`等center级组织保持原样且不参与台账行匹配
+- 后端修改后需重启`node app.js`（端口5876）使变更生效
+- 交付报告需归档至`G:/hse-dashboard/docs/191副/②交付报告/`目录
+- 「司机身份不进考核」：员工主数据岗位为司机（roster_position='司机'）的人员不进「三违管理考核/三违分析」考核对象（这两个页面硬编码仅 乡镇作业中心经理/管理员 两 Tab；考核对象 hse_assessment_target 只拉 乡镇作业中心经理 + 管理员(org_type=town_center) + 人工岗位）。司机三违走档案线 driver_violation/driver_three_violation，不参与经理/管理员月度考核。同一姓名若档案线为司机、考核线台账被标经理级岗位，按主数据岗位判定司机身份，考核线标注为身份错配需修正
+- violation_records 表 id=4922（杨小林，violator_id=6767 司机）身份错配已修正：position 总经理→司机、grid_level 总网格长→''、area_team 公司管理→车队（2026-09-12，事务 UPDATE，不影响已生效扣分）
+- violation_records 身份错配批量修正（2026-09-12，共14条）：司机线 4922杨小林/5141李春东/4721赵振刚 + 公司管理层批次 4851苑国月/4852张会领/4853张俊起/4854张会祥/4849张俊起/4857李兰风/5070吕秀芬/5095赵玉峰/5096杨洪海/5097刘广利/5449李清芹。统一按 employee.roster_position 归位 position、grid_level 置空''、area_team 取 roster_department。全部 in_target=0（不在考核对象表、无已生效扣分），不影响考核分数
+- violation_records 身份错配核查口径（2026-09-12，**权威口径已冻结**）：**网格长仅限总经理、部门经理、乡镇作业中心经理、管理员四类岗位；保洁员/中转站管理员等非管理岗不兼网格长**。曾被误判为「保洁员兼任三级/二级网格长职责、未改动」——**系误判**，经业务确认「保洁员只是保洁员，网格长只有四类岗位」后，已执行 `_tmp_fix501.mjs` 批量归位 501 条（保洁员490+中转站管理员22），position→roster_position、grid_level置空，零残留。考勤看门狗：非管理HR岗位被标管理级岗位谱系台账一律按此口径归位
+- violation_records 身份错配批量修正（2026-09-12，批次二501条）：员工主数据为「乡镇保洁员/中转站管理员」、台账岗位被标「总经理/部门经理/乡镇作业中心经理/管理员」且 grid_level=三级/二级网格长 → position 归位到 roster_position、grid_level 置空。全部 in_target=0、hse_assessment_deduction 无扣分，不影响考核分数。剩余 3 条人工班长→管理员/乡镇作业中心经理（张忠华/苑恩林/陈庆祥）仅台账岗位与考核对象身份、非错配，保留不动
+- 「人工班长=管理员=三级网格长」是同一批人的不同叫法（2026-09-12 业务确认）：花名册岗位写「人工班长」，但同一人在考核体系中就是「管理员」「三级网格长」。故人工班长属权威网格长四类岗位中的「管理员」序列，是正当考核对象。判定一条台账是否错配，不能只看 roster_position 字符串（人工班长/保洁员都为非网格长岗字样），而应按该人员是否属于网格长考核序列——保洁员/中转站管理员的「管理员/乡镇经理」台账岗位是错配（归位），人工班长的「管理员」台账岗位是正当身份（保留）
+
+- 公司考核体系三层（2026-09-12 梳理）：
+  - 驾驶员考核（个人线）：①驾驶证扣分（12个月=1年，现系统近5年窗口按业务确认不改为准）；②日常三违→「驾驶员三违扣分台账」=**同一自然年度内跨月累加**（1-12月累计），达阈值分等级管控、下一年度（次年1/1）重新清零。**非跨年累加**（2025+2026+2027是错误理解）。该台账=「驾驶员违章记录→三违扣分记录」的自然年度累计统计+分级管控，当前页面仅逐条明细、尚无年度累计/分级，**未建（后期增加）**；③日常三违传导上级扣分=每起1分（DRIVER004，2026-09已上线）
+  - 管理员考核：目标职责30/HSE教培30/三违管理40/否决100
+  - 乡镇作业中心经理考核：安全文化建设20/HSE教培30/现场管理-驾驶员管理20/现场管理-转运站10/三违管理15；系统内另有否决项100（业务确认乡镇经理**有**否决项）、网格管理并入两者「三违管理」
+  - 系统 hse_assessment_category_limit 与上述口述完全一致
+- 驾驶员日常三违传导规则 DRIVER004（2026-09-12 上线）：数据源 driver_three_violation，每起1分，传导**仅乡镇作业中心经理**（不含管理员）→ 计入「三违管理」（经理上限15）。事件级幂等（一条记录=一条扣分）；按 violation_time 归属考核年月；无法唯一定位员工/所属组织无乡镇经理目标 → 跳过(no-town-manager)。定位链 name→v_employee_org_full→org_name→findTownManagerForDept。环卫作业中心/津城街道作业中心司机因无乡镇经理考核目标 → 传导跳过
+- ruleEngine 新增自动扣分规则的落地路径：新增 adapters/<xxx>Adapter.js（契约：key/ruleCode/sourceTable/kind/metricCode/idempotency/scan/buildDeductKey/buildItem/buildDetail/buildReportDetail，scan 返回 intents/skipped）→ engine.js 的 AUTO_DEDUCTION_ADAPTERS 加 key + ensureAdaptersRegistered 里 registerAdapter → hse_assessment_rule 插入一行(rule_code 唯一、adapter_key 关联) → dry-run(runCycleAdapters cycleId {adapterKeys,dryRun:true}) 验证 → 真实运行(dryRun:false) 验收。传导到上级复用 driverMonthlyAdapter.findTownManagerForDept
+
+## Engineering Conventions
+- '安全文化建设'台账页面在切换到尚无台账的月份时，自动以上一个有台账的月份为基准复制生成台账数据（包括人员列表和专项活动勾选状态）
+- '安全文化建设'自动生成的延续月份台账中，'manual_deduct'字段设为0，'has_manual_col'字段设为FALSE
+- '安全文化建设'延续月份的扣分计算不沿用源月的'表格扣分'列，改为按'未开展项 × unit'计算
+- '三违分析'台账页面在切换到尚无台账的月份（≥2026-08）时，自动以上一个有台账的月份为基准复制生成台账数据，数据源为三违台账和网格长巡查台账
+- 月度考核周期已实现每月1日00:30自动创建当月考核周期并按花名册同步考核对象；同时支持前端按需触发自动生成，无需Excel导入
+- 月度考核周期生成接口（POST /cycles/auto-generate）为幂等设计，若周期已存在则返回created=false
+- 月度考核周期生成时，考核对象从系统花名册按岗位（经理/管理员/网格长）延续生成
+- 月度考核周期页面（cycles.vue）在打开时若当月周期未创建则自动补齐，并提供「自动生成本月周期」操作按钮
+- '转运站管理'台账页面在切换到尚无台账且 ≥2026-08 的月份时，自动以上一个有台账的月份为基准复制生成空页面（站点身份信息复制，考核数值设为0）
+- 三级菜单“三违管理考核”中通过“增加列”加入的人工列（未按时整改、违章指挥、劳保用品未佩戴、无证上岗、现场隐患未上报等）数值输入使用 `manual-cell-center` 类实现居中对齐，内部 `.n-input__input-el` 设 `text-align: center`
+
+## Auto-Archive Mechanism (关键对话自动归档)
+- 归档根目录：`G:se-dashboardocs91副`
+- 触发方式：对话内即时归档 + 每周批量汇总（两者结合）
+- 归档范围四类：冻结的规则/口径、交付报告与执行记录、决策与结论要点、风险与待办
+- 机制说明文档：`docs91副EADME-归档机制.md`（含目录结构、命名规范、更新规则）
+- 归档模板统一存放在 `docs91副templates`，索引在 `docs91副index.md`
+- 对话内产生关键结论/冻结规则/交付/风险时，立即写入归档并同步更新索引；不得等都结束后再集中补
+
+## Lessons Learned
+- koa-connect wrapper caused subtle ctx.state data loss; native Koa rewrite is required instead of wrapping Express middleware
+- WPS_GRID_DATA_SOURCE=true with incomplete WPS historical data (no August 2026 records) caused system to display incorrect cutoff date (August 30 instead of 31) for grid inspection ledger summaries
+- '月巡查次数' in the '网格长巡查管理' list does not update because the `grid_inspection_records` table lacks data for the current month (2026-09), with only 2026-08 data available (1724 records)
+- The '所属乡镇/作业中心' column in the '三违管理考核' tab lists was blank because the column configuration in index.vue lacked a slots binding to the 'dept' template, causing it to render the non-existent 'row.dept' field instead of 'row.township' or 'row.department'
+- ECONNREFUSED error when accessing /api/user/info indicates backend API service is not running; must start backend separately using `npm run dev` in server directory
+- Initial离职人员 count (11) was incorrect because it only checked status field and missed resignation data stored in employee_assignment.remark
+- 离职人员 count must include both system status and Excel-sourced employment_relation to match user expectations
+- 员工总数 and 离职人员 counts may not align because employee count includes only current main positions while resignation count includes historical records
+- 身份证打码功能使用纯数字正则 `/({6}){8}({4})/` 导致含X的身份证号无法匹配，造成明码显示；需使用通用正则 `^(.{6}).*(.{4})$` 兼容18位含X与15位老证
+- Custom NInput slot (`trainingDate-edit`) + formatter for inline editing in vxe-table caused unreliable value write-back to `row.trainingDate` on blur, resulting in saving old values; native input editor is required instead
+- Backend modifications may not take effect if old processes are not completely terminated before restarting
+- Ghost active driver records (e.g., Wang Chuntang id=9727) with NULL employment_relation in current row but resignation status in other records are not filtered by checking only current row employment_relation
+- Different data sources (real-time roster vs. historical archives) between violation records and safety files cause expected driver count discrepancies even after fixes

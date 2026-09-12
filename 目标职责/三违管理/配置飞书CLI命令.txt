@@ -1,0 +1,34 @@
+# 飞书 CLI 快速配置命令
+# 请在 PowerShell 中运行以下命令
+
+# 刷新环境变量
+$env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "  飞书 CLI 配置" -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host ""
+
+Write-Host "步骤 1: 初始化配置" -ForegroundColor Yellow
+Write-Host "运行以下命令:" -ForegroundColor White
+Write-Host "  lark-cli config init --new" -ForegroundColor Green
+Write-Host ""
+Write-Host "当提示输入时:" -ForegroundColor White
+Write-Host "  App ID: 环境变量 FEISHU_APP_ID" -ForegroundColor Green
+Write-Host "  App Secret: [在此输入您的 App Secret]" -ForegroundColor Yellow
+Write-Host ""
+
+Write-Host "步骤 2: 授权访问" -ForegroundColor Yellow
+Write-Host "配置完成后，运行:" -ForegroundColor White
+Write-Host "  lark-cli auth login --domain base" -ForegroundColor Green
+Write-Host ""
+
+Write-Host "步骤 3: 验证配置" -ForegroundColor Yellow
+Write-Host "运行:" -ForegroundColor White
+Write-Host "  lark-cli base +base-list" -ForegroundColor Green
+Write-Host "应该显示您的多维表格列表" -ForegroundColor Gray
+Write-Host ""
+
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "提示: 配置信息保存在 ~/.lark-cli/config.json" -ForegroundColor Gray
+Write-Host "========================================" -ForegroundColor Cyan

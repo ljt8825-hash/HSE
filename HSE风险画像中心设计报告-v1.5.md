@@ -1,0 +1,848 @@
+# HSE风险画像中心设计报告
+
+> 版本：v1.5（管理责任画像扩展版·网格长体系）
+> 阶段：Sprint5.14（设计阶段，不含开发）
+> 日期：2026年7月21日
+> 修订依据：v1.5 扩展任务
+
+---
+
+## 一、设计目标
+
+### 1.1 业务目标
+
+建设 **HSE风险画像中心**，整合员工、培训、三违、隐患、交通安全、事故、管理责任等多源数据，为项目公司安环管理部、区域检查、集团领导检查展示提供全面的风险可视化能力。
+
+**服务对象**：项目公司安环管理部
+
+**职责边界**：
+
+| 职责 | 安环管理部 | 生产管理部 |
+|------|:---------:|:---------:|
+| 安全风险 | ✅ | |
+| 人员风险 | ✅ | |
+| 事故风险 | ✅ | |
+| 行为风险 | ✅ | |
+| 管理责任风险 | ✅ | |
+| 网格长责任体系 | ✅ | |
+| 驾驶员安全行为画像 | ✅ | |
+| 驾驶资格管理 | ✅ | |
+| 驾驶行为风险 | ✅ | |
+| 驾驶证扣分风险 | ✅ | |
+| 交通违法风险 | ✅ | |
+| 交通事故风险 | ✅ | |
+| 驾驶证有效期管理 | | ✅ |
+| 驾驶证年检提醒 | | ✅ |
+| 车辆维修 | | ✅ |
+| 车辆保养 | | ✅ |
+| 车辆年检 | | ✅ |
+| 生产车辆管理 | | ✅ |
+
+### 1.2 设计原则
+
+| 原则 | 说明 |
+|------|------|
+| 统一人员关联 | 使用 `employee_id` 作为唯一人员标识，禁止姓名关联 |
+| 数据只读整合 | 风险画像仅读取各类业务模块数据，不修改其表结构和业务逻辑 |
+| 规则可配置 | 风险等级和权重由集团/区域/项目公司规则配置计算，禁止硬编码 |
+| 最小侵入 | 本Sprint仅做设计分析，不修改现有模型、不新增依赖 |
+| 禁止新增人员表 | 复用现有员工主数据模型 |
+| 禁止新增三违表 | 复用现有 violation_records 表，仅读取数据 |
+| 职责边界清晰 | 仅设计安环管理部职责范围内的内容 |
+| 三检归属明确 | 三检属于驾驶员安全行为，不是车辆属性 |
+| 三检数据来源 | 三检数据来源为Excel导入，禁止移动端填报和在线实时填写 |
+| 车辆关联方式 | 禁止驾驶员固定绑定车辆，使用车辆使用历史记录 |
+| 权重禁止写死 | 风险权重由规则配置，支持不同岗位不同权重 |
+| 管理责任画像 | 新增管理责任画像，体现项目公司安全生产责任制落实情况 |
+| 网格长责任体系 | 新增网格长责任体系（一级/二级/三级/四级），基于employee设计，标准岗位+岗位别名 |
+| 巡查责任画像 | 本阶段只设计，不开发巡查业务，禁止开发巡查APP/定位/移动端 |
+
+### 1.3 系统范围
+
+HSE风险画像中心包含以下画像模块：
+
+| 模块 | 说明 | 版本 |
+|------|------|:----:|
+| 员工风险画像 | 员工个人安全风险综合评估 | v1.4 |
+| 驾驶员综合安全行为画像 | 驾驶员专属安全行为画像 | v1.4 |
+| 组织风险画像 | 按组织架构分析风险分布 | v1.4 |
+| 车辆风险画像 | 车辆基础情况、历史使用情况、关联事故 | v1.4 |
+| 风险分级管控画像 | 双重预防机制可视化 | v1.4 |
+| **管理责任画像** | **项目公司安全生产责任制落实情况** | **v1.5新增** |
+| **网格长责任画像** | **网格长责任落实情况** | **v1.5新增** |
+| **巡查责任画像** | **巡查责任指标（仅设计）** | **v1.5新增** |
+
+---
+
+## 二、员工安全风险画像（v1.4保持不变）
+
+### 2.1 数据来源
+
+| 维度 | 数据来源 | 关联字段 |
+|------|----------|----------|
+| 培训风险 | training_records | employee_id |
+| 三违风险（作业行为风险） | violation_records | violator_id |
+| 交通安全风险 | hse_traffic_records, hse_traffic_violations, hse_traffic_accidents, hse_vehicle_usage_history | employee_id |
+| 驾驶员安全行为风险 | hse_driver_inspection_records | employee_id |
+| 事故风险 | hse_incident_records | employee_id |
+| 隐患责任风险 | hazards | responsible_id |
+
+### 2.2 风险指标体系
+
+#### 2.2.1 培训风险
+
+| 指标编号 | 指标名称 | 计算方式 | 统计周期 |
+|:--------:|----------|----------|:--------:|
+| M-01 | 培训完成率 | 合格培训数/应培训数 | 近12月 |
+| M-02 | 逾期培训次数 | COUNT(过期/临期) | 近12月 |
+| M-03 | 岗位培训符合率 | 岗位要求培训合格数/岗位要求培训总数 | 当前 |
+
+#### 2.2.2 三违风险（作业行为风险）
+
+> **数据来源**：现有 `violation_records` 表（只读，禁止新增三违表）
+
+| 指标编号 | 指标名称 | 计算方式 | 统计周期 |
+|:--------:|----------|----------|:--------:|
+| M-04 | 三违次数 | COUNT(violator_id) | 近12月 |
+| M-05 | 严重三违次数 | COUNT(violation_level='严重') | 近12月 |
+| M-06 | 重复三违次数 | 同类三违重复发生次数 | 近12月 |
+| M-07 | 近12个月三违趋势 | 按月统计三违次数 | 近12月 |
+
+#### 2.2.3 交通安全风险
+
+**驾驶证扣分（近5年）**：
+
+| 指标编号 | 指标名称 | 计算方式 | 统计周期 |
+|:--------:|----------|----------|:--------:|
+| M-08 | 累计扣分 | SUM(points_deducted) | 近5年 |
+| M-09 | 扣分次数 | COUNT | 近5年 |
+| M-10 | 最高单次扣分 | MAX(points_deducted) | 近5年 |
+| M-11 | 最近一次扣分时间 | MAX(violation_date) | 近5年 |
+| M-12 | 近5年扣分趋势 | 按年/按月统计 | 近5年 |
+
+**交通违法（近5年）**：
+
+| 指标编号 | 指标名称 | 计算方式 | 统计周期 |
+|:--------:|----------|----------|:--------:|
+| M-13 | 交通违法次数 | COUNT | 近5年 |
+| M-14 | 违法类型分布 | GROUP BY violation_code | 近5年 |
+
+**交通事故（近5年或集团规则配置）**：
+
+| 指标编号 | 指标名称 | 计算方式 | 统计周期 |
+|:--------:|----------|----------|:--------:|
+| M-15 | 驾驶事故次数 | COUNT | 近5年或集团规则配置 |
+| M-16 | 责任事故次数 | COUNT(responsibility='main') | 近5年或集团规则配置 |
+
+#### 2.2.4 驾驶员安全行为风险
+
+> **数据来源**：`hse_driver_inspection_records` 表（三检数据来源为Excel导入）
+> **计算规则**：三检完成率必须考虑应执行次数，考虑请假、调休、非出车日、替班情况
+
+| 指标编号 | 指标名称 | 计算方式 | 统计周期 |
+|:--------:|----------|----------|:--------:|
+| M-17 | 三检完成率 | 实际完成次数/应执行次数 | 近30天 |
+| M-18 | 三检缺失次数 | 应执行次数-实际完成次数 | 近30天 |
+| M-19 | 三检整改完成率 | 已整改问题数/发现问题总数 | 近30天 |
+
+#### 2.2.5 事故风险
+
+| 指标编号 | 指标名称 | 计算方式 | 统计周期 |
+|:--------:|----------|----------|:--------:|
+| M-20 | 事故次数 | COUNT(employee_id) | 近12月 |
+| M-21 | 事故等级 | MAX(incident_level) | 近12月 |
+| M-22 | 责任等级 | MAX(responsibility) | 近12月 |
+| M-23 | 整改完成情况 | 整改完成率 | 当前 |
+
+#### 2.2.6 隐患责任风险
+
+| 指标编号 | 指标名称 | 计算方式 | 统计周期 |
+|:--------:|----------|----------|:--------:|
+| M-24 | 责任隐患次数 | COUNT(responsible_id) | 近12月 |
+| M-25 | 重大隐患次数 | COUNT(risk_level='重大') | 近12月 |
+| M-26 | 整改超期次数 | COUNT(超期未关闭) | 近12月 |
+
+### 2.3 风险评分模型（规则配置）
+
+> **重要**：风险权重禁止写死，由集团/区域/项目公司规则配置，支持不同岗位不同权重。
+
+#### 2.3.1 默认权重配置
+
+采用**加权评分法**，总分100分：
+
+| 维度 | 默认权重 | 满分 | 驾驶员 | 非驾驶员 |
+|------|:--------:|:----:|:------:|:--------:|
+| 培训风险 | 20% | 20 | 20 | 20 |
+| 三违风险 | 25% | 25 | 25 | 25 |
+| 交通安全风险 | 15% | 15 | 15 | 0 |
+| 驾驶员安全行为风险 | 5% | 5 | 5 | 0 |
+| 事故风险 | 15% | 15 | 15 | 15 |
+| 隐患责任风险 | 20% | 20 | 20 | 20 |
+| **合计** | **100%** | **100** | **100** | **80** |
+
+**非驾驶员评分换算公式**：实际得分 / 0.8
+
+#### 2.3.2 岗位差异化权重配置
+
+支持不同岗位配置不同权重，例如：
+
+| 岗位类别 | 培训 | 三违 | 交通安全 | 驾驶行为 | 事故 | 隐患 |
+|----------|:----:|:----:|:--------:|:--------:|:----:|:----:|
+| 驾驶员（默认） | 20% | 25% | 15% | 5% | 15% | 20% |
+| 驾驶员（高交通风险） | 15% | 20% | 25% | 10% | 15% | 15% |
+| 一线作业人员 | 25% | 30% | 0% | 0% | 15% | 30% |
+| 管理人员 | 30% | 20% | 0% | 0% | 20% | 30% |
+
+### 2.4 风险等级判定
+
+| 总分 | 风险等级 | 标识 | 颜色 |
+|:----:|:--------:|:----:|:----:|
+| ≥ 85 | 低风险 | green | 绿色 |
+| 70-84 | 中风险 | yellow | 黄色 |
+| 50-69 | 高风险 | orange | 橙色 |
+| < 50 | 极高风险 | red | 红色 |
+
+### 2.5 一票否决规则
+
+| 规则编号 | 条件 | 说明 |
+|:--------:|------|------|
+| V-01 | 近12月严重三违 ≥ 2次 | 屡次严重违章 |
+| V-02 | 近12月重大事故 ≥ 1次 | 发生重大事故 |
+| V-03 | 近5年驾驶证累计扣满12分 | 驾照吊销 |
+| V-04 | 近12月重大隐患责任 ≥ 2次 | 屡次重大隐患 |
+| V-05 | 近12月事故主要责任 ≥ 2次 | 屡次事故主要责任 |
+
+---
+
+## 三、驾驶员综合安全行为画像（v1.4保持不变）
+
+### 3.1 设计目标
+
+将分散的驾驶员风险数据融合为**驾驶员综合安全行为画像**，提供统一的驾驶员安全行为视图。
+
+> 详见《驾驶员综合安全行为画像设计-v1.4.md》
+
+### 3.2 画像结构
+
+```
+驾驶员综合安全行为画像
+├── 基础信息
+│   ├── 员工信息（姓名、工号、年龄、性别）
+│   ├── 岗位信息（岗位名称、岗位类别）
+│   └── 组织信息（所属组织、作业单元）
+│
+├── 安全行为风险
+│   ├── 培训风险（数据来源：training_records）
+│   ├── 三违风险（数据来源：violation_records）
+│   ├── 交通安全风险（数据来源：hse_traffic_records, hse_traffic_violations, hse_traffic_accidents）
+│   └── 驾驶员安全行为风险（数据来源：hse_driver_inspection_records）
+│
+└── 综合风险评估
+    ├── 风险评分
+    ├── 风险等级
+    └── 管控措施建议
+```
+
+### 3.3 数据来源
+
+所有数据复用已有模块，禁止新增三违表：
+
+| 风险维度 | 数据来源 | 关联字段 |
+|----------|----------|----------|
+| 培训风险 | training_records | employee_id |
+| 三违风险 | violation_records | violator_id |
+| 交通安全风险 | hse_traffic_records, hse_traffic_violations, hse_traffic_accidents | employee_id |
+| 驾驶员安全行为风险 | hse_driver_inspection_records | employee_id |
+
+---
+
+## 四、组织风险画像（v1.4保持不变）
+
+### 4.1 设计目标
+
+按组织架构分析风险，支持以下组织类型：
+
+| 组织类型 | 说明 |
+|----------|------|
+| 环卫作业中心 | 道路清扫、垃圾收集等作业单元 |
+| 乡镇作业中心 | 乡镇区域作业单元 |
+| 转运站 | 垃圾中转站 |
+| 车辆作业单元 | 车辆运营单元 |
+
+### 4.2 组织风险指标
+
+| 指标编号 | 指标名称 | 计算方式 | 统计周期 |
+|:--------:|----------|----------|:--------:|
+| O-01 | 风险数量 | 区域内风险总数 | 当前 |
+| O-02 | 隐患数量 | 区域内隐患总数 | 当前 |
+| O-03 | 三违数量 | 区域内三违总数 | 近12月 |
+| O-04 | 事故数量 | 区域内事故总数 | 近12月 |
+| O-05 | 培训完成率 | 区域内员工培训完成率 | 当前 |
+| O-06 | 高风险员工数 | 风险等级为orange/red的员工数 | 当前 |
+| O-07 | 重大隐患数 | 区域内重大隐患数 | 当前 |
+| O-08 | 整改完成率 | 隐患整改完成率 | 当前 |
+
+---
+
+## 五、车辆风险画像（v1.4保持不变）
+
+### 5.1 设计目标
+
+车辆画像仅展示与HSE相关的内容，**删除所有属于生产管理职责的内容**。
+
+### 5.2 车辆画像内容（精简后）
+
+| 内容 | 说明 | 数据来源 |
+|------|------|----------|
+| 车辆基础信息 | 车牌、车型、所属作业单元 | vehicles |
+| 历史使用情况 | 驾驶员使用历史（非固定绑定） | hse_vehicle_usage_history |
+| 关联事故 | 车辆相关交通事故 | hse_traffic_accidents |
+| 检查历史查询 | 车辆相关的三检记录查询（只读） | hse_driver_inspection_records |
+
+### 5.3 删除内容
+
+| 删除内容 | 删除原因 |
+|----------|----------|
+| 三检完成率 | 三检属于驾驶员安全行为，不属于车辆属性 |
+| 车辆故障次数 | 属于生产管理职责 |
+| 车辆异常次数 | 属于生产管理职责 |
+| 维修次数 | 属于生产管理职责 |
+| 年检提醒 | 属于生产管理职责 |
+| 保养记录 | 属于生产管理职责 |
+
+### 5.4 车辆关联设计
+
+**禁止**：驾驶员固定绑定车辆
+
+**原因**：实际存在备用车、临时替班、车辆调配、驾驶员换车等场景
+
+**设计**：车辆使用历史（`hse_vehicle_usage_history`）
+
+| 字段 | 说明 |
+|------|------|
+| employee_id | 驾驶员ID |
+| vehicle_id | 车辆ID |
+| 开始时间 | 使用开始时间 |
+| 结束时间 | 使用结束时间（NULL表示当前正在使用） |
+| 使用类型 | assigned/standby/substitute/temporary/dispatch |
+
+**说明**：`vehicle_id` 仅用于历史追溯，不作为当前固定关系。
+
+---
+
+## 六、事故管理（v1.4保持不变）
+
+### 6.1 事故分类
+
+| 事故类型 | 标识 | 说明 |
+|----------|------|------|
+| 生产安全事故 | production | 员工在生产作业过程中发生的安全事故 |
+| 交通事故 | traffic | 车辆行驶过程中发生的事故 |
+| 环境污染事故 | environmental | 污染、泄漏等环境影响事件 |
+
+### 6.2 保留内容
+
+| 内容 | 说明 |
+|------|------|
+| 四不放过 | 事故原因未查清不放过、责任人员未处理不放过、整改措施未落实不放过、有关人员未受到教育不放过 |
+| 事故调查 | 事故调查流程 |
+| 责任认定 | 责任类型（主要责任/次要责任/同等责任/无责任/待定） |
+| 整改措施 | 整改措施制定和落实 |
+
+> 详见《HSE事故管理设计.md》
+
+---
+
+## 七、风险分级管控画像（v1.4保持不变）
+
+### 7.1 设计目标
+
+实现双重预防机制的可视化：
+
+```
+风险辨识 → 危险源清单 → 风险评价 → 风险等级 → 管控措施 → 责任部门 → 责任人员
+                                                              │
+                                                              ▼
+                                                    检查 → 隐患 → 整改
+```
+
+### 7.2 风险分级管控指标
+
+| 指标编号 | 指标名称 | 计算方式 | 统计周期 |
+|:--------:|----------|----------|:--------:|
+| R-01 | 危险源数量 | 危险源清单总数 | 当前 |
+| R-02 | 重大风险源数量 | 风险等级为高/极高的危险源数 | 当前 |
+| R-03 | 管控措施覆盖率 | 已落实管控措施的风险源数/总风险源数 | 当前 |
+| R-04 | 检查计划完成率 | 已完成检查次数/计划检查次数 | 近30天 |
+| R-05 | 隐患发现率 | 检查发现隐患数/检查次数 | 近30天 |
+| R-06 | 隐患整改完成率 | 已整改隐患数/总隐患数 | 当前 |
+| R-07 | 重复隐患率 | 重复出现的隐患数/总隐患数 | 近12月 |
+| R-08 | 风险等级分布 | 各等级风险源数量分布 | 当前 |
+
+---
+
+## 八、风险规则配置设计（v1.4保持不变）
+
+### 8.1 设计目标
+
+风险权重和等级规则由集团/区域/项目公司统一配置，**禁止硬编码**。
+
+### 8.2 配置层级
+
+| 层级 | 说明 | 优先级 |
+|------|------|:------:|
+| 集团规则 | 集团级全局规则配置 | 最高 |
+| 区域规则 | 区域级规则配置（可覆盖集团规则） | 中 |
+| 项目公司规则 | 项目公司级规则配置（可覆盖区域规则） | 低 |
+
+### 8.3 配置内容
+
+| 配置项 | 说明 |
+|--------|------|
+| 风险维度权重 | 各风险维度的权重配置（按岗位类别） |
+| 风险等级阈值 | 风险等级判定的分数阈值 |
+| 一票否决规则 | 一票否决条件配置 |
+| 统计周期配置 | 各指标的统计周期配置 |
+| 评分细则 | 各指标的评分规则 |
+| 管理责任权重 | 管理责任画像各维度权重配置（v1.5新增） |
+| 网格长责任权重 | 网格长各层级责任权重配置（v1.5新增） |
+
+### 8.4 配置表设计
+
+#### 8.4.1 hse_risk_weight_config（风险权重配置表）
+
+| 字段名 | 类型 | 约束 | 说明 |
+|--------|------|------|------|
+| id | BIGSERIAL | PRIMARY KEY | 主键 |
+| config_code | VARCHAR(64) | UNIQUE | 配置编码 |
+| config_name | VARCHAR(128) | NOT NULL | 配置名称 |
+| level | VARCHAR(32) | NOT NULL | 配置层级（group/region/project） |
+| level_code | VARCHAR(64) | | 层级编码（如区域编码、项目公司编码） |
+| position_category | VARCHAR(32) | | 岗位类别（driver/worker/manager/grid_all） |
+| grid_level | VARCHAR(32) | | 网格层级（grid1/grid2/grid3/grid4，v1.5新增） |
+| dimension_code | VARCHAR(32) | NOT NULL | 风险维度编码 |
+| weight | DECIMAL(5,2) | NOT NULL | 权重（百分比） |
+| enabled | BOOLEAN | DEFAULT TRUE | 是否启用 |
+| remark | TEXT | | 备注 |
+| created_at | TIMESTAMPTZ | DEFAULT NOW() | 创建时间 |
+| updated_at | TIMESTAMPTZ | DEFAULT NOW() | 更新时间 |
+
+#### 8.4.2 hse_risk_level_config（风险等级配置表）
+
+| 字段名 | 类型 | 约束 | 说明 |
+|--------|------|------|------|
+| id | BIGSERIAL | PRIMARY KEY | 主键 |
+| level_code | VARCHAR(32) | UNIQUE | 等级编码（green/yellow/orange/red） |
+| level_name | VARCHAR(32) | NOT NULL | 等级名称 |
+| min_score | DECIMAL(5,2) | NOT NULL | 最低分数 |
+| max_score | DECIMAL(5,2) | NOT NULL | 最高分数 |
+| color | VARCHAR(16) | | 颜色 |
+| enabled | BOOLEAN | DEFAULT TRUE | 是否启用 |
+| created_at | TIMESTAMPTZ | DEFAULT NOW() | 创建时间 |
+| updated_at | TIMESTAMPTZ | DEFAULT NOW() | 更新时间 |
+
+#### 8.4.3 hse_risk_veto_config（一票否决配置表）
+
+| 字段名 | 类型 | 约束 | 说明 |
+|--------|------|------|------|
+| id | BIGSERIAL | PRIMARY KEY | 主键 |
+| veto_code | VARCHAR(64) | UNIQUE | 否决规则编码 |
+| veto_name | VARCHAR(128) | NOT NULL | 否决规则名称 |
+| level | VARCHAR(32) | NOT NULL | 配置层级（group/region/project） |
+| level_code | VARCHAR(64) | | 层级编码 |
+| dimension_code | VARCHAR(32) | NOT NULL | 风险维度编码 |
+| condition_type | VARCHAR(32) | NOT NULL | 条件类型（count/sum/max） |
+| condition_value | DECIMAL(10,2) | NOT NULL | 条件值 |
+| period | VARCHAR(32) | | 统计周期 |
+| enabled | BOOLEAN | DEFAULT TRUE | 是否启用 |
+| created_at | TIMESTAMPTZ | DEFAULT NOW() | 创建时间 |
+| updated_at | TIMESTAMPTZ | DEFAULT NOW() | 更新时间 |
+
+---
+
+## 九、三检数据导入设计（v1.5扩展：Excel导入详细设计）
+
+### 9.1 数据来源
+
+三检数据来源为 **Excel导入**，禁止设计移动端填报和在线实时填写。
+
+### 9.2 业务流程
+
+```
+驾驶员填写纸质/Excel三检表
+    │
+    ▼
+汇总Excel
+    │
+    ▼
+HSE系统导入
+    │
+    ▼
+形成驾驶员安全行为数据（hse_driver_inspection_records）
+```
+
+### 9.3 Excel导入规则
+
+| 规则项 | 说明 |
+|--------|------|
+| 文件格式 | xlsx/xls |
+| 导入频率 | 按日/按周导入 |
+| 导入内容 | 出车前检查、运行中检查、收车后检查 |
+| 必填字段 | employee_id、inspection_date、inspection_type、inspection_result |
+| 关联字段 | vehicle_id（可选，仅用于追溯） |
+| 数据校验 | 检查employee_id是否存在、inspection_type是否合法 |
+
+---
+
+## 十、管理责任画像（v1.5新增）
+
+### 10.1 设计目标
+
+新增**管理责任画像**模块，体现项目公司安全生产责任制落实情况。
+
+> 管理责任画像不是替代员工风险画像，而是在员工风险画像基础上，增加管理层级的责任落实评估。
+
+### 10.2 画像定位
+
+| 画像类型 | 评估对象 | 评估内容 |
+|----------|----------|----------|
+| 员工风险画像 | 员工个人 | 个人安全行为风险 |
+| 管理责任画像 | 管理人员/网格长 | 安全生产责任制落实情况 |
+
+### 10.3 画像结构
+
+```
+管理责任画像
+├── 基础信息
+│   ├── 员工信息（姓名、工号、岗位）
+│   ├── 管理角色（总网格长/一级网格长/二级网格长/三级网格长），标准岗位+岗位别名
+│   ├── 责任组织（所属组织）
+│   └── 责任区域（管辖区域）
+│
+├── 责任落实指标
+│   ├── 巡查责任指标
+│   │   ├── 应巡查次数
+│   │   ├── 实际巡查次数
+│   │   ├── 巡查完成率
+│   │   └── 巡查频次
+│   ├── 隐患治理责任
+│   │   ├── 责任区域隐患数量
+│   │   ├── 重大隐患数量
+│   │   ├── 隐患整改完成率
+│   │   └── 整改闭环情况
+│   ├── 三违管理责任
+│   │   ├── 责任区域三违数量
+│   │   ├── 严重三违数量
+│   │   └── 三违趋势
+│   ├── 事故管理责任
+│   │   ├── 责任区域事故数量
+│   │   ├── 事故等级
+│   │   └── 事故整改落实
+│   └── 培训管理责任
+│       ├── 责任区域培训完成率
+│       └── 培训覆盖率
+│
+└── 综合责任评估
+    ├── 责任评分（规则配置权重）
+    ├── 责任等级（green/yellow/orange/red）
+    └── 改进建议
+```
+
+> 详见《HSE管理责任画像设计.md》
+
+---
+
+## 十一、网格长责任体系（v1.5新增）
+
+### 11.1 设计目标
+
+根据项目公司网格管理制度，设计**网格长责任体系**。
+
+### 11.2 网格层级
+
+| 网格层级 | 角色名称 | 标准岗位 | 岗位别名 | 巡查频次 | 说明 |
+|:--------:|----------|----------|----------|----------|------|
+| 一级（grid1） | 总网格长 | 总经理 | — | 1次/3天 | 项目公司安全生产第一责任人 |
+| 二级（grid2） | 一级网格长 | 部门经理 | — | 1次/2天 | 各部门安全生产责任人 |
+| 三级（grid3） | 二级网格长 | 乡镇作业中心经理 | 乡镇主管/人工片区长 | 1次/1天 | 乡镇/区域安全生产责任人 |
+| 四级（grid4） | 三级网格长 | 管理员 | 人工班长 | 1次/1天 | 基层网格管理员 |
+
+### 11.3 责任关系模型
+
+基于 `employee` 设计，**禁止新增人员表**。
+
+```
+员工（employee）
+    │
+    ▼
+管理责任角色（hse_grid_responsibility）
+    │
+    ▼
+责任区域（hse_grid_area）
+    │
+    ▼
+责任组织
+```
+
+### 11.4 模型字段
+
+| 字段 | 说明 |
+|------|------|
+| employee_id | 关联员工ID（基于employee，不新增人员表） |
+| grid_level | 网格层级（grid1/grid2/grid3/grid4） |
+| grid_role | 网格角色（总网格长/一级网格长/二级网格长/三级网格长） |
+| standard_position | 标准岗位名称（如乡镇作业中心经理、管理员） |
+| position_alias | 岗位别名（如乡镇主管、人工片区长、人工班长），兼容员工花名册导入 |
+| responsible_org | 责任组织 |
+| responsible_area | 责任区域 |
+| inspection_frequency | 巡查频次（1次/3天、1次/2天、1次/1天） |
+
+> 详见《网格长责任体系设计.md》
+
+---
+
+## 十二、巡查责任画像（v1.5新增·仅设计）
+
+### 12.1 设计说明
+
+本阶段**只设计巡查责任画像**，**不开发巡查业务**。禁止开发巡查APP、定位功能、移动端。
+
+### 12.2 设计指标
+
+| 指标编号 | 指标名称 | 计算方式 | 数据来源 |
+|:--------:|----------|----------|----------|
+| P-01 | 应巡查次数 | 按巡查频次配置计算 | hse_grid_responsibility |
+| P-02 | 巡查频次 | 配置的巡查频次（1次/3天、1次/2天、1次/1天） | hse_grid_responsibility |
+| P-03 | 责任区域 | 管辖的责任区域 | hse_grid_responsibility |
+| P-04 | 发现隐患数量 | 责任区域内隐患数量 | hazards |
+| P-05 | 整改闭环情况 | 隐患整改完成率 | hazards |
+
+### 12.3 与风险画像的关联
+
+形成以下关联链路，用于集团检查展示：
+
+```
+组织
+    │
+    ▼
+网格责任人
+    │
+    ▼
+责任区域
+    │
+    ▼
+风险
+    │
+    ▼
+隐患
+    │
+    ▼
+整改
+```
+
+---
+
+## 十三、数据聚合方案（v1.5扩展）
+
+### 13.1 聚合策略
+
+风险画像采用**实时聚合**策略，不新增数据表，通过 SQL 联合查询实时计算。
+
+### 13.2 员工风险画像聚合查询（v1.4保持不变）
+
+```sql
+SELECT
+  e.id AS employee_id,
+  e.name,
+  e.employee_code,
+  -- 培训维度
+  (SELECT COUNT(*) FROM training_records tr 
+   WHERE tr.employee_id = e.id AND tr.is_deleted = false
+   AND tr.training_date >= CURRENT_DATE - INTERVAL '12 months') AS training_count,
+  (SELECT SUM(CASE WHEN tr.result = '合格' THEN 1 ELSE 0 END) FROM training_records tr 
+   WHERE tr.employee_id = e.id AND tr.is_deleted = false) AS qualified_count,
+  -- 三违维度（复用现有 violation_records 表）
+  (SELECT COUNT(*) FROM violation_records vr 
+   WHERE vr.violator_id = e.id AND vr.is_deleted = false
+   AND vr.violation_date >= CURRENT_DATE - INTERVAL '12 months') AS violation_count,
+  (SELECT COUNT(*) FROM violation_records vr 
+   WHERE vr.violator_id = e.id AND vr.is_deleted = false
+   AND vr.violation_level = '严重'
+   AND vr.violation_date >= CURRENT_DATE - INTERVAL '12 months') AS serious_violation_count,
+  -- 事故维度
+  (SELECT COUNT(*) FROM hse_incident_records ir 
+   WHERE ir.employee_id = e.id AND ir.is_deleted = false
+   AND ir.occurred_at >= CURRENT_DATE - INTERVAL '12 months') AS incident_count,
+  -- 隐患维度
+  (SELECT COUNT(*) FROM hazards h 
+   WHERE h.responsible_id = e.id AND h.is_deleted = false
+   AND h.hazard_date >= CURRENT_DATE - INTERVAL '12 months') AS hazard_count,
+  -- 交通安全维度（近5年）
+  (SELECT COALESCE(SUM(tv.points_deducted), 0) FROM hse_traffic_violations tv 
+   WHERE tv.employee_id = e.id AND tv.is_deleted = false
+   AND tv.violation_date >= CURRENT_DATE - INTERVAL '5 years') AS total_points_deducted,
+  (SELECT COUNT(*) FROM hse_traffic_violations tv 
+   WHERE tv.employee_id = e.id AND tv.is_deleted = false
+   AND tv.violation_date >= CURRENT_DATE - INTERVAL '5 years') AS violation_count_5y,
+  -- 驾驶员安全行为维度（三检，近30天，考虑应执行次数）
+  (SELECT COUNT(*) FROM hse_driver_inspection_records dir 
+   WHERE dir.employee_id = e.id AND dir.is_deleted = false
+   AND dir.inspection_result IN ('completed', 'abnormal')
+   AND dir.inspection_time >= CURRENT_DATE - INTERVAL '30 days') AS inspection_completed_count,
+  (SELECT COUNT(*) FROM hse_driver_inspection_schedule ds 
+   WHERE ds.employee_id = e.id AND ds.is_deleted = false
+   AND ds.schedule_date >= CURRENT_DATE - INTERVAL '30 days'
+   AND ds.is_work_day = true) AS inspection_required_count
+FROM employee e
+WHERE e.is_deleted = false
+ORDER BY e.id;
+```
+
+### 13.3 管理责任画像聚合查询（v1.5新增）
+
+```sql
+SELECT
+  gr.id AS responsibility_id,
+  gr.employee_id,
+  e.name,
+  e.employee_code,
+  gr.grid_level,
+  gr.grid_role,
+  gr.responsible_org,
+  gr.responsible_area,
+  gr.inspection_frequency,
+  -- 隐患治理责任
+  (SELECT COUNT(*) FROM hazards h 
+   WHERE h.responsible_org = gr.responsible_org 
+   AND h.is_deleted = false
+   AND h.hazard_date >= CURRENT_DATE - INTERVAL '12 months') AS hazard_count,
+  (SELECT COUNT(*) FROM hazards h 
+   WHERE h.responsible_org = gr.responsible_org 
+   AND h.is_deleted = false
+   AND h.risk_level = '重大'
+   AND h.hazard_date >= CURRENT_DATE - INTERVAL '12 months') AS major_hazard_count,
+  (SELECT COUNT(*) FROM hazards h 
+   WHERE h.responsible_org = gr.responsible_org 
+   AND h.is_deleted = false
+   AND h.status = 'closed') * 100.0 / NULLIF((SELECT COUNT(*) FROM hazards h 
+   WHERE h.responsible_org = gr.responsible_org 
+   AND h.is_deleted = false), 0) AS hazard_rectification_rate,
+  -- 三违管理责任
+  (SELECT COUNT(*) FROM violation_records vr 
+   WHERE vr.responsible_org = gr.responsible_org 
+   AND vr.is_deleted = false
+   AND vr.violation_date >= CURRENT_DATE - INTERVAL '12 months') AS violation_count,
+  (SELECT COUNT(*) FROM violation_records vr 
+   WHERE vr.responsible_org = gr.responsible_org 
+   AND vr.is_deleted = false
+   AND vr.violation_level = '严重'
+   AND vr.violation_date >= CURRENT_DATE - INTERVAL '12 months') AS serious_violation_count,
+  -- 事故管理责任
+  (SELECT COUNT(*) FROM hse_incident_records ir 
+   WHERE ir.responsible_org = gr.responsible_org 
+   AND ir.is_deleted = false
+   AND ir.occurred_at >= CURRENT_DATE - INTERVAL '12 months') AS incident_count
+FROM hse_grid_responsibility gr
+JOIN employee e ON gr.employee_id = e.id
+WHERE gr.is_deleted = false
+ORDER BY gr.grid_level, gr.id;
+```
+
+---
+
+## 十四、与现有系统的关系（v1.5扩展）
+
+### 14.1 不修改的模块
+
+| 模块 | 表 | 说明 |
+|------|----|------|
+| 员工模型 | employee, employee_assignment, position | 不修改表结构和业务逻辑 |
+| 培训模型 | training_records, training_plans, training_requirements | 不修改表结构和业务逻辑 |
+| 三违模型 | violation_records | 不修改表结构和业务逻辑，仅读取数据 |
+| 隐患模型 | hazards | 不修改表结构和业务逻辑 |
+
+### 14.2 新增设计的模块
+
+| 模块 | 表 | 说明 | 版本 |
+|------|----|------|:----:|
+| 事故管理 | hse_incident_records, hse_incident_participants | 独立事故管理模块 | v1.4 |
+| 交通安全 | hse_traffic_records, hse_traffic_violations, hse_traffic_accidents | 独立交通安全模块（删除驾驶证有效期管理、年检提醒） | v1.4 |
+| 车辆使用记录 | hse_vehicle_usage_history | 驾驶员车辆使用记录（非固定绑定） | v1.4 |
+| 驾驶员三检记录 | hse_driver_inspection_records, hse_driver_inspection_schedule | 驾驶员安全行为记录（三检，Excel导入） | v1.4 |
+| 驾驶员风险评估 | hse_driver_risk_assessment | 季度驾驶员安全风险评估档案 | v1.4 |
+| 风险规则配置 | hse_risk_weight_config, hse_risk_level_config, hse_risk_veto_config | 集团/区域/项目公司风险规则配置 | v1.4 |
+| 风险分级管控 | hse_risk_sources, hse_risk_controls | 双重预防机制 | v1.4 |
+| **网格长责任体系** | **hse_grid_responsibility, hse_grid_area** | **网格长责任关系模型（基于employee）** | **v1.5新增** |
+| **管理责任画像** | **（只读聚合，不新增表）** | **管理责任落实评估** | **v1.5新增** |
+
+### 14.3 复用的能力
+
+| 能力 | 来源 | 用途 |
+|------|------|------|
+| v_employee_current 视图 | 现有 | 员工基础信息展示 |
+| EmployeeSelector 组件 | 现有 | 员工选择器 |
+| useAccess | 现有 | 权限控制 |
+| $t i18n | 现有 | 国际化 |
+| @vben/request | 现有 | API 请求 |
+| Ant Design Vue | 现有 | UI 组件 |
+
+---
+
+## 十五、权限设计（v1.5扩展）
+
+| 操作 | 权限代码 | 说明 | 版本 |
+|------|----------|------|:----:|
+| 查看员工风险画像 | hse:risk-profile:employee:view | | v1.4 |
+| 查看驾驶员综合安全行为画像 | hse:risk-profile:driver:view | | v1.4 |
+| 查看组织风险画像 | hse:risk-profile:org:view | | v1.4 |
+| 查看车辆风险画像 | hse:risk-profile:vehicle:view | | v1.4 |
+| 查看风险分级管控画像 | hse:risk-profile:control:view | | v1.4 |
+| 查看所有员工画像 | hse:risk-profile:view-all | 管理员权限 | v1.4 |
+| 管理风险规则配置 | hse:risk-config:manage | 集团/区域管理员 | v1.4 |
+| 导出风险报告 | hse:risk-profile:export | | v1.4 |
+| **查看管理责任画像** | **hse:responsibility-profile:view** | **v1.5新增** | v1.5 |
+| **查看网格长责任体系** | **hse:grid-responsibility:view** | **v1.5新增** | v1.5 |
+| **管理网格长责任配置** | **hse:grid-responsibility:manage** | **v1.5新增** | v1.5 |
+| **查看巡查责任画像** | **hse:patrol-responsibility:view** | **v1.5新增（仅设计）** | v1.5 |
+
+---
+
+## 十六、后续开发建议（v1.5扩展）
+
+### 16.1 开发分阶段
+
+| 阶段 | 内容 | 优先级 | 版本 |
+|:----:|------|:------:|:----:|
+| 1 | 事故管理模块开发 | 高 | v1.4 |
+| 2 | 交通安全管理模块开发（删除驾驶证有效期管理、年检提醒） | 高 | v1.4 |
+| 3 | 驾驶员三检记录模块开发（Excel导入，含排班计算） | 高 | v1.4 |
+| 4 | 车辆使用记录模块开发（hse_vehicle_usage_history） | 高 | v1.4 |
+| 5 | 驾驶员风险评估档案模块开发 | 高 | v1.4 |
+| 6 | 风险规则配置模块开发（集团/区域/项目公司层级） | 高 | v1.4 |
+| 7 | 风险分级管控模块开发 | 高 | v1.4 |
+| 8 | 后端风险画像聚合API | 高 | v1.4 |
+| 9 | 前端员工风险画像页面 | 高 | v1.4 |
+| 10 | 前端驾驶员综合安全行为画像页面 | 高 | v1.4 |
+| 11 | 前端组织风险画像页面 | 高 | v1.4 |
+| 12 | 前端车辆风险画像页面 | 中 | v1.4 |
+| 13 | 前端风险分级管控页面 | 高 | v1.4 |
+| 14 | 高风险预警列表 | 中 | v1.4 |
+| 15 | 风险报告导出 | 中 | v1.4 |
+| 16 | **网格长责任体系模块开发** | **高** | **v1.5** |
+| 17 | **管理责任画像聚合API开发** | **高** | **v1.5** |
+| 18 | **前端管理责任画像页面** | **高** | **v1.5** |
+| 19 | **驾驶员三检Excel导入功能开发** | **高** | **v1.5** |
+| 20 | **巡查业务模块开发** | **中（下一阶段）** | **v1.6+** |
+
+---
+
+## 十七、修订记录
+
+| 版本 | 日期 | 修订内容 |
+|:----:|------|----------|
+| v1.0 | 2026-07-21 | 初始版本 |
+| v1.1 | 2026-07-21 | 第一次修订：删除车辆管理非HSE内容；驾驶证扣分统计周期改为近5年；车辆关联改为驾驶员车辆使用记录；三检管理改为驾驶员安全行为指标 |
+| v1.2 | 2026-07-21 | 第二次修订：员工风险画像增加三违风险维度；三检表名调整为 hse_driver_inspection_records；车辆画像删除三检完成率等非HSE内容 |
+| v1.3 | 2026-07-21 | 第三次修订：新增驾驶员综合安全行为画像模块；三检计算规则优化；新增 hse_driver_risk_assessment 表；交通违法统计周期明确；车辆使用历史完善设计；风险评分模型优化；新增风险规则配置表 |
+| v1.4 | 2026-07-21 | 第四次修订：<br>1. 三检数据来源明确为Excel导入，禁止移动端填报和在线实时填写<br>2. 驾驶员风险画像完善：培训风险、三违风险、交通安全风险、驾驶员安全行为风险<br>3. 删除驾驶证有效期管理、驾驶证年检提醒（属于行政/生产管理职责）<br>4. 车辆关联设计调整：禁止驾驶员固定绑定车辆，设计 hse_vehicle_usage_history<br>5. 删除车辆生产管理内容（维修次数、故障次数、异常次数、年检、保养记录）<br>6. 风险规则配置优化：支持集团/区域/项目公司规则，支持不同岗位不同权重<br>7. 保持事故管理（生产安全事故、交通事故、环境污染事故，四不放过）<br>8. 保持组织和职责边界：不增加网格长制度、不增加巡查责任模型 |
+| v1.5 | 2026-07-21 | 第五次修订：<br>1. 新增管理责任画像模块，体现安全生产责任制落实<br>2. 新增网格长责任体系：一级（总网格长/总经理）、二级（一级网格长/部门经理）、三级（二级网格长/乡镇作业中心经理）、四级（三级网格长/管理员）<br>3. 岗位名称设计：标准岗位（乡镇作业中心经理、管理员）+ 岗位别名（乡镇主管、人工片区长、人工班长），兼容员工花名册导入<br>4. 网格责任模型新增 standard_position、position_alias 字段<br>5. 巡查频次：1次/3天、1次/2天、1次/1天、1次/1天（本阶段仅设计，禁止开发巡查APP/定位/移动端）<br>6. 关联链路：组织→网格责任人→责任区域→风险→隐患→整改<br>7. 保持v1.4已有设计不变（员工风险画像、驾驶员综合安全行为画像、交通安全风险、事故风险、车辆历史使用）<br>8. 不修改三违模型、培训模型、隐患模型、employee模型<br>9. 数据进入 hse_driver_inspection_records |

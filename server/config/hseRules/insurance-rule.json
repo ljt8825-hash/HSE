@@ -1,0 +1,125 @@
+{
+  "version": "1.0.0",
+  "description": "HSE保险管理规则配置 - 人员保险/车辆保险/其他保险 全部规则集中管理",
+  "updatedAt": "2026-07-25",
+  "ruleCode": "insuranceRule",
+  "ruleName": "保险管理规则",
+
+  "overAgeThresholds": {
+    "description": "超龄识别阈值（与employee-age-rule.json保持一致）",
+    "male": 60,
+    "female": 50,
+    "note": "男性≥60或女性≥50自动识别为超龄人员"
+  },
+
+  "expiryRules": {
+    "description": "临期/过期判定规则（全部保险类型通用）",
+    "expiringDays": 30,
+    "expiredCondition": "expire_date < CURRENT_DATE",
+    "expiringCondition": "expire_date >= CURRENT_DATE AND expire_date <= CURRENT_DATE + INTERVAL '30 days'",
+    "normalCondition": "expire_date > CURRENT_DATE + INTERVAL '30 days'"
+  },
+
+  "personnelInsurance": {
+    "description": "人员保险缴纳条件规则引擎 - 按年龄+性别+五险属性匹配",
+    "rules": [
+      {
+        "code": "overage_default",
+        "name": "超龄人员默认方案",
+        "priority": 1,
+        "enabled": true,
+        "conditions": {
+          "ageGender": "overAge",
+          "note": "男性≥60或女性≥50"
+        },
+        "insurancePlan": {
+          "types": ["工伤保险", "雇主责任险"],
+          "employerLiabilityAmount": 100000,
+          "isMandatory": true,
+          "note": "工伤保险 + 10万雇主责任险（默认）"
+        }
+      },
+      {
+        "code": "adult_five_ins",
+        "name": "适龄五险人员方案",
+        "priority": 2,
+        "enabled": true,
+        "conditions": {
+          "ageGender": "adult",
+          "hasFiveIns": true,
+          "note": "男≤60且女≤50 + 人员属性标记为缴纳五险"
+        },
+        "insurancePlan": {
+          "types": ["工伤保险"],
+          "isMandatory": true,
+          "note": "五险人员方案（提示词08）：五险为人员属性/规则条件而非保单类型，实际跟踪结果为工伤保障 → 输出工伤保险"
+        }
+      },
+      {
+        "code": "adult_employer",
+        "name": "适龄雇主险人员方案",
+        "priority": 3,
+        "enabled": true,
+        "conditions": {
+          "ageGender": "adult",
+          "hasFiveIns": false,
+          "note": "男≤60且女≤50 + 非五险"
+        },
+        "insurancePlan": {
+          "types": ["雇主责任险"],
+          "employerLiabilityAmount": 800000,
+          "isMandatory": true,
+          "note": "80万雇主责任险（默认）"
+        }
+      }
+    ],
+    "conditionDimensions": ["年龄", "性别", "五险标记", "岗位", "部门"],
+    "note": "规则引擎支持按「年龄+性别+人员属性+岗位+部门」组合匹配，条件可增删改"
+  },
+
+  "vehicleInsurance": {
+    "description": "车辆保险规则配置",
+    "types": [
+      { "code": "compulsory", "name": "交强险", "isMandatory": true },
+      { "code": "commercial", "name": "商业险", "isMandatory": false }
+    ],
+    "expiringDays": 30,
+    "note": "支持交强险、商业险；无承运人责任险"
+  },
+
+  "otherInsurance": {
+    "description": "其他保险规则配置",
+    "types": [
+      { "code": "public_liability", "name": "公众责任险", "isMandatory": false },
+      { "code": "property_all_risk", "name": "财产一切险", "isMandatory": false }
+    ],
+    "expiringDays": 30
+  },
+
+  "budgetConfig": {
+    "description": "保险预算配置",
+    "dimensions": ["部门", "保险类型"],
+    "note": "按部门+保险类型做预算vs实际对比"
+  },
+
+  "dataSourceBoundary": {
+    "description": "人员管理边界（红线）",
+    "personnelInsurance": {
+      "linkFields": ["employee_id", "employee_no"],
+      "readFromPersonnel": ["name", "gender", "birth_date", "department", "position", "has_five_ins"],
+      "forbiddenFields": ["name", "gender", "birth_date", "department", "position", "has_five_ins"],
+      "note": "人员保险只关联员工ID/员工编号，展示时实时取人员管理数据；禁止在保险模块维护或修改姓名、部门、岗位、年龄、性别、是否五险等基础属性"
+    },
+    "overAgeRule": {
+      "male": "age >= 60",
+      "female": "age >= 50",
+      "note": "超龄判定必须使用基线规则：男性年龄≥60，女性年龄≥50"
+    }
+  },
+
+  "forbidden": {
+    "assessmentRuleInCalculation": false,
+    "hardcodeAnyRule": false,
+    "note": "assessment_rule仅作影子数据，禁止参与计算；禁止硬编码任何保额、临期、匹配逻辑"
+  }
+}

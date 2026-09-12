@@ -1,0 +1,1 @@
+import{On as e,k as t,mt as n,v as r}from"./runtime-core.esm-bundler-Blp3D1W4.js";import{t as i}from"./objectSpread2-Cp9FhHJ8.js";import{t as a}from"./fallback-yhaT2h4j.js";var o=t(i(i({},{name:`Fallback500Demo`}),{},{__name:`internal-error`,setup(t){return(t,i)=>(n(),r(e(a),{status:`500`}))}}));export{o as default};

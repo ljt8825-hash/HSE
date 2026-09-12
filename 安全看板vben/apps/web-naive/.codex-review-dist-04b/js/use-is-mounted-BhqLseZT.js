@@ -1,0 +1,1 @@
+import{_n as e,ct as t,vn as n}from"./runtime-core.esm-bundler-Blp3D1W4.js";function r(){let r=n(!1);return t(()=>{r.value=!0}),e(r)}export{r as t};

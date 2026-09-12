@@ -1,0 +1,70 @@
+[
+ {
+  "name": "当日序号",
+  "type": "text"
+ },
+ {
+  "name": "昵称",
+  "type": "text"
+ },
+ {
+  "name": "分组名称",
+  "type": "text"
+ },
+ {
+  "name": "姓名",
+  "type": "text"
+ },
+ {
+  "name": "所属岗位",
+  "type": "text"
+ },
+ {
+  "name": "网格等级",
+  "type": "text"
+ },
+ {
+  "name": "检查日期",
+  "type": "text"
+ },
+ {
+  "name": "三违行为",
+  "type": "text"
+ },
+ {
+  "name": "违章人姓名",
+  "type": "text"
+ },
+ {
+  "name": "违章人性别",
+  "type": "text"
+ },
+ {
+  "name": "违章人年龄",
+  "type": "text"
+ },
+ {
+  "name": "当日是否报名",
+  "type": "text"
+ },
+ {
+  "name": "标记",
+  "type": "text"
+ },
+ {
+  "name": "是否补交",
+  "type": "text"
+ },
+ {
+  "name": "提交时间",
+  "type": "text"
+ },
+ {
+  "name": "编号",
+  "type": "text"
+ },
+ {
+  "name": "来源日期",
+  "type": "text"
+ }
+]

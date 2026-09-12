@@ -1,0 +1,151 @@
+{
+  "version": "1.1.0",
+  "description": "HSE导入能力配置 - 所有业务模块统一使用",
+  "defaults": {
+    "maxFileSize": 10485760,
+    "allowedFormats": [".xlsx", ".xls", ".csv"],
+    "batchSize": 100,
+    "errorLimit": 1000,
+    "templateVersion": "1.1"
+  },
+  "modules": {
+    "employee": {
+      "targetTable": "employee",
+      "moduleName": "员工花名册",
+      "templateColumns": ["姓名", "身份证号", "手机号", "部门", "岗位", "入职日期"],
+      "conflictKey": "id_card"
+    },
+    "personnel": {
+      "targetTable": "personnel_insurance",
+      "moduleName": "人员保险",
+      "templateColumns": ["姓名", "身份证号", "部门", "岗位", "保险状态", "保险类型", "保单号", "保险起期", "保险到期", "保费"],
+      "conflictKey": ["name", "id_card", "policy_no"]
+    },
+    "vehicle": {
+      "targetTable": "vehicle_insurance",
+      "moduleName": "车辆保险",
+      "templateColumns": ["车牌号", "车架号", "车型", "车主", "保险类型", "保险起期", "保险到期", "保费", "车辆类型", "状态"],
+      "conflictKey": ["plate_no", "policy_no"]
+    },
+    "regulations": {
+      "targetTable": "regulations",
+      "moduleName": "规章制度",
+      "templateColumns": ["制度名称", "制度编号", "制度类型", "发布日期", "实施日期", "制定部门", "状态", "版本"],
+      "conflictKey": "name"
+    },
+    "training": {
+      "targetTable": "training_plans",
+      "moduleName": "培训考核",
+      "templateColumns": ["培训名称", "培训类型", "培训日期", "培训时长", "培训内容", "讲师", "考核结果", "分数", "状态"],
+      "conflictKey": ["title", "start_date"]
+    },
+    "hazards": {
+      "targetTable": "hazards",
+      "moduleName": "隐患排查治理",
+      "templateColumns": ["隐患描述", "整改措施", "检查时间", "检查人员", "整改人员", "整改时间", "是否整改完成"],
+      "conflictKey": "description"
+    },
+    "accidents": {
+      "targetTable": "accidents",
+      "moduleName": "事故管理",
+      "templateColumns": ["事故日期", "事故类型", "事故等级", "发生地点", "事故描述", "损失金额", "处理状态"],
+      "conflictKey": ["accident_date", "accident_type", "location"]
+    },
+    "emergency": {
+      "targetTable": "emergency_plans",
+      "moduleName": "应急预案",
+      "templateColumns": ["预案名称", "类型", "级别", "状态", "责任部门", "责任人", "联系电话", "描述", "版本"],
+      "conflictKey": ["name", "version"]
+    },
+    "drill": {
+      "targetTable": "emergency_drills",
+      "moduleName": "应急演练",
+      "templateColumns": ["预案名称", "演练类型", "演练日期", "演练地点", "参加人数", "时长分钟", "演练结果", "评估人", "总结", "改进建议"],
+      "conflictKey": ["plan_name", "drill_date"]
+    },
+    "risk-control": {
+      "targetTable": "risk_sources",
+      "moduleName": "风险分级管控",
+      "templateColumns": ["风险名称", "风险等级", "风险类型", "责任部门", "管控措施", "状态"],
+      "conflictKey": ["name", "location"]
+    },
+    "violation": {
+      "targetTable": "violation_records",
+      "moduleName": "三违管理",
+      "templateColumns": ["片区/班组", "上传时间", "检查人姓名", "网格等级", "所属岗位", "违章人姓名", "违章人性别", "违章人年龄", "车辆类型/保洁员", "上报状态", "图片内容", "三违行为", "三违类型输出结果", "需要整改", "整改执行人", "整改后的照片", "示意图"],
+      "conflictKey": ["area_team", "upload_time", "violator_name", "violation_behavior", "grid_level", "inspector_name"]
+    },
+    "fire-facility": {
+      "targetTable": "memory_fire_equipment",
+      "moduleName": "消防设施管理",
+      "templateColumns": ["设施名称", "设施类型", "型号规格", "安装位置", "设施状态", "数量", "安装日期", "有效期至", "上次检查", "下次检查", "负责人", "联系电话"],
+      "conflictKey": ["name", "location"]
+    },
+    "grid": {
+      "targetTable": "grid_areas",
+      "moduleName": "网格管理",
+      "templateColumns": ["网格名称", "网格编号", "网格级别", "负责人", "职务", "联系方式", "区域范围", "所属乡镇", "巡查频率", "风险等级", "状态"],
+      "conflictKey": ["name", "grid_level", "area"]
+    },
+    "over-age": {
+      "targetTable": "over_age_personnel",
+      "moduleName": "超龄人员管控",
+      "templateColumns": ["姓名", "身份证号", "部门", "岗位", "年龄", "超龄年限", "管控类型", "审批状态", "保险状态"],
+      "conflictKey": ["name", "id_card"]
+    },
+    "objectives": {
+      "targetTable": "hse_target_contracts",
+      "moduleName": "目标职责",
+      "templateColumns": ["年度", "季度", "部门", "责任人", "考核分数", "等级", "状态"],
+      "conflictKey": ["title", "department"]
+    },
+    "committee": {
+      "targetTable": "hse_safety_committee",
+      "moduleName": "安全人员",
+      "templateColumns": ["姓名", "部门", "职务", "联系电话", "委员会类型", "任职日期", "状态"],
+      "conflictKey": ["name", "position"]
+    },
+    "budget": {
+      "targetTable": "hse_safety_budget",
+      "moduleName": "安全费用预算",
+      "templateColumns": ["预算项目", "预算金额", "已用金额", "预算类别", "状态", "责任部门", "备注"],
+      "conflictKey": ["item_name", "budget_year"]
+    },
+    "assessment": {
+      "targetTable": "hse_responsibility_assessment",
+      "moduleName": "责任制考核",
+      "templateColumns": ["考核名称", "考核周期", "被考核部门", "考核分数", "考核等级", "考核人", "考核日期"],
+      "conflictKey": ["assessment_name", "period", "department"]
+    },
+    "audit": {
+      "targetTable": "audit_logs",
+      "moduleName": "审计日志",
+      "templateColumns": ["操作人", "操作类型", "操作对象", "操作时间", "IP地址", "操作结果", "备注"],
+      "conflictKey": ["operator", "action_type", "action_time"]
+    },
+    "workflow": {
+      "targetTable": "hse_workflows",
+      "moduleName": "审批任务",
+      "templateColumns": ["流程编码", "流程名称", "流程描述", "状态", "排序"],
+      "conflictKey": ["code", "name"]
+    },
+    "new-employee": {
+      "targetTable": "new_employee_training",
+      "moduleName": "新员工培训",
+      "templateColumns": ["姓名", "部门", "岗位", "入职日期", "培训完成", "考试分数", "师傅姓名", "考核结果"],
+      "conflictKey": ["name", "department", "hire_date"]
+    },
+    "ledger": {
+      "targetTable": "training_ledger",
+      "moduleName": "培训台账",
+      "templateColumns": ["培训名称", "培训类型", "培训日期", "培训时长", "培训讲师", "参训人数", "合格人数", "合格率"],
+      "conflictKey": ["name", "training_date"]
+    },
+    "driver": {
+      "targetTable": "driver_assessment",
+      "moduleName": "驾驶员实操",
+      "templateColumns": ["姓名", "部门", "岗位", "驾驶证号", "准驾车型", "入职日期", "实操考核日期", "考核结果", "安全行驶里程"],
+      "conflictKey": ["name", "department", "license_no"]
+    }
+  }
+}

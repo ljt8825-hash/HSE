@@ -1,0 +1,49 @@
+{
+  "version": "1.0.0",
+  "description": "HSE角色层级配置 - 总经理 > 部门/中心 > 乡镇作业中心经理 > 管理员 > 员工",
+  "hierarchy": [
+    {
+      "code": "general_manager",
+      "name": "公司总经理",
+      "level": 1,
+      "description": "公司最高管理层，拥有全部权限"
+    },
+    {
+      "code": "dept_manager",
+      "name": "部门/中心经理",
+      "level": 2,
+      "description": "部门或中心负责人"
+    },
+    {
+      "code": "township_manager",
+      "name": "乡镇作业中心经理",
+      "level": 3,
+      "description": "乡镇作业中心负责人"
+    },
+    {
+      "code": "admin",
+      "name": "系统管理员",
+      "level": 4,
+      "description": "系统管理员，拥有系统配置权限"
+    },
+    {
+      "code": "safety_manager",
+      "name": "安全管理员",
+      "level": 5,
+      "description": "专职安全管理人员"
+    },
+    {
+      "code": "safety_officer",
+      "name": "安全员",
+      "level": 6,
+      "description": "现场安全管理人员"
+    },
+    {
+      "code": "employee",
+      "name": "员工",
+      "level": 7,
+      "description": "普通员工"
+    }
+  ],
+  "builtInRoles": ["general_manager", "dept_manager", "township_manager", "admin", "safety_manager", "safety_officer", "employee"]
+}

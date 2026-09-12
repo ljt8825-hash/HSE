@@ -1,0 +1,24 @@
+{
+  "id": "96",
+  "suggested_score": "1.00",
+  "confirmed_score": null,
+  "review_status": "pending",
+  "source_detail": {
+    "cap": 15,
+    "kind": "grid_unchecked_monthly",
+    "unit": 1,
+    "year": 2026,
+    "month": 8,
+    "actual": 29,
+    "missing": 1,
+    "summary": "未检查（本月应巡30次/实巡29次/缺1次）",
+    "category": "三违管理",
+    "expected": 30,
+    "rawScore": 1,
+    "ruleName": "未检查",
+    "deductKey": "grid-unchecked:24:7643",
+    "eventType": "GRID_UNCHECKED",
+    "cappedScore": 1,
+    "otherCatScore": 0
+  }
+}

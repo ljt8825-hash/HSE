@@ -1,0 +1,1 @@
+import{t as e}from"./objectSpread2-Cp9FhHJ8.js";var t={primary:`hsl(144 57% 45%)`,info:`hsl(212 100% 45%)`,warning:`hsl(38 92% 50%)`,danger:`hsl(348 100% 50%)`},n={infoColor:`rgb(32, 128, 240)`,infoColorHover:`rgb(63, 150, 247)`,infoColorPressed:`rgb(24, 110, 216)`,infoColorSuppl:`rgb(24, 110, 216)`};function r(t){return{common:e(e({},t),n)}}export{t as n,r as t};

@@ -1,0 +1,93 @@
+{
+  "version": "1.0.0",
+  "description": "HSE系统管理业务模块规则配置 - Sprint11-12",
+  "forbidden": {
+    "assessmentRuleInCalculation": false,
+    "hardcodeAnyRule": false,
+    "note": "assessment_rule仅作只读影子数据，禁止参与计算；禁止硬编码角色权限、密码策略、登录锁定、审计保留期限等逻辑"
+  },
+  "passwordPolicy": {
+    "minLength": 8,
+    "maxLength": 32,
+    "requireUppercase": true,
+    "requireLowercase": true,
+    "requireNumber": true,
+    "requireSpecial": true,
+    "specialChars": "!@#$%^&*()_+-=[]{}|;':\",./<>?",
+    "expireDays": 90,
+    "historyCount": 5,
+    "minChangeIntervalHours": 1
+  },
+  "loginSecurity": {
+    "maxFailedAttempts": 5,
+    "lockDurationMinutes": 30,
+    "sessionTimeoutMinutes": 120,
+    "concurrentSessionsAllowed": 1,
+    "ipWhitelistEnabled": false,
+    "ipWhitelist": []
+  },
+  "roles": {
+    "hierarchyStrict": true,
+    "defaultRoles": [
+      { "code": "company_gm", "name": "公司总经理", "level": 1, "orgScope": "all" },
+      { "code": "department_head", "name": "部门/中心负责人", "level": 2, "orgScope": "department" },
+      { "code": "township_manager", "name": "乡镇作业中心经理", "level": 3, "orgScope": "township" },
+      { "code": "administrator", "name": "管理员", "level": 4, "orgScope": "township" },
+      { "code": "employee", "name": "员工", "level": 5, "orgScope": "self" }
+    ],
+    "roleOrgMapping": {
+      "company_gm": ["all"],
+      "department_head": ["department"],
+      "township_manager": ["township"],
+      "administrator": ["township"],
+      "employee": ["self"]
+    },
+    "allowCustomRoles": true,
+    "customRoleMinLevel": 3,
+    "permissionChangeAudit": true
+  },
+  "audit": {
+    "retentionDays": 365,
+    "archiveDays": 180,
+    "actions": [
+      "login", "logout", "create", "update", "delete", "import", "export",
+      "permission_change", "password_reset", "password_change", "role_assign",
+      "user_enable", "user_disable", "user_lock", "user_unlock",
+      "rule_change", "config_change", "data_restore"
+    ],
+    "criticalActions": [
+      "delete", "permission_change", "password_reset", "role_assign",
+      "rule_change", "config_change", "data_restore", "export"
+    ],
+    "logImmutable": true,
+    "allowDeleteByRoles": ["company_gm"],
+    "archiveAutoRun": true
+  },
+  "dataScope": {
+    "levels": ["all", "department", "township", "team", "self"],
+    "defaultForRole": {
+      "company_gm": "all",
+      "department_head": "department",
+      "township_manager": "township",
+      "administrator": "township",
+      "employee": "self"
+    }
+  },
+  "responsibilityMatrix": {
+    "company_gm": ["user_manage_all", "role_manage", "audit_view", "audit_archive", "config_manage", "permission_grant"],
+    "department_head": ["user_manage_dept", "role_view", "audit_view_dept", "user_enable_dept"],
+    "township_manager": ["user_manage_township", "role_view", "audit_view_township", "user_reset_password"],
+    "administrator": ["data_maintenance", "user_create", "user_update", "audit_view", "process_tracking"],
+    "employee": ["self_view", "self_password_change", "self_profile_update"]
+  },
+  "dashboardCards": [
+    { "code": "SYS-001", "title": "用户总数", "semanticColor": "info" },
+    { "code": "SYS-002", "title": "启用用户", "semanticColor": "success" },
+    { "code": "SYS-003", "title": "禁用用户", "semanticColor": "warning" },
+    { "code": "SYS-004", "title": "锁定用户", "semanticColor": "danger" },
+    { "code": "SYS-005", "title": "角色总数", "semanticColor": "info" },
+    { "code": "SYS-006", "title": "今日登录次数", "semanticColor": "success" },
+    { "code": "SYS-007", "title": "今日登录失败", "semanticColor": "danger" },
+    { "code": "SYS-008", "title": "本周关键操作", "semanticColor": "warning" }
+  ]
+}

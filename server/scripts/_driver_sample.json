@@ -1,0 +1,23 @@
+{
+  "id": "7440",
+  "employee_code": "00490167",
+  "name": "潘兴山",
+  "gender": "男",
+  "age": 56,
+  "org_unit_id": "15",
+  "org_name": "大柳镇作业中心",
+  "org_type": "town_center",
+  "org_code": "TOWN-DALIU",
+  "operation_unit_id": "61",
+  "unit_name": "大柳镇收运车组",
+  "unit_type": "collection_team",
+  "dept_name": "大柳镇片区",
+  "position_id": "1398",
+  "position_name": "垃圾收运车驾驶员",
+  "position_code": "POS-DRIVER-COLLECT",
+  "status": "active",
+  "hire_date": "2026-07-21T16:00:00.000Z",
+  "phone": "13336278659",
+  "id_card": "372431197004034413",
+  "is_driver": true
+}

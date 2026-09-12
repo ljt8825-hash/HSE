@@ -1,0 +1,13 @@
+{
+  "module": "assessment-monthly",
+  "dependsOn": {
+    "employeeFields": ["employeeId", "employeeName", "deptName", "positionName", "orgStatus"],
+    "events": ["EMPLOYEE_TRANSFERRED", "EMPLOYEE_RESIGNED", "EMPLOYEE_STATUS_CHANGED"],
+    "queries": ["getEmployeesByIds", "getEmployeeSelectorList"],
+    "components": ["EmployeeSelector", "EmployeeName"]
+  },
+  "provides": {
+    "employeeStats": ["assessmentScore", "assessmentCount"],
+    "events": ["ASSESSMENT_COMPLETED"]
+  }
+}

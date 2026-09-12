@@ -1,0 +1,36 @@
+{
+  "version": "1.0.0",
+  "description": "HSE附件能力配置 - 支持制度/培训/隐患/事故/保险等模块",
+  "defaults": {
+    "maxFileSize": 52428800,
+    "allowedFormats": [".pdf", ".doc", ".docx", ".xls", ".xlsx", ".jpg", ".jpeg", ".png", ".txt"],
+    "uploadDir": "./uploads/attachments"
+  },
+  "modules": {
+    "regulations": {
+      "moduleName": "制度标准",
+      "category": "制度附件",
+      "maxFiles": 10
+    },
+    "training": {
+      "moduleName": "培训考核",
+      "category": "培训资料",
+      "maxFiles": 20
+    },
+    "hazards": {
+      "moduleName": "隐患治理",
+      "category": "隐患附件",
+      "maxFiles": 15
+    },
+    "accidents": {
+      "moduleName": "应急管理",
+      "category": "事故附件",
+      "maxFiles": 30
+    },
+    "insurance": {
+      "moduleName": "保险管理",
+      "category": "保险单据",
+      "maxFiles": 10
+    }
+  }
+}

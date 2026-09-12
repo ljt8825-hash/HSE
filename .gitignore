@@ -1,0 +1,309 @@
+# ============================================
+# HSE 安全管理系统 - .gitignore
+# ============================================
+
+# ---- 环境变量 ----
+# 包含数据库密码、JWT 密钥等敏感信息
+.env
+.env.production
+.env.local
+.env.docker
+server/.env
+
+# ---- 依赖 ----
+node_modules/
+server/node_modules/
+
+# ---- 构建产物 ----
+server/dist/
+
+# ---- 备份文件 ----
+backups/
+*.bak
+*.sql.gz
+
+# ---- 日志 ----
+logs/
+*.log
+server/error.log
+server/combined.log
+
+# ---- 操作系统 ----
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# ---- IDE ----
+.idea/
+.vscode/settings.json
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# ---- 上传文件 ----
+# 生产环境上传的文件不应在版本控制中
+server/uploads/*
+!server/uploads/.gitkeep
+
+# ---- 临时文件 ----
+temp/
+tmp/
+*.tmp
+
+# ---- 测试覆盖率 ----
+coverage/
+server/coverage/
+
+# ---- Python 临时文件 ----
+__pycache__/
+*.pyc
+*.pyo
+
+# ---- 安全加固补充规则（v4.1） ----
+
+# 环境变量（含敏感信息）— 补充
+.env.*.local
+.env.production.local
+.env.staging
+
+# 日志 — 补充
+*.log.gz
+
+# 备份 — 补充
+*.dump
+
+# 构建产物 — 补充（顶层）
+dist/
+build/
+
+# IDE — 补充（完整忽略 .vscode）
+.vscode/
+
+# PM2 进程管理
+pids/
+*.pid
+
+# Docker 持久化数据
+postgres_data/
+pgdata/
+
+# 测试 — 补充
+.nyc_output/
+
+# 临时文件 — 补充
+.workbuddy/
+
+
+# ============================================
+# 推荐版合并（2026-09-12 行动计划 G1），追加于下方
+# ============================================
+
+# ===== 环境与密钥 =====
+.env
+.env.*
+!.env.example
+server/.env
+server/.env.*
+*.pem
+*.key
+*credentials*
+*secret*
+
+# ===== 依赖与构建产物 =====
+node_modules/
+.pnpm-store/
+dist/
+build/
+.turbo/
+.cache/
+*.tsbuildinfo
+
+# ===== 日志与临时文件 =====
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ===== 临时/一次性脚本与目录 =====
+_tmp_*/
+_debug*/
+_verify*/
+_shot*/
+_03a_*/
+_backup*/
+_backs/
+backs/
+scripts/adhoc/
+server/scripts/adhoc/
+
+# 根目录常见临时产物
+_shot_*.cjs
+_*.cjs
+*.xlsx
+!docs/**/*.xlsx
+
+# ===== 上传与导出 =====
+uploads/
+server/uploads/
+export/
+server/export/
+
+# ===== IDE 与系统文件 =====
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ===== 测试与覆盖率 =====
+coverage/
+.nyc_output/
+
+# ===== 其他 =====
+*.local
+*.bak
+*.tmp
+
+
+# ============================================
+# 收敛型源码基线 (2026-09-12) — 排除构建/探测/临时产物
+# ============================================
+
+# 构建缓存与前端 dist 备份（dist.bak.* / dist_esbk_* / dist_verify_* ...）
+_build_cache/
+.dist_cache/
+dist/
+dist*/
+**/dist*/
+dist.bak.*/
+dist_*/
+**/dist_*/
+*.tsbuildinfo
+.turbo/
+.cache/
+
+# 工具/平台本地目录（非源码）
+.trae/
+.trae-html-share-packages/
+.workbuddy/
+.playwright-cli/
+playwright-report/
+test-results/
+safe_verify/
+_14_chrome_profile/
+_18_chrome_profile/
+
+# 探测与诊断输出（server 根 ad-hoc 产物）
+server/_*.txt
+server/_*.json
+server/_*.log
+server/_debug_*.js
+[0-9][0-9]_*.txt
+[0-9][0-9]_*.json
+[0-9][0-9]_*.cjs
+[0-9][0-9]_*.sh
+[0-9][0-9][0-9]_*.cjs
+[0-9][0-9][0-9]_*.txt
+*_sider_dump*.txt
+*_curl_tmp*.txt
+*_n1_retest*.cjs
+
+# 运行时导出/数据目录（非源码）
+导出文件/
+测试数据/
+数据源/
+final/
+monitoring/
+logstash/
+uploads/
+server/uploads/
+export/
+server/export/
+data/
+server/data/
+dbbackup/
+server/dbbackup/
+
+# 根级临时/一次性/验证目录（以 / 锚定根目录，避免误伤前端 views/_core）
+/_test_venv/
+/_zod_extract/
+/_express_extract/
+/_08_2_backup/
+/_03b_shots/
+/_0904_sanjian/
+/_0905_transfer_station/
+/_0907_accident_analysis_backup/
+/_0908_kdocs_sanwei/
+/_acc_input_verify/
+/_official_ref/
+/_test_npm/
+/_backup_packages_*/
+/_backups/
+/_verify/
+/_verify_shots/
+/_verify_tmp/
+/_02b_dbg_upload.cjs
+verify_naive/
+server/test-uploads/
+
+# server/scripts 下的验证截图（非源码；保留 scripts 内代码脚本）
+server/scripts/**/*.jpg
+server/scripts/**/*.jpeg
+server/scripts/**/*.png
+server/scripts/**/*.gif
+
+# Windows 保留设备名（git add 会因索引失败而中断整个 add）
+/nul
+/con
+/prn
+/aux
+/com1
+/com2
+/com3
+/lpt1
+
+# ============================================
+# 二次收敛 (2026-09-12) — server 根 ad-hoc 脚本 / 遗留 TS / 大文件非源码
+# ============================================
+
+# server 根一次性诊断/迁移脚本（权威 schema 已归档在 server/sql/ 与 src 源码）
+server/_*.js
+server/_*.cjs
+server/_*.mjs
+server/_*.sql
+server/_*.ts
+server/_*.xlsx
+server/check-*.js
+server/diag-*.js
+server/diag-*.cjs
+server/verify-*.js
+server/survey-*.js
+server/test-*.js
+server/test-*.cjs
+server/test_*.js
+server/driver-test-data.js
+
+# 遗留 TypeScript 版（已被 app.js/CommonJS 取代；如需保留另行 un-ignore）
+/server/src/
+
+# 大型二进制 / 归档 / 示例（非源码）
+安全看板vben/tools/pnpm.exe
+**/dist_*.zip
+**/dist.bak*.zip
+_129_pre_migration_dump.sql
+**/_*_pre_migration_dump.sql
+tools/backups_archive*.tar.gz
+scripts/_sample_*
+
+# server/scripts 下的运行输出/诊断
+server/scripts/output/
+
+# 根级探针输出单文件
+/_*.txt
+/_*.json
+/_*.log

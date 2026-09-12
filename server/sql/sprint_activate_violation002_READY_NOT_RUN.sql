@@ -1,0 +1,67 @@
+-- ============================================================
+-- VIOLATION002「检查未反馈」激活就绪包（只备不执行）
+-- 文件：server/sql/sprint_activate_violation002_READY_NOT_RUN.sql
+-- 日期：2026-08-31（提示词-08 任务 B）
+--
+-- ⚠️⚠️⚠️ 未执行 ⚠️⚠️⚠️
+-- 本文件全部可执行语句均处于注释态，当前执行不会产生任何数据变更。
+-- 业务拍板后，由人工按下方「激活清单」逐条去掉注释后执行。
+--
+-- 背景：violationUnrectifiedAdapter.js 已注册（engine.js 第 39 行，注册达 3 个）但
+--       不在 AUTO_DEDUCTION_ADAPTERS（仍 2 个）—— 适配器休眠，规则行维持
+--       integration_status='pending_data' / adapter_key NULL / metric_code NULL。
+--
+-- ── 激活前检查清单（业务拍板）──────────────────────────────
+-- ① 口径确认：是否区分查处来源？与 VIOLATION003（violation_event）同记录双扣分是否允许？
+--    （三违计分：company=5、township/self/NULL=1；VIOLATION002 统一 1 分/条）
+-- ② 指标号拍板：metric_code 二选一：
+--      选项A：新增指标 HSE-KPI-SAF-007（需先建指标行）
+--      选项B：复用 HSE-KPI-SAF-001（需确认该指标未被其他规则占用计数口径）
+-- ③ 历史 violator_id 全 NULL（2026-08-31 探针：需整改未整改 128 条但带 violator 键 0 条）
+--    → 激活后命中为 0，需录入端持续落键（violator_id）后才会真实扣分。
+-- ④ 激活后首次真实运行核对：观测文案应显示「人次」（deductedUnit='events'）、
+--    扣分归属 target 正确、类别上限（三违管理 cap=15）钳制正常。
+--
+-- ── 激活动作（业务拍板后去注释执行，顺序执行 1→2→3）─────────
+-- 1. 备份规则行（可重复：每次重建备份表）
+--    DROP TABLE IF EXISTS hse_assessment_rule_bak_violation002_READY_NOT_RUN;
+--    CREATE TABLE hse_assessment_rule_bak_violation002_READY_NOT_RUN AS
+--      SELECT * FROM hse_assessment_rule WHERE rule_code = 'VIOLATION002';
+--
+-- 2. 激活规则行（integration_status/adapter_key/metric_code 三字段）
+--    UPDATE hse_assessment_rule
+--       SET integration_status = 'active',
+--           adapter_key        = 'violation_unrectified',
+--           metric_code        = 'HSE-KPI-SAF-007',   -- ⚠️ 指标号二选一：007 新增 / SAF-001 复用，业务定
+--           updated_at         = NOW()
+--     WHERE rule_code = 'VIOLATION002' AND is_deleted = FALSE;
+--
+-- 3. 引擎开关（代码改动，不由 SQL 执行）：
+--    server/services/ruleEngine/engine.js 第 30 行
+--      const AUTO_DEDUCTION_ADAPTERS = ['grid_unchecked', 'violation_record'];
+--    改为（追加 'violation_unrectified'）：
+--      const AUTO_DEDUCTION_ADAPTERS = ['grid_unchecked', 'violation_record', 'violation_unrectified'];
+--    改完重启后端生效。前端无需改动（观测列直接渲染后端 last_run_summary）。
+--
+-- ── 回滚段（激活后发现异常时执行）──────────────────────────
+-- 1. 规则行恢复休眠态：
+--    UPDATE hse_assessment_rule
+--       SET integration_status = 'pending_data',
+--           adapter_key        = NULL,
+--           metric_code        = NULL,
+--           updated_at         = NOW()
+--     WHERE rule_code = 'VIOLATION002' AND is_deleted = FALSE;
+-- 2. 从 AUTO 列表移除（engine.js 第 30 行改回原两元素）并重启后端。
+-- 3. 已产生的扣分如需清理：DELETE/软删 hse_assessment_deduction
+--    WHERE source_table='violation_records' AND source_detail->>'kind'='violation_unrectified'
+--    （按需执行，不随本文件自动清理）。
+--
+-- ── 核验（可选，去注释执行）───────────────────────────────
+-- SELECT rule_code, integration_status, adapter_key, metric_code
+--   FROM hse_assessment_rule_bak_violation002_READY_NOT_RUN;
+-- SELECT rule_code, integration_status, adapter_key, metric_code
+--   FROM hse_assessment_rule WHERE rule_code = 'VIOLATION002';
+-- ============================================================
+
+-- 本文件无未注释的可执行语句（只备不执行）。
+-- 业务拍板后：取消上方「激活动作 1→2→3」的注释并按序执行。

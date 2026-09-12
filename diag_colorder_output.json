@@ -1,0 +1,24 @@
+{
+  "steps": [
+    {
+      "step": "initial",
+      "order": null,
+      "sortable": true
+    },
+    {
+      "step": "click1",
+      "order": "asc",
+      "sortable": true
+    },
+    {
+      "step": "click2",
+      "order": "desc",
+      "sortable": true
+    },
+    {
+      "step": "click3",
+      "order": null,
+      "sortable": true
+    }
+  ]
+}

@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>扣分调整方案设计 — 规则层 × 明细层</title>
+<style>
+  :root{
+    --bg:#f4f7fb;--card:#fff;--ink:#1f2d3d;--muted:#5c6b7f;--line:#e3ebf3;
+    --brand:#0f7b5f;--brand-2:#0a5f4a;--accent:#d97706;--accent-2:#b45309;
+    --red:#c0392b;--red-bg:#fdecea;--code-bg:#0f2233;--code-ink:#d6f0e8;
+    --tag-ok:#e6f6ef;--tag-ok-ink:#0f7b5f;--tag-warn:#fdf0e7;--tag-warn-ink:#b45309;
+    --radius:14px;--shadow:0 6px 24px rgba(15,123,95,.08);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font-family:"PingFang SC","Microsoft YaHei",-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.7;padding:0 20px 80px}
+  .wrap{max-width:1120px;margin:0 auto}
+  .hero{margin:40px 0 26px;background:linear-gradient(135deg,#0f7b5f 0%,#075544 100%);border-radius:20px;padding:42px 46px;color:#fff;box-shadow:0 12px 40px rgba(15,123,95,.25)}
+  .hero .kicker{display:inline-block;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.3);padding:4px 14px;border-radius:20px;font-size:13px;letter-spacing:1px;margin-bottom:16px}
+  .hero h1{font-size:28px;font-weight:700;letter-spacing:.5px}
+  .hero p{margin-top:14px;opacity:.92;font-size:14.5px;max-width:760px}
+  .hero .meta{margin-top:20px;display:flex;gap:22px;flex-wrap:wrap;font-size:13px;opacity:.85}
+  .hero .meta b{font-weight:600}
+
+  section{margin-top:42px}
+  h2{font-size:21px;font-weight:700;display:flex;align-items:center;gap:12px;margin-bottom:4px}
+  h2 .no{background:var(--brand);color:#fff;width:30px;height:30px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;font-size:15px;flex:none}
+  .lead{color:var(--muted);font-size:14.5px;margin:6px 0 18px;max-width:900px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:26px 30px;margin-bottom:20px}
+  h3{font-size:16px;font-weight:700;margin:22px 0 14px;color:var(--brand-2);border-left:4px solid var(--brand);padding-left:10px}
+  h3:first-child{margin-top:0}
+  table{width:100%;border-collapse:collapse;font-size:13px;margin:10px 0}
+  th{background:#0b3d30;color:#fff;text-align:left;padding:8px 11px;font-weight:600;font-size:12.5px;white-space:nowrap}
+  td{padding:8px 11px;border-bottom:1px solid var(--line);vertical-align:top}
+  tr:nth-child(even) td{background:#fafcfd}
+  code{font-family:"SFMono-Regular",Consolas,Menlo,monospace;font-size:12px;background:#eef4f1;color:#0a5f4a;padding:1px 6px;border-radius:5px}
+  .col-pk{color:var(--brand);font-weight:600}
+  .sql{background:var(--code-bg);color:var(--code-ink);border-radius:12px;padding:20px 22px;overflow:auto;font-family:"SFMono-Regular",Consolas,Menlo,monospace;font-size:12.5px;line-height:1.75;margin-top:8px}
+  .sql .cm{color:#7aa4c9}.sql .kw{color:#7ee8c0;font-weight:600}.sql .k{color:#ffcf8f}
+  .note{background:#fff8ed;border:1px solid #f3d9b8;border-left:4px solid var(--accent);border-radius:10px;padding:15px 18px;font-size:13.5px;color:#5b4320;margin:14px 0}
+  .warn{background:var(--red-bg);border-color:#efc9c4;border-left-color:var(--red);color:#7a2b22}
+  .warn b{color:var(--red)}
+  .tag{display:inline-block;font-size:11.5px;padding:1px 9px;border-radius:11px;font-weight:600;white-space:nowrap}
+  .tag-ok{background:var(--tag-ok);color:var(--tag-ok-ink)}
+  .tag-warn{background:var(--tag-warn);color:var(--tag-warn-ink)}
+  .compare{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-top:14px}
+  @media(max-width:860px){.compare{grid-template-columns:1fr}}
+  .pane{border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .pane .hd{padding:10px 14px;color:#fff;font-weight:600;font-size:13.5px}
+  .pane.rule .hd{background:var(--brand)}
+  .pane.detail .hd{background:#5b6b8a}
+  .pane.shield .hd{background:var(--accent)}
+  .pane .bd{padding:13px 15px}
+  .pane ul{margin:0;padding-left:0;list-style:none}
+  .pane li{position:relative;padding-left:16px;margin-bottom:6px;font-size:13px;color:#37475a}
+  .pane li::before{content:"•";position:absolute;left:2px;color:var(--muted)}
+  .flow{display:flex;align-items:stretch;gap:8px;flex-wrap:wrap;margin-top:14px}
+  .flow .step{flex:1;min-width:140px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:13px 15px;text-align:center;font-size:13px;position:relative}
+  .flow .step b{display:block;font-size:13.5px;color:var(--brand-2);margin-bottom:3px}
+  .flow .arr{align-self:center;color:var(--muted);font-size:16px;font-weight:600}
+  .priol{list-style:none;padding:0;margin:10px 0}
+  .priol li{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px dashed #eef2f6;font-size:13.5px}
+  .badge{flex:none;min-width:44px;text-align:center;border-radius:6px;padding:3px 0;font-weight:700;font-size:12px;color:#fff}
+  .b1{background:#c0392b}.b2{background:#d97706}.b3{background:#5470c6}.b0{background:#95a5a6}
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:12px}
+  @media(max-width:820px){.split{grid-template-columns:1fr}}
+  footer{margin-top:56px;padding-top:22px;border-top:1px solid var(--line);color:var(--muted);font-size:12.5px;text-align:center}
+  a{color:var(--brand);text-decoration:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hero">
+    <span class="kicker">数据库与交互设计 · 扣分调整能力</span>
+    <h1>扣分调整方案设计 — 规则层 × 明细层</h1>
+    <p>解决"对某个人 / 某件事 / 某时期调整扣分权重"的多变需求。采用<b>规则层（批量/政策性）+ 明细层（单条/个案式）</b>两层模型，并明确"开关 / 0 值 / 缩放因子"各自职责。</p>
+    <div class="meta">
+      <span><b>适用范围</b> 月度自动考核扣分</span>
+      <span><b>衔接</b> assessmentScoringEngine / hse_assessment_deduction</span>
+      <span><b>日期</b> 2026-08-27</span>
+    </div>
+  </div>
+
+  <!-- 1 目标与结论 -->
+  <section>
+    <h2><span class="no">1</span>结论速览</h2>
+    <div class="card">
+      <div class="compare">
+        <div class="pane rule">
+          <div class="hd">规则层 · 政策性批量</div>
+          <div class="bd"><ul>
+            <li>新表 <code>hse_assessment_metric_rule</code></li>
+            <li>处理 "事件×对象×时期" 权重</li>
+            <li>用 <code>scale_factor</code> 加重/减轻</li>
+            <li>用 <code>active</code> 开关结构性停用</li>
+            <li>评审后可回滚、可审计</li>
+          </ul></div>
+        </div>
+        <div class="pane detail">
+          <div class="hd">明细层 · 个案单条</div>
+          <div class="bd"><ul>
+            <li>现有 <code>hse_assessment_deduction</code></li>
+            <li>用 <code>confirmed_score</code> 修正单条</li>
+            <li>置 0 表示"本条豁免"</li>
+            <li>冻结后禁止改动（已有保护）</li>
+            <li>需修复"审核覆盖人工"隐患</li>
+          </ul></div>
+        </div>
+        <div class="pane shield">
+          <div class="hd">对照 · 开关 vs 0 值</div>
+          <div class="bd"><ul>
+            <li>结构性问题 → <b>active 开关</b></li>
+            <li>加分减分力度 → <b>scale_factor</b></li>
+            <li>个案一条别扣 → <b>confirmed=0</b></li>
+            <li>三者并行，互不替代</li>
+            <li>0 不丢语义：配合 <code>deduction_source</code></li>
+          </ul></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2 现状与挂点 -->
+  <section>
+    <h2><span class="no">2</span>现状与规则层挂点</h2>
+    <div class="card">
+      <div class="lead">调研确认：引擎扣分统一收敛在 <code>addAutoDeduction()</code>，且 <code>hse_assessment_metric.rule_config</code> 已预留未消费——这是插入规则层的天然切口。</div>
+      <div class="flow">
+        <div class="step"><b>事件消费</b>onViolationCreated 等<br>硬编码 score</div>
+        <div class="arr">→</div>
+        <div class="step"><b>规则层命中</b><span style="color:var(--brand)">(新增拦截)</span><br>查 metric_rule × 优先级</div>
+        <div class="arr">→</div>
+        <div class="step"><b>addAutoDeduction</b><br>幂等 + 落库</div>
+        <div class="arr">→</div>
+        <div class="step"><b>recalculateTarget</b><br>score_auto=100−Σ</div>
+      </div>
+      <div class="note" style="margin-top:18px">挂点选择：在 <code>engine.addAutoDeduction({...suggestedScore})</code> 入口前把 <code>suggestedScore</code> 经规则层换算，并把命中信息写入 <code>source_detail</code>（如 <code>rule_hit</code>、<code>applied_scale</code>、<code>rule_version</code>），实现完整追溯。</div>
+      <div class="note warn">
+        <b>已发现两处与本次设计耦合的现状隐患：</b><br>
+        ① <b>审核覆盖人工调整</b>：审核通过接口执行 <code>confirmed_score = suggested_score</code>，会把之前经 <code>/deductions/adjust</code> 修好的 <code>confirmed_score</code> 覆盖回建议值。<br>
+        ② <b>rule_config 未消费</b>：各事件处理器扣分写死在代码里（三违5/隐患3/会议2…），改任何一条力度都要动代码、发版。
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 规则层设计 -->
+  <section>
+    <h2><span class="no">3</span>规则层：hse_assessment_metric_rule</h2>
+    <div class="card">
+      <div class="split">
+        <table>
+          <thead><tr><th>列名</th><th>类型</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td class="col-pk">id</td><td>BIGSERIAL</td><td>PK</td></tr>
+            <tr><td>rule_name</td><td>VARCHAR(100)</td><td>规则名称</td></tr>
+            <tr><td>metric_code</td><td>VARCHAR(50)</td><td>命中的指标</td></tr>
+            <tr><td>object_type</td><td>VARCHAR(20)</td><td>all / employee / grid_level / township / department</td></tr>
+            <tr><td>object_value</td><td>VARCHAR(100)</td><td>绑定的对象值（员工ID/等级/乡镇）</td></tr>
+            <tr><td>valid_from / to</td><td>DATE</td><td>生效时期</td></tr>
+            <tr><td>scale_factor</td><td>NUMERIC(4,2)</td><td>0 豁免 / &lt;1 减轻 / 1 默认 / &gt;1 加重</td></tr>
+            <tr><td>priority</td><td>INT</td><td>越大越优先</td></tr>
+            <tr><td>active</td><td>BOOL</td><td>开关：FALSE 即结构性停用</td></tr>
+            <tr><td>remark / audit</td><td>TEXT / JSONB</td><td>备注、审计信息（建/改人·时间·版本）</td></tr>
+          </tbody>
+        </table>
+        <div>
+          <h3 style="border:none;padding-left:0;margin-top:0">关键语义</h3>
+          <p style="font-size:13.5px;color:#41505f">把"加权重"固化为 <b>scale_factor</b> 而非改写引擎梯度——原指标 <code>rule_config</code> 保持不动，规则叠加上去，可随时启停、永不破坏基线。</p>
+          <div class="sql"><span class="cm">-- 例：2026年9月 火灾隐患整改 加3倍重量</span>
+<span class="kw">INSERT INTO</span> <span class="k">hse_assessment_metric_rule</span>
+(rule_name, metric_code, object_type, object_value,
+ valid_from, valid_to, scale_factor, priority, active)
+<span class="kw">VALUES</span>
+('Q3 火灾高发期 隐患加重', 'HSE-KPI-HZD-002', 'all', NULL,
+ '2026-09-01','2026-09-30', 2.0, 10, TRUE);</div>
+          <div class="sql" style="margin-top:8px"><span class="cm">-- 例：某员工当月起 WFH/网格豁免（结构性停）</span>
+<span class="kw">VALUES</span> ('张某 产假网格豁免','HSE-KPI-GRD-001',
+ 'employee','E1234','2026-09-01','2026-12-31', 0, 20, TRUE);</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 优先级 -->
+  <section>
+    <h2><span class="no">4</span>命中优先级（同一对象多条规则时）</h2>
+    <div class="card">
+      <ul class="priol">
+        <li><span class="badge b1">1</span><span><b>employee 精确绑定</b>（object_type=employee，object_value=该员工ID）最优先</span></li>
+        <li><span class="badge b2">2</span><span>其次 <b>grid_level 等级</b>（网格长/等级）</span></li>
+        <li><span class="badge b3">3</span><span>再 <b>township / department</b> 组织维度</span></li>
+        <li><span class="badge b0">4</span><span>最后 <b>all 全体</b>；同层内再按 priority 大的生效</span></li>
+      </ul>
+      <div class="note">只取<b>优先级最高的一条</b>生效（不叠加），语义清晰可预期。若需"基准规则+例外"叠加，后续可扩展为 multiply 模式，本期不做。</div>
+    </div>
+  </section>
+
+  <!-- 5 明细层强化 -->
+  <section>
+    <h2><span class="no">5</span>明细层：修正现有 deduction 流程</h2>
+    <div class="card">
+      <div class="compare">
+        <div class="pane rule"><div class="hd" style="background:#0b3d30">现状</div><div class="bd"><ul>
+          <li>审核通过：<code>confirmed = suggested</code></li>
+          <li>adjust 改 confirmed（写版本表）</li>
+          <li>但审核会覆盖人工调整值 ✕</li>
+          <li>rule_config 未消费 ✕</li>
+        </ul></div></div>
+        <div class="pane detail"><div class="hd">调整后</div><div class="bd"><ul>
+          <li>审核通过：<code>confirmed = COALESCE(confirmed, suggested)</code></li>
+          <li>仅当人工未调整时才回填 suggested</li>
+          <li>rule_config 参与 suggested 计算</li>
+          <li>删除用 is_deleted 软删（防审计断裂）</li>
+        </ul></div></div>
+        <div class="pane shield"><div class="hd">语义约定</div><div class="bd"><ul>
+          <li><b>suggested</b>：规则/引擎建议值（自动）</li>
+          <li><b>confirmed=0</b>：本条豁免但仍留痕</li>
+          <li><b>confirmed&gt;0</b>：核定的扣分</li>
+          <li>rejected：不算入分（现有逻辑）</li>
+        </ul></div></div>
+      </div>
+      <div class="note warn" style="margin-top:16px">
+        <b>必须处理的修复：</b>审核通过接口将 <code>confirmed_score = suggested_score</code> 改为 <br>
+        <code>confirmed_score = COALESCE(confirmed_score, suggested_score)</code>，
+        否则规则层与人工调整都会在审核通过时被静默覆盖，审计分失真。该改动属现有考核链路修复，建议单独立项回归测试。
+      </div>
+    </div>
+  </section>
+
+  <!-- 6 交互设计 -->
+  <section>
+    <h2><span class="no">6</span>表格 / 表单交互分工</h2>
+    <div class="card">
+      <table>
+        <thead><tr><th>场景</th><th>形态</th><th>字段 / 动作</th></tr></thead>
+        <tbody>
+          <tr><td>新建一条权重/豁免规则</td><td><span class="tag tag-ok">表单</span></td><td>事件(metric_code) + 对象维度 + 时期 + scale_factor + 备注</td></tr>
+          <tr><td>规则管理/启停</td><td><span class="tag tag-warn">表格</span></td><td>列：名称/事件/对象/时期/力度/优先级/开关；行内切 active、排序 priority</td></tr>
+          <tr><td>单条扣分明细修正</td><td><span class="tag tag-warn">表格+行内</span></td><td>现扣分审核表，行内改 confirmed_score（经 adjust 接口）</td></tr>
+          <tr><td>追溯</td><td>详情</td><td>source_detail 展示命中规则、scale、rule_version；adjust 版本列表</td></tr>
+        </tbody>
+      </table>
+      <div class="note" style="margin-top:14px">表单一次新增、结构复杂、低频 → 用表单天然合适；明细行内编辑高频轻量 → 用表格。与现有扣分审核页风格保持一致，不引入额外自定义组件（遵循项目"保持 Vben/Naive 组件干净"约束）。</div>
+    </div>
+  </section>
+
+  <!-- 7 落地清单 -->
+  <section>
+    <h2><span class="no">7</span>落地清单与验收</h2>
+    <div class="card">
+      <table>
+        <thead><tr><th>#</th><th>事项</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td>建表 <code>hse_assessment_metric_rule</code></td><td>DDL + 索引(metric_code, active, valid_from/to)</td></tr>
+          <tr><td>2</td><td>规则层拦截</td><td>在 addAutoDeduction 前解析建议分 = base × scale_factor</td></tr>
+          <tr><td>3</td><td>source_detail 追溯</td><td>写 rule_hit / applied_scale / rule_version</td></tr>
+          <tr><td>4</td><td>修复审核覆盖隐患</td><td>confirmed = COALESCE(confirmed, suggested)</td></tr>
+          <tr><td>5</td><td>消费 rule_config</td><td>把事件处理器硬编码分值切到 rule_config.deduction_per_unit</td></tr>
+          <tr><td>6</td><td>前端规则管理页</td><td>规则表单 + 管理表格 + 行内启停</td></tr>
+        </tbody>
+      </table>
+      <div class="note">验收口径：① 加强/豁免规则命中后分数按 scale 变动且可回滚；② 冻结后规则与明细均不可改；③ 全程 source_detail 可追溯到命中规则；④ 审核通过不覆盖人工 adjusted 值。</div>
+    </div>
+  </section>
+
+  <footer>扣分调整方案设计 · 规则层 × 明细层 · HSE 安全看板 · 2026-08-27</footer>
+</div>
+</body>
+</html>

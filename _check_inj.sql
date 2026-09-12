@@ -1,0 +1,3 @@
+SELECT 'inj_total_records='||COUNT(*) FROM personnel_insurance WHERE is_deleted=false AND insurance_type='工伤保险';
+SELECT 'inj_active_records='||COUNT(*) FROM personnel_insurance WHERE is_deleted=false AND insurance_type='工伤保险' AND is_current=true AND start_date<=CURRENT_DATE AND expire_date>=CURRENT_DATE;
+SELECT 'imported_1107_with_inj='||COUNT(DISTINCT p.employee_id) FROM personnel_insurance p WHERE p.is_deleted=false AND p.insurance_type='工伤保险' AND p.employee_id IN (SELECT DISTINCT employee_id FROM personnel_insurance WHERE is_deleted=false AND insurance_type='雇主责任险' AND coverage_amount IN (800000,100000) AND created_at > NOW() - INTERVAL '2 hours');

@@ -1,0 +1,122 @@
+{
+  "version": "1.0.0",
+  "description": "HSE目标职责业务模块规则配置 - Sprint11-10",
+  "forbidden": {
+    "assessmentRuleInCalculation": false,
+    "hardcodeAnyRule": false,
+    "note": "assessment_rule仅作只读影子数据，禁止参与计算；禁止硬编码任何签订率、完成率、考核得分、扣分逻辑、预算预警等"
+  },
+  "contract": {
+    "statuses": ["draft", "pending", "signed", "archived", "void"],
+    "statusLabels": {
+      "draft": "草稿",
+      "pending": "待签订",
+      "signed": "已签订",
+      "archived": "已归档",
+      "void": "已废止"
+    },
+    "types": ["company_level", "department_level", "township_level", "team_level"],
+    "typeLabels": {
+      "company_level": "公司级",
+      "department_level": "部门级",
+      "township_level": "乡镇级",
+      "team_level": "班组级"
+    },
+    "signDeadlineDays": 30,
+    "archiveRetentionYears": 5
+  },
+  "committee": {
+    "memberTypes": ["safety_manager", "committee_member", "safety_officer", "fire_officer", "emergency_leader"],
+    "memberTypeLabels": {
+      "safety_manager": "安全管理人员",
+      "committee_member": "安委会成员",
+      "safety_officer": "安全员",
+      "fire_officer": "消防负责人",
+      "emergency_leader": "应急负责人"
+    },
+    "statuses": ["active", "inactive", "term_expired"],
+    "statusLabels": {
+      "active": "在职",
+      "inactive": "离职",
+      "term_expired": "任期届满"
+    },
+    "termYears": 3,
+    "minSafetyOfficerPerTownship": 1
+  },
+  "assessment": {
+    "grades": ["excellent", "good", "pass", "fail"],
+    "gradeLabels": {
+      "excellent": "优秀",
+      "good": "良好",
+      "pass": "合格",
+      "fail": "不合格"
+    },
+    "gradeThresholds": {
+      "excellent": 90,
+      "good": 80,
+      "pass": 60,
+      "fail": 0
+    },
+    "multiSourceData": {
+      "enabled": true,
+      "sources": ["violations", "hazards", "training", "accidents"],
+      "sourceWeights": {
+        "violations": 30,
+        "hazards": 25,
+        "training": 20,
+        "accidents": 25
+      }
+    },
+    "deductionRules": {
+      "violationPerItem": 2,
+      "hazardNotRectified": 5,
+      "trainingMissed": 3,
+      "accidentMinor": 10,
+      "accidentMajor": 50
+    }
+  },
+  "budget": {
+    "categories": ["training", "ppe", "fire_protection", "emergency", "insurance", "health_check", "other"],
+    "categoryLabels": {
+      "training": "安全培训",
+      "ppe": "个人防护用品",
+      "fire_protection": "消防设施",
+      "emergency": "应急物资",
+      "insurance": "保险费用",
+      "health_check": "职业健康检查",
+      "other": "其他"
+    },
+    "warningThreshold": 85,
+    "overspendThreshold": 100,
+    "executionRateFormula": "total_spent / total_budget * 100",
+    "dimensions": ["department", "project", "category"]
+  },
+  "monthlyAssessment": {
+    "cycleType": "monthly",
+    "autoScoreEnabled": true,
+    "deductionReviewRequired": true,
+    "freezeAfterDays": 10,
+    "assessmentScope": ["township_manager", "administrator"]
+  },
+  "responsibilityMatrix": {
+    "company_gm": ["contract_sign", "budget_approve", "assessment_finalize", "committee_chair"],
+    "department_head": ["contract_dept_sign", "budget_dept_execute", "assessment_dept_review", "committee_member"],
+    "township_manager": ["contract_township_execute", "budget_township_use", "assessment_township_self", "safety_implementation"],
+    "administrator": ["data_maintenance", "process_tracking", "document_management", "assessment_coordination"],
+    "employee": ["self_sign", "participate_training", "report_hazard"]
+  },
+  "dashboardCards": [
+    { "code": "OBJ-001", "title": "责任书签订率", "semanticColor": "success" },
+    { "code": "OBJ-002", "title": "已签订责任书", "semanticColor": "info" },
+    { "code": "OBJ-003", "title": "待签订责任书", "semanticColor": "warning" },
+    { "code": "OBJ-004", "title": "安全管理人员数", "semanticColor": "info" },
+    { "code": "OBJ-005", "title": "安委会成员数", "semanticColor": "info" },
+    { "code": "OBJ-006", "title": "考核优秀率", "semanticColor": "success" },
+    { "code": "OBJ-007", "title": "考核不合格数", "semanticColor": "danger" },
+    { "code": "OBJ-008", "title": "安全费用预算总额", "semanticColor": "info" },
+    { "code": "OBJ-009", "title": "预算执行率", "semanticColor": "info" },
+    { "code": "OBJ-010", "title": "超支预警项", "semanticColor": "warning" },
+    { "code": "OBJ-011", "title": "本月履职完成率", "semanticColor": "success" },
+    { "code": "OBJ-012", "title": "本月考核对象数", "semanticColor": "info" }
+  ]
+}

@@ -1,0 +1,167 @@
+{
+  "version": "1.0.0",
+  "description": "HSE风险分级管控规则 - 风险等级划分、评价方法、管控措施分类",
+  "updatedAt": "2026-07-25",
+  "ruleCode": "riskLevelRule",
+  "ruleName": "风险分级管控规则",
+
+  "riskLevels": [
+    {
+      "code": "level1",
+      "label": "一级",
+      "alias": "重大风险",
+      "description": "可能造成重大人员伤亡或重大经济损失的风险",
+      "semanticColor": "danger",
+      "scoreRange": { "min": 75, "max": 100 },
+      "controlRequirement": "必须立即采取管控措施，制定专项应急预案，责任落实到部门负责人",
+      "reviewCycleMonths": 1,
+      "needEmergencyPlan": true,
+      "needSpecialTraining": true
+    },
+    {
+      "code": "level2",
+      "label": "二级",
+      "alias": "较大风险",
+      "description": "可能造成较大人员伤亡或较大经济损失的风险",
+      "semanticColor": "warning",
+      "scoreRange": { "min": 50, "max": 74 },
+      "controlRequirement": "需要采取重点管控措施，制定管控方案，责任落实到岗位",
+      "reviewCycleMonths": 3,
+      "needEmergencyPlan": true,
+      "needSpecialTraining": false
+    },
+    {
+      "code": "level3",
+      "label": "三级",
+      "alias": "一般风险",
+      "description": "可能造成一般人员伤亡或一般经济损失的风险",
+      "semanticColor": "info",
+      "scoreRange": { "min": 25, "max": 49 },
+      "controlRequirement": "需要采取常规管控措施，纳入日常管理",
+      "reviewCycleMonths": 6,
+      "needEmergencyPlan": false,
+      "needSpecialTraining": false
+    },
+    {
+      "code": "level4",
+      "label": "四级",
+      "alias": "低风险",
+      "description": "危险性较低，在可接受范围内的风险",
+      "semanticColor": "success",
+      "scoreRange": { "min": 0, "max": 24 },
+      "controlRequirement": "保持现有管控措施，定期关注变化",
+      "reviewCycleMonths": 12,
+      "needEmergencyPlan": false,
+      "needSpecialTraining": false
+    }
+  ],
+
+  "assessmentMethods": [
+    {
+      "code": "lec",
+      "label": "LEC评价法",
+      "description": "作业条件危险性评价法：D = L × E × C",
+      "factors": [
+        { "code": "L", "label": "发生事故的可能性", "range": "0.1-10" },
+        { "code": "E", "label": "暴露于危险环境的频繁程度", "range": "0.5-10" },
+        { "code": "C", "label": "发生事故产生的后果", "range": "1-100" }
+      ],
+      "scoreMapping": {
+        ">=320": "一级",
+        "160-319": "二级",
+        "70-159": "三级",
+        "<70": "四级"
+      }
+    },
+    {
+      "code": "risk_matrix",
+      "label": "风险矩阵法",
+      "description": "基于可能性和后果严重性的二维矩阵评价",
+      "factors": [
+        { "code": "likelihood", "label": "发生可能性", "range": "1-5" },
+        { "code": "severity", "label": "后果严重性", "range": "1-5" }
+      ],
+      "scoreMapping": {
+        "20-25": "一级",
+        "12-19": "二级",
+        "6-11": "三级",
+        "1-5": "四级"
+      }
+    },
+    {
+      "code": "expert",
+      "label": "专家评议法",
+      "description": "由行业专家根据经验进行风险分级判定",
+      "factors": [
+        { "code": "expert_opinion", "label": "专家综合意见", "range": "定性" }
+      ]
+    }
+  ],
+
+  "controlMeasureTypes": [
+    {
+      "code": "engineering",
+      "label": "工程措施",
+      "description": "通过技术手段消除或降低风险，如防护设施、安全装置、自动化改造",
+      "icon": "lucide:wrench",
+      "priority": 1
+    },
+    {
+      "code": "management",
+      "label": "管理措施",
+      "description": "通过制度、流程、监督等管理手段控制风险，如操作规程、作业许可、检查制度",
+      "icon": "lucide:clipboard-list",
+      "priority": 2
+    },
+    {
+      "code": "training",
+      "label": "培训措施",
+      "description": "通过教育培训提高人员安全意识和操作技能，如安全培训、应急演练、技能考核",
+      "icon": "lucide:graduation-cap",
+      "priority": 3
+    },
+    {
+      "code": "emergency",
+      "label": "应急措施",
+      "description": "制定应急预案并准备应急资源，以应对突发事件，减少事故损失",
+      "icon": "lucide:ambulance",
+      "priority": 4
+    }
+  ],
+
+  "riskCategories": [
+    { "code": "mechanical", "label": "机械伤害", "description": "机械设备造成的人身伤害风险" },
+    { "code": "electrical", "label": "触电伤害", "description": "电气设备造成的触电风险" },
+    { "code": "fall", "label": "高处坠落", "description": "高处作业时坠落的风险" },
+    { "code": "fire", "label": "火灾爆炸", "description": "火灾或爆炸事故风险" },
+    { "code": "chemical", "label": "化学伤害", "description": "危险化学品造成的伤害风险" },
+    { "code": "vehicle", "label": "车辆伤害", "description": "机动车辆造成的伤害风险" },
+    { "code": "collapse", "label": "坍塌倾覆", "description": "建构筑物坍塌或设备倾覆风险" },
+    { "code": "poison", "label": "中毒窒息", "description": "有毒有害气体或缺氧环境造成的风险" },
+    { "code": "drowning", "label": "淹溺风险", "description": "水域作业或涉水时的淹溺风险" },
+    { "code": "other", "label": "其他风险", "description": "未列入上述分类的其他风险" }
+  ],
+
+  "responsibilityMatrix": {
+    "level1": { "responsibleRole": "department_manager", "approveRole": "company_leader", "description": "重大风险由部门负责人管控，公司领导审批" },
+    "level2": { "responsibleRole": "team_leader", "approveRole": "department_manager", "description": "较大风险由班组长管控，部门负责人审批" },
+    "level3": { "responsibleRole": "post_worker", "approveRole": "team_leader", "description": "一般风险由岗位员工管控，班组长审批" },
+    "level4": { "responsibleRole": "post_worker", "approveRole": "team_leader", "description": "低风险由岗位员工自行管控，班组长关注" }
+  },
+
+  "autoUpgradeRules": {
+    "description": "风险等级自动升级规则",
+    "rules": [
+      { "trigger": "同区域同类风险累计≥3项", "action": "提升一级" },
+      { "trigger": "6个月内相关隐患≥5项", "action": "提升一级" },
+      { "trigger": "发生相关未遂事件", "action": "提升一级" },
+      { "trigger": "管控措施连续2次未落实", "action": "提升一级" }
+    ]
+  },
+
+  "futureUpgrade": {
+    "stage1": "配置文件（当前版本）",
+    "stage2": "数据库规则表（assessment_rule）",
+    "stage3": "风险规则中心（可视化配置、动态调整）"
+  }
+}

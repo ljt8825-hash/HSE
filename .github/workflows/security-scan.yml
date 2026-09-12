@@ -1,0 +1,123 @@
+name: Security Scan
+
+on:
+  schedule:
+    - cron: '0 2 * * 1'  # 每周一凌晨2点执行
+  workflow_dispatch:        # 手动触发
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  dependency-audit:
+    name: Dependency Vulnerability Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Backend npm audit
+        working-directory: server
+        run: |
+          echo "=== Backend Dependency Audit ==="
+          npm ci --production
+          npm audit --json > audit-report.json || true
+          
+          # 统计结果
+          if [ -f audit-report.json ]; then
+            CRITICAL=$(node -e "const r=require('./audit-report.json');console.log(r.vulnerabilities?.critical||0)")
+            HIGH=$(node -e "const r=require('./audit-report.json');console.log(r.vulnerabilities?.high||0)")
+            MODERATE=$(node -e "const r=require('./audit-report.json');console.log(r.vulnerabilities?.moderate||0)")
+            LOW=$(node -e "const r=require('./audit-report.json');console.log(r.vulnerabilities?.low||0)")
+            echo "Critical: $CRITICAL | High: $HIGH | Moderate: $MODERATE | Low: $LOW"
+            
+            if [ "$CRITICAL" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
+              echo "::warning::发现 ${CRITICAL} 个 Critical 和 ${HIGH} 个 High 级别漏洞"
+            fi
+          fi
+
+      - name: Upload audit report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: npm-audit-report
+          path: server/audit-report.json
+          retention-days: 14
+
+  secret-scan:
+    name: Hardcoded Secret Detection
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 需要完整历史检测
+
+      - name: Scan for hardcoded secrets
+        run: |
+          echo "=== Secret Scan ==="
+          FAILED=0
+          
+          # 扫描硬编码密钥模式
+          PATTERNS=(
+            "hse-safety-dashboard-secret-key"
+            "hse-refresh-secret-key"
+            "password\s*=\s*['\"](?!--|placeholder|change|your)[^'\"]{8,}['\"]"
+            "api[_-]?key\s*=\s*['\"][a-zA-Z0-9]{20,}['\"]"
+            "secret\s*=\s*['\"][a-zA-Z0-9]{20,}['\"]"
+          )
+          
+          for PATTERN in "${PATTERNS[@]}"; do
+            MATCHES=$(grep -rn --include="*.js" --include="*.ts" --include="*.json" \
+              --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.git \
+              -E "$PATTERN" server/ 安全看板vben/apps/web-naive/src/ 2>/dev/null || true)
+            
+            if [ -n "$MATCHES" ]; then
+              echo "❌ 发现匹配: $PATTERN"
+              echo "$MATCHES"
+              FAILED=1
+            fi
+          done
+          
+          if [ "$FAILED" -eq 0 ]; then
+            echo "✅ 未发现硬编码敏感信息"
+          else
+            echo "::warning::发现潜在的硬编码敏感信息，请人工审查"
+          fi
+
+  trivy-scan:
+    name: Trivy Container/Image Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          exit-code: '0'  # 不阻断 CI，仅报告
+          timeout: '15m'
+          ignore-unfixed: true
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+        continue-on-error: true
+
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+        continue-on-error: true
+
+      - name: Trivy summary
+        if: always()
+        run: |
+          echo "=== Trivy Scan Summary ==="
+          echo "Trivy 扫描已完成。详细结果请查看 Security 标签页。"
+          echo "SARIF 报告已上传至 GitHub Code Scanning。"

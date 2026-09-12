@@ -1,0 +1,40 @@
+{
+  "steps": [
+    {
+      "step": "initial",
+      "thClass": "vxe-table--column vxe-header--column col_24 fixed--visible col--center col--fixed fixed--width is--padding is--sortable",
+      "sortBtns": [
+        "vxe-sort--asc-btn vxe-table-icon-caret-up",
+        "vxe-sort--desc-btn vxe-table-icon-caret-down"
+      ],
+      "colOrder": null
+    },
+    {
+      "step": "click1",
+      "thClass": "vxe-table--column vxe-header--column col_24 fixed--visible col--center col--fixed fixed--width is--padding is--sortable",
+      "sortBtns": [
+        "vxe-sort--asc-btn vxe-table-icon-caret-up sort--active",
+        "vxe-sort--desc-btn vxe-table-icon-caret-down"
+      ],
+      "colOrder": "asc"
+    },
+    {
+      "step": "click2",
+      "thClass": "vxe-table--column vxe-header--column col_24 fixed--visible col--center col--fixed fixed--width is--padding is--sortable",
+      "sortBtns": [
+        "vxe-sort--asc-btn vxe-table-icon-caret-up",
+        "vxe-sort--desc-btn vxe-table-icon-caret-down sort--active"
+      ],
+      "colOrder": "desc"
+    },
+    {
+      "step": "click3",
+      "thClass": "vxe-table--column vxe-header--column col_24 fixed--visible col--center col--fixed fixed--width is--padding is--sortable",
+      "sortBtns": [
+        "vxe-sort--asc-btn vxe-table-icon-caret-up",
+        "vxe-sort--desc-btn vxe-table-icon-caret-down"
+      ],
+      "colOrder": null
+    }
+  ]
+}

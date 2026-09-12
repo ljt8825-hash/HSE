@@ -1,0 +1,65 @@
+const { z } = require('zod');
+
+// 日期字符串校验 (YYYY-MM-DD)
+const dateString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, '日期格式必须为 YYYY-MM-DD').optional().or(z.literal('')).or(z.literal(null));
+
+// 事故状态枚举：DB 历史数据混合 EN+CN（closed/pending/已结案/处理中），schema 同时接受
+// 前端 formModel.status 来自 row.status（EN），PUT 时 payload 直接传 EN；写库时由 updateAccident 路由 normalize
+const accidentStatus = z.enum(['处理中', '已结案', '跟踪中', 'closed', 'pending', 'processing', 'reported', 'investigating']).default('处理中');
+
+// 事故等级枚举：覆盖两套国标体系
+// - 生产安全事故等级：一般 / 较大 / 重大 / 特别重大
+// - 道路交通事故等级：一级 / 二级 / 三级 / 四级（数据库历史事故导入使用，如宁津项目事故统计报表）
+const accidentLevel = z.enum(['一般', '较大', '重大', '特别重大', '一级', '二级', '三级', '四级']).default('一般');
+
+// 创建事故记录校验
+const createAccidentSchema = z.object({
+  no: z.number().int().positive().optional().or(z.literal(null)).or(z.literal('')),
+  accident_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, '事故日期格式必须为 YYYY-MM-DD'),
+  year: z.number().int().min(2000).max(2100).optional(),
+  month: z.number().int().min(1).max(12).optional(),
+  township: z.string().max(100, '乡镇不能超过100字符').optional().or(z.literal('')),
+  location: z.string().max(200, '地点不能超过200字符').optional().or(z.literal('')),
+  involved_vehicle: z.string().max(100).optional().or(z.literal('')),
+  vehicle_id: z.number().int().positive().optional().or(z.literal(null)),
+  involved_person: z.string().max(100).optional().or(z.literal('')),
+  personnel_id: z.number().int().positive().optional().or(z.literal(null)),
+  accident_type: z.string().max(50).optional().or(z.literal('')),
+  responsibility: z.string().max(100).optional().or(z.literal('')),
+  responsibility_level: z.string().max(50).optional().or(z.literal('')),
+  level: accidentLevel,
+  description: z.string().max(2000, '描述不能超过2000字符').optional().or(z.literal('')),
+  cause_analysis: z.string().max(2000).optional().or(z.literal('')),
+  loss_amount: z.number().min(0).default(0),
+  compensation: z.number().min(0).default(0),
+  status: accidentStatus,
+  handler: z.string().max(100).optional().or(z.literal('')),
+  close_date: dateString,
+  remark: z.string().max(1000).optional().or(z.literal('')),
+  // R1-Phase2：报告人/处理人员关联员工 ID（花名册为基石，可选）
+  reporter: z.string().max(100).optional().or(z.literal('')).or(z.literal(null)),
+  handlerId: z.number().int().optional().or(z.literal(null)),
+  reporterId: z.number().int().optional().or(z.literal(null))
+});
+
+// 更新事故记录校验（所有字段可选）
+const updateAccidentSchema = createAccidentSchema.partial();
+
+// 列表查询参数校验
+const listAccidentQuerySchema = z.object({
+  page: z.string().regex(/^\d+$/).transform(Number).default('1'),
+  pageSize: z.string().regex(/^\d+$/).transform(Number).default('20'),
+  keyword: z.string().max(100).optional(),
+  year: z.string().regex(/^\d{4}$/).optional(),
+  month: z.string().regex(/^\d{1,2}$/).optional(),
+  township: z.string().max(100).optional(),
+  status: z.enum(['处理中', '已结案', '跟踪中', 'closed', 'pending', 'processing', 'reported', 'investigating']).optional(),
+  level: z.enum(['一般', '较大', '重大', '特别重大', '一级', '二级', '三级', '四级']).optional(),
+  accident_type: z.string().max(50).optional()
+});
+
+module.exports = {
+  createAccidentSchema,
+  updateAccidentSchema,
+  listAccidentQuerySchema
+};

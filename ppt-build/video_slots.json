@@ -1,0 +1,89 @@
+{
+  "meta": {
+    "title": "video_slots",
+    "description": "视频/动效插入位计划，供 HyperFrames / 渲染 Agent 消费。所有 slot 标注是否需渲染与建议时长，不夸大。",
+    "totalSlots": 6,
+    "globalFallback": "所有视频 slot 在无渲染能力时，以对应静态图（见 asset_manifest.md C 类）或纯 CSS 过渡替代",
+    "constraint": "时长保守估算；不要求 3D/实拍，优先轻量 SVG/CSS/Canvas 动画"
+  },
+  "slots": [
+    {
+      "id": "v1_timeline_overview",
+      "page": 5,
+      "type": "timeline_animation",
+      "title": "四阶段时间线生长动画",
+      "goal": "横向时间轴 4 节点依次点亮，配合『每个节点推翻上一点』的旁白",
+      "needRender": true,
+      "suggestDurationSec": 10,
+      "style": "SVG 路径描边 + 节点脉冲，轻量",
+      "sourceRef": ["F:/deploy/hse-dashboard/CHANGELOG.md", "F:/deploy/hse-dashboard/安全管理系统/frontend-refactor-report-step1.md", "F:/deploy/hse-dashboard/Vben_Admin_Restore_to_Official_Report.md"],
+      "staticFallback": "四阶段时间线静态图（需生成，见 asset_manifest C）",
+      "note": "仅作背景动效，不抢旁白"
+    },
+    {
+      "id": "v2_stage_transition",
+      "page": 6,
+      "type": "stage_transition",
+      "title": "阶段间转场（×4 复用）",
+      "goal": "P6→P7→P8→P9 每进入新阶段时的 1.5–2s 转场，标注阶段名与主导工具",
+      "needRender": true,
+      "suggestDurationSec": 2,
+      "style": "阶段标签滑入 + 工具图标淡入，CSS 过渡即可",
+      "sourceRef": ["F:/deploy/hse-dashboard/安全管理系统/", "F:/deploy/hse-dashboard/安全看板vben/"],
+      "staticFallback": "阶段分隔静态页（文字版阶段卡片）",
+      "note": "4 个阶段复用同一转场模板，仅换文案/图标"
+    },
+    {
+      "id": "v3_pitfall_highlight",
+      "page": 10,
+      "type": "pitfall_highlight",
+      "title": "踩坑高亮（副本地狱 + 没 Git + 偏离重复）",
+      "goal": "P10–P12 用动效逐条『砸下』踩坑证据（副本文件名坠落堆叠、Git 红叉、重复菜单灰化），强化刺痛感",
+      "needRender": true,
+      "suggestDurationSec": 3,
+      "style": "文件名卡片坠落堆叠 + 红叉脉冲，轻量 Canvas/CSS",
+      "sourceRef": ["F:/deploy/hse-dashboard/交通安全风险管理设计-v1.3.md", "F:/deploy/hse-dashboard/Vben_Admin_Restore_to_Official_Report.md", "F:/deploy/hse-dashboard/功能重复与合并分析报告.md"],
+      "staticFallback": "文件副本地狱堆叠可视化（需生成，见 asset_manifest C）",
+      "note": "情绪谷底，动效要『重』，但单条不过 3s，避免拖沓"
+    },
+    {
+      "id": "v4_pivot_restore",
+      "page": 8,
+      "type": "key_moment",
+      "title": "『推倒重来』关键转场",
+      "goal": "P8 『最贵的那行代码是删掉的代码』时，用前端代码『碎裂→还原官方』的短动画强化转折",
+      "needRender": true,
+      "suggestDurationSec": 4,
+      "style": "代码块碎裂/淡出 + Vben 官方 logo 浮现，CSS",
+      "sourceRef": ["F:/deploy/hse-dashboard/Vben_Admin_Restore_to_Official_Report.md"],
+      "staticFallback": "恢复官方基线事件卡（文字版）",
+      "note": "全场唯一『重转折』动效，放在 P8 收尾"
+    },
+    {
+      "id": "v5_free_tier_flow",
+      "page": 16,
+      "type": "concept_animation",
+      "title": "白嫖策略双杠杆流动示意",
+      "goal": "P16 点题页：展示『同软件多账号轮换』与『跨软件切换』两条额度流动路径，错峰点亮",
+      "needRender": true,
+      "suggestDurationSec": 8,
+      "style": "节点（账号/软件）间额度流光箭头循环，SVG/Canvas",
+      "sourceRef": [],
+      "staticFallback": "白嫖策略双杠杆静态示意图（需 AI 出图或图表，见 asset_manifest C）",
+      "note": "点题页，动效要『爽』，传递『额度可调度』的掌控感"
+    },
+    {
+      "id": "v6_cta_close",
+      "page": 19,
+      "type": "cta_animation",
+      "title": "结尾 CTA 收束",
+      "goal": "P19 金句『我踩的坑，就是你省下的一个月』后，四阶段时间轴回收成一条上升曲线 + 3 条 CTA 卡片浮现",
+      "needRender": true,
+      "suggestDurationSec": 6,
+      "style": "时间轴压缩为上升箭头 + CTA 卡片渐显，CSS/SVG",
+      "sourceRef": ["F:/deploy/hse-dashboard/安全管理系统/screenshot_light_initial.png"],
+      "staticFallback": "CTA 收束背景图（需 AI 出图，见 asset_manifest C）",
+      "note": "收尾情绪上扬，动效不超过 6s，给旁白留白"
+    }
+  ]
+}

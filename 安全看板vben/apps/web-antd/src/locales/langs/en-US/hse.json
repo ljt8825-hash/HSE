@@ -1,0 +1,1130 @@
+{
+  "alerts": {
+    "title": "Alert Center",
+    "stats": {
+      "total": "Total Alerts",
+      "critical": "Critical",
+      "new": "Pending",
+      "resolved": "Resolved"
+    },
+    "list": "Alert List",
+    "batchResolve": "Batch Resolve",
+    "export": "Export",
+    "search": {
+      "keyword": "Keyword",
+      "level": "Level",
+      "status": "Status",
+      "timeRange": "Time Range"
+    },
+    "action": {
+      "view": "View",
+      "resolve": "Resolve"
+    },
+    "detail": "Alert Detail"
+  },
+  "workflow": {
+    "title": "Workflow Engine",
+    "definitions": "Definitions",
+    "instances": "Instances",
+    "tasks": "My Tasks",
+    "create": "New Workflow",
+    "start": "Start Workflow",
+    "approve": "Approve",
+    "reject": "Reject",
+    "history": "History",
+    "view": "View",
+    "edit": "Edit",
+    "delete": "Delete"
+  },
+  "notifications": {
+    "title": "Notification Center",
+    "unread": "Unread",
+    "all": "All",
+    "system": "System",
+    "alert": "Alert",
+    "workflow": "Workflow",
+    "markAllRead": "Mark All Read",
+    "clearAll": "Clear All",
+    "markRead": "Mark Read",
+    "delete": "Delete",
+    "type": {
+      "system": "System",
+      "alert": "Alert",
+      "workflow": "Workflow",
+      "task": "Task"
+    },
+    "bell": {
+      "title": "Notifications",
+      "unreadTip": "{count} unread",
+      "empty": "No unread notifications",
+      "viewAll": "View all notifications",
+      "priority": {
+        "urgent": "Urgent",
+        "warning": "Expiring",
+        "normal": "Normal"
+      },
+      "loadFailed": "Failed to load notifications",
+      "markReadFailed": "Failed to mark as read",
+      "clearFailed": "Failed to clear notifications",
+      "jumpFailed": "Navigation failed, please try again later",
+      "ws": {
+        "connected": "Realtime connection established",
+        "connecting": "Connecting to realtime service...",
+        "disconnected": "Realtime connection disconnected",
+        "degraded": "Realtime unavailable, switched to polling",
+        "reconnecting": "Reconnecting (attempt {count})...",
+        "authFailed": "Authentication failed, please login again",
+        "heartbeatOk": "Heartbeat normal"
+      }
+    }
+  },
+  "system": {
+    "title": "System Management",
+    "users": {
+      "title": "User Management",
+      "create": "New User",
+      "edit": "Edit User",
+      "delete": "Delete User",
+      "resetPwd": "Reset Password",
+      "enable": "Enable",
+      "disable": "Disable"
+    },
+    "roles": {
+      "title": "Role Management",
+      "create": "New Role",
+      "edit": "Edit Role",
+      "delete": "Delete Role",
+      "permission": "Permissions"
+    }
+  },
+  "security": {
+    "title": "Security Audit",
+    "audit": {
+      "title": "Audit Log",
+      "export": "Export",
+      "detail": "Detail"
+    }
+  },
+  "hazards": {
+    "title": "Hazard Management",
+    "stats": {
+      "total": "Total Hazards",
+      "pending": "Pending",
+      "processing": "Processing",
+      "completed": "Completed"
+    },
+    "create": "New Hazard",
+    "view": "View",
+    "edit": "Edit",
+    "complete": "Complete",
+    "delete": "Delete",
+    "search": {
+      "keyword": "Keyword",
+      "year": "Year",
+      "month": "Month",
+      "level": "Level",
+      "status": "Status",
+      "category": "Category",
+      "location": "Location"
+    },
+    "detail": "Hazard Detail",
+    "status": {
+      "pending": "Pending",
+      "processing": "Processing",
+      "completed": "Completed",
+      "resolved": "Resolved",
+      "unresolved": "Unresolved"
+    },
+    "linkage": {
+      "relatedRiskTitle": "Related Risk",
+      "riskName": "Risk Name",
+      "riskLocation": "Risk Location",
+      "riskMeasures": "Control Measures",
+      "lastHazardCheck": "Last Hazard Check",
+      "hazardCount": "Hazard Count",
+      "viewRiskDetail": "View Risk Detail",
+      "noRelatedRisk": "No related risk"
+    }
+  },
+  "insurance": {
+    "title": "Insurance Management",
+    "personnel": {
+      "title": "Personnel Insurance",
+      "stats": {
+        "total": "Total Personnel",
+        "insured": "Insured",
+        "expiring": "Expiring Soon",
+        "highRisk": "High Risk"
+      },
+      "tabs": {
+        "all": "All Personnel",
+        "highRisk": "High Risk",
+        "expiring": "Expiring",
+        "expired": "Expired"
+      },
+      "viewMode": {
+        "list": "List View",
+        "category": "Category View",
+        "calendar": "Calendar View"
+      },
+      "create": "New Personnel",
+      "edit": "Edit",
+      "delete": "Delete",
+      "renewal": "Renewal",
+      "batchRenewal": "Batch Renewal"
+    }
+  },
+  "accidents": {
+    "title": "Accident Management",
+    "visibilityTitle": "Accident Stats Visibility",
+    "totalRecords": "Total {total} records",
+    "deadUnit": "dead",
+    "injuredUnit": "injured",
+    "yearUnit": "Year",
+    "monthUnit": "Month",
+    "dayUnit": "days",
+    "stats": {
+      "total": "Total Accidents",
+      "major": "Major Accidents",
+      "open": "Open Cases",
+      "casualties": "Casualties",
+      "loss": "Economic Loss",
+      "expiring": "Expiring",
+      "expired": "Expired"
+    },
+    "level": {
+      "major": "Major",
+      "serious": "Serious",
+      "general": "General",
+      "minor": "Minor"
+    },
+    "type": {
+      "traffic": "Traffic Accident",
+      "occupational": "Occupational Injury",
+      "equipment": "Equipment Accident",
+      "fire": "Fire Accident",
+      "environmental": "Environmental Accident",
+      "other": "Other"
+    },
+    "status": {
+      "open": "Open",
+      "reported": "Reported",
+      "investigating": "Investigating",
+      "processing": "Processing",
+      "closed": "Closed"
+    },
+    "expiry": {
+      "title": "Deadline",
+      "normal": "Normal",
+      "expiring": "Expiring",
+      "expired": "Expired",
+      "closed": "Closed",
+      "permanent": "Permanent",
+      "unknown": "Unknown"
+    },
+    "search": {
+      "keyword": "Keyword",
+      "keywordPlaceholder": "Search accident name/location",
+      "year": "Year",
+      "allYear": "All Years",
+      "month": "Month",
+      "allMonth": "All Months",
+      "level": "Level",
+      "allLevel": "All Levels",
+      "type": "Type",
+      "allType": "All Types",
+      "status": "Status",
+      "allStatus": "All Status",
+      "allExpiry": "All Deadline"
+    },
+    "form": {
+      "title": "Accident Name",
+      "titlePlaceholder": "Enter accident name",
+      "description": "Description",
+      "descriptionPlaceholder": "Enter accident description and initial analysis",
+      "level": "Level",
+      "levelPlaceholder": "Select accident level",
+      "type": "Type",
+      "typePlaceholder": "Select accident type",
+      "status": "Status",
+      "statusPlaceholder": "Select status",
+      "location": "Location",
+      "locationPlaceholder": "Enter accident location",
+      "occurredAt": "Occurred At",
+      "occurredAtPlaceholder": "Select occurred date",
+      "reporter": "Reporter",
+      "reporterPlaceholder": "Enter reporter name",
+      "casualties": "Deaths",
+      "injuries": "Injuries",
+      "economicLoss": "Economic Loss (CNY)",
+      "economicLossPlaceholder": "Enter economic loss amount",
+      "rectificationDeadlineDays": "Rectification Deadline (days)",
+      "rectificationDeadlineDaysPlaceholder": "e.g. 30 (from occurred date)",
+      "relatedHazardId": "Related Hazard",
+      "relatedHazardIdPlaceholder": "Select related hazard record",
+      "relatedEmergencyId": "Related Emergency Plan",
+      "relatedEmergencyIdPlaceholder": "Select related emergency plan",
+      "remark": "Remark",
+      "remarkPlaceholder": "Other notes"
+    },
+    "column": {
+      "title": "Accident Name",
+      "level": "Level",
+      "type": "Type",
+      "status": "Status",
+      "occurredAt": "Occurred At",
+      "casualties": "Casualties",
+      "economicLoss": "Economic Loss",
+      "reportGroup": "Report to Group"
+    },
+    "reportGroup": {
+      "reported": "Reported",
+      "unreported": "Not Reported",
+      "reportedSuccess": "Reported to Group",
+      "unreportedSuccess": "Unreported from Group"
+    },
+    "detail": {
+      "title": "Accident Detail",
+      "level": "Level:",
+      "type": "Type:",
+      "status": "Status:",
+      "location": "Location:",
+      "occurredAt": "Occurred At:",
+      "reportedAt": "Reported At:",
+      "reporter": "Reporter:",
+      "casualties": "Casualties:",
+      "economicLoss": "Economic Loss:",
+      "rectificationDeadlineDays": "Rectification Deadline:",
+      "handler": "Handler:",
+      "closedAt": "Closed At:",
+      "relatedHazardId": "Related Hazard:",
+      "relatedEmergencyId": "Related Plan:",
+      "description": "Description",
+      "remark": "Remark"
+    },
+    "attachment": {
+      "title": "Attachments",
+      "upload": "Upload",
+      "version": "Version",
+      "uploadedBy": "Uploaded By",
+      "uploadedAt": "Uploaded At",
+      "fileName": "File Name",
+      "fileSize": "Size",
+      "isLatest": "Latest",
+      "download": "Download",
+      "delete": "Delete",
+      "deleteConfirm": "Are you sure to delete this attachment?",
+      "uploadSuccess": "Attachment uploaded",
+      "uploadFailed": "Upload failed",
+      "deleteSuccess": "Attachment deleted",
+      "deleteFailed": "Delete failed",
+      "loadFailed": "Failed to load attachments",
+      "empty": "No attachments, please upload",
+      "versionPlaceholder": "Enter version, e.g. V1.0"
+    },
+    "version": {
+      "tabAttachments": "Attachments",
+      "tabVersions": "History Versions",
+      "version": "Version",
+      "changeType": "Change Type",
+      "changeSummary": "Change Summary",
+      "changedBy": "Changed By",
+      "changedAt": "Changed At",
+      "empty": "No history versions",
+      "loadFailed": "Failed to load versions",
+      "changeTypeCreate": "Create",
+      "changeTypeUpdate": "Update",
+      "changeTypeImport": "Import",
+      "changeTypeRevise": "Revise"
+    },
+    "action": {
+      "title": "Action",
+      "create": "New Accident",
+      "createTitle": "Create Accident",
+      "editTitle": "Edit Accident",
+      "edit": "Edit",
+      "view": "View",
+      "delete": "Delete",
+      "deleteConfirm": "Are you sure to delete this accident?",
+      "confirmDelete": "Delete",
+      "cancel": "Cancel",
+      "export": "Export",
+      "import": "Import",
+      "reset": "Reset",
+      "startInvestigate": "Start Investigation",
+      "startInvestigateConfirm": "Change status to Investigating?",
+      "startProcessing": "Start Processing",
+      "startProcessingConfirm": "Change status to Processing?",
+      "close": "Close Case",
+      "closeConfirm": "Mark this accident as closed?"
+    },
+    "validate": {
+      "titleRequired": "Please enter accident name",
+      "titleLength": "Name length must be 3-100 characters",
+      "levelRequired": "Please select accident level",
+      "typeRequired": "Please select accident type",
+      "locationRequired": "Please enter location",
+      "occurredAtRequired": "Please select occurred date",
+      "reporterRequired": "Please enter reporter",
+      "casualtiesRequired": "Please enter deaths",
+      "casualtiesMin": "Deaths cannot be less than 0",
+      "injuriesRequired": "Please enter injuries",
+      "injuriesMin": "Injuries cannot be less than 0",
+      "economicLossRequired": "Please enter economic loss",
+      "economicLossMin": "Economic loss cannot be less than 0"
+    },
+    "message": {
+      "createSuccess": "Created successfully",
+      "updateSuccess": "Updated successfully",
+      "statusUpdated": "Status updated successfully",
+      "deleteSuccess": "Deleted successfully",
+      "statusChangeSuccess": "Status changed successfully",
+      "statusChangeFailed": "Failed to change status"
+    },
+    "export": {
+      "success": "Exported successfully",
+      "failed": "Export failed, please try again later"
+    }
+  },
+  "training": {
+    "title": "Training Management",
+    "stats": {
+      "total": "Training Plans",
+      "ongoing": "Ongoing",
+      "completed": "Completed",
+      "attendees": "Attendees",
+      "passRate": "Pass Rate"
+    },
+    "type": {
+      "safety": "Safety Training",
+      "skills": "Skills Training",
+      "emergency": "Emergency Training",
+      "induction": "Induction Training",
+      "regular": "Regular Training"
+    },
+    "status": {
+      "draft": "Draft",
+      "planned": "Planned",
+      "ongoing": "Ongoing",
+      "completed": "Completed",
+      "cancelled": "Cancelled"
+    }
+  },
+  "emergency": {
+    "title": "Emergency Management",
+    "stats": {
+      "totalPlans": "Total Plans",
+      "active": "Active",
+      "drills": "Total Drills",
+      "participants": "Participants"
+    },
+    "type": {
+      "fire": "Fire",
+      "traffic": "Traffic",
+      "chemical": "Hazardous Chemicals",
+      "natural_disaster": "Natural Disaster",
+      "equipment": "Equipment",
+      "public_health": "Public Health",
+      "other": "Other"
+    },
+    "level": {
+      "level1": "Level I",
+      "level2": "Level II",
+      "level3": "Level III",
+      "level4": "Level IV"
+    },
+    "status": {
+      "active": "Active",
+      "inactive": "Inactive",
+      "drilling": "Drilling",
+      "archived": "Archived"
+    }
+  },
+  "goals": {
+    "title": "Goal Management",
+    "stats": {
+      "total": "Total Goals",
+      "achieved": "Achieved",
+      "onTrack": "On Track",
+      "atRisk": "At Risk",
+      "avgProgress": "Avg Progress"
+    },
+    "status": {
+      "on_track": "On Track",
+      "at_risk": "At Risk",
+      "behind": "Behind",
+      "achieved": "Achieved",
+      "failed": "Failed"
+    }
+  },
+  "inspection": {
+    "title": "Site Management",
+    "stats": {
+      "total": "Total Inspections",
+      "completed": "Completed",
+      "issues": "Issues Found",
+      "pending": "Pending Rectification",
+      "overdue": "Overdue Rectification",
+      "avgScore": "Avg Score"
+    },
+    "type": {
+      "routine": "Routine Inspection",
+      "special": "Special Inspection",
+      "periodic": "Periodic Inspection",
+      "temporary": "Temporary Inspection"
+    },
+    "status": {
+      "pending": "Pending",
+      "completed": "Completed",
+      "issues_found": "Issues Found"
+    }
+  },
+  "regulations": {
+    "title": "Regulations Management",
+    "stats": {
+      "total": "Total Regulations",
+      "effective": "Effective",
+      "revised": "Under Revision",
+      "draft": "Draft"
+    },
+    "category": {
+      "national": "National",
+      "provincial": "Provincial",
+      "municipal": "Municipal",
+      "internal": "Internal",
+      "industry": "Industry"
+    },
+    "type": {
+      "law": "Law",
+      "regulation": "Regulation",
+      "standard": "Standard",
+      "procedure": "Procedure",
+      "guideline": "Guideline"
+    },
+    "status": {
+      "effective": "Effective",
+      "draft": "Draft",
+      "revised": "Under Revision",
+      "abolished": "Abolished"
+    },
+    "expiry": {
+      "title": "Expiry Reminder",
+      "normal": "Normal",
+      "expiring": "Expiring",
+      "expired": "Expired",
+      "permanent": "Permanent",
+      "unknown": "Unknown"
+    },
+    "attachment": {
+      "title": "Attachments",
+      "upload": "Upload Attachment",
+      "version": "Version",
+      "uploadedBy": "Uploaded By",
+      "uploadedAt": "Uploaded At",
+      "fileName": "File Name",
+      "fileSize": "Size",
+      "isLatest": "Latest",
+      "download": "Download",
+      "preview": "Preview",
+      "delete": "Delete",
+      "deleteConfirm": "Are you sure to delete this attachment?",
+      "uploadSuccess": "Attachment uploaded successfully",
+      "uploadFailed": "Attachment upload failed",
+      "deleteSuccess": "Attachment deleted successfully",
+      "deleteFailed": "Attachment deletion failed",
+      "loadFailed": "Failed to load attachments",
+      "empty": "No attachments yet",
+      "versionPlaceholder": "Enter version, e.g. V1.0"
+    },
+    "version": {
+      "tabAttachments": "Attachments",
+      "tabVersions": "Version History",
+      "version": "Version",
+      "changeType": "Change Type",
+      "changeSummary": "Change Summary",
+      "changedBy": "Changed By",
+      "changedAt": "Changed At",
+      "empty": "No version history",
+      "loadFailed": "Failed to load version history",
+      "changeTypeCreate": "Create",
+      "changeTypeUpdate": "Update",
+      "changeTypeImport": "Import",
+      "changeTypeRevise": "Revise"
+    },
+    "action": {
+      "create": "New Regulation",
+      "edit": "Edit Regulation",
+      "view": "View Detail",
+      "delete": "Delete Regulation",
+      "export": "Export Report",
+      "import": "Import Data"
+    },
+    "search": {
+      "keyword": "Keyword",
+      "category": "Category",
+      "type": "Type",
+      "status": "Status"
+    },
+    "validate": {
+      "titleRequired": "Please enter title",
+      "titleLength": "Title length must be 3-200 chars",
+      "categoryRequired": "Please select category",
+      "typeRequired": "Please select type",
+      "documentNoRequired": "Please enter document no.",
+      "versionRequired": "Please enter version",
+      "issueDateRequired": "Please select issue date",
+      "effectiveDateRequired": "Please select effective date",
+      "issuerRequired": "Please enter issuer",
+      "summaryRequired": "Please enter summary",
+      "validityPeriodNumber": "Validity must be a number",
+      "importRequiredField": "Row {row}: required field {field} missing",
+      "importDateFormat": "Row {row}: invalid date format: {value} (expected YYYY-MM-DD)"
+    },
+    "export": {
+      "success": "Export succeeded",
+      "failed": "Export failed, please try again"
+    }
+  },
+  "riskControl": {
+    "title": "Risk Control",
+    "riskMap": "Risk Map",
+    "riskSuffix": " Risk",
+    "totalRecords": "{total} record(s) in total",
+    "stats": {
+      "total": "Total Risks",
+      "level1": "Level 1 Risk",
+      "level2": "Level 2 Risk",
+      "level3": "Level 3 Risk",
+      "level4": "Level 4 Risk"
+    },
+    "level": {
+      "level1": "Level 1 (Major)",
+      "level2": "Level 2 (Significant)",
+      "level3": "Level 3 (General)",
+      "level4": "Level 4 (Low)"
+    },
+    "type": {
+      "mechanical": "Mechanical Injury",
+      "falling": "Falling from Height",
+      "strike": "Object Strike",
+      "electric": "Electric Shock",
+      "fire": "Fire",
+      "explosion": "Explosion",
+      "poisoning": "Poisoning/Asphyxia",
+      "other": "Other"
+    },
+    "area": {
+      "production": "Production Area",
+      "warehouse": "Warehouse Area",
+      "office": "Office Area",
+      "maintenance": "Maintenance Area",
+      "dangerous": "Hazardous Materials Area",
+      "public": "Public Area"
+    },
+    "status": {
+      "normal": "Normal",
+      "resolved": "Resolved",
+      "monitoring": "Monitoring"
+    },
+    "expiry": {
+      "title": "Expiry Reminder",
+      "normal": "Normal",
+      "expiring": "Expiring",
+      "expired": "Expired",
+      "permanent": "Permanent",
+      "unknown": "Unknown"
+    },
+    "search": {
+      "keyword": "Keyword",
+      "keywordPlaceholder": "Search risk name/location",
+      "level": "Level",
+      "allLevel": "All Levels",
+      "type": "Type",
+      "allType": "All Types",
+      "area": "Area",
+      "allArea": "All Areas",
+      "allExpiry": "All Expiry"
+    },
+    "form": {
+      "name": "Risk Name",
+      "namePlaceholder": "Enter risk name",
+      "level": "Risk Level",
+      "levelPlaceholder": "Select risk level",
+      "type": "Risk Type",
+      "typePlaceholder": "Select risk type",
+      "status": "Status",
+      "statusPlaceholder": "Select status",
+      "location": "Location",
+      "locationPlaceholder": "Enter risk location",
+      "lng": "Lng",
+      "lat": "Lat",
+      "area": "Area",
+      "areaPlaceholder": "Select area",
+      "assessmentDate": "Assessment Date",
+      "assessmentDatePlaceholder": "Select assessment date",
+      "reviewCycle": "Review Cycle (m)",
+      "reviewCyclePlaceholder": "e.g. 12",
+      "measures": "Control Measures",
+      "measuresPlaceholder": "Enter control measures",
+      "emergency": "Emergency Measures",
+      "emergencyPlaceholder": "Enter emergency measures",
+      "accidentType": "Accident Type",
+      "accidentTypePlaceholder": "Possible accident type",
+      "sheet": "Grid",
+      "sheetPlaceholder": "Grid ID"
+    },
+    "column": {
+      "index": "No.",
+      "name": "Risk Name",
+      "level": "Level",
+      "type": "Type",
+      "location": "Location",
+      "area": "Area",
+      "status": "Status",
+      "assessmentDate": "Assessment Date",
+      "createdAt": "Created At"
+    },
+    "detail": {
+      "title": "Risk Detail",
+      "type": "Type: ",
+      "location": "Location: ",
+      "area": "Area: ",
+      "sheet": "Grid: ",
+      "gps": "GPS: ",
+      "gpsEmpty": "Not set (approximate)",
+      "accidentType": "Accident Type: ",
+      "assessmentDate": "Assessment Date: ",
+      "reviewCycle": "Review Cycle: ",
+      "createdAt": "Created At: ",
+      "measures": "Control Measures",
+      "emergency": "Emergency Measures",
+      "empty": "N/A",
+      "monthUnit": " month(s)"
+    },
+    "attachment": {
+      "title": "Attachments",
+      "upload": "Upload Attachment",
+      "version": "Version",
+      "uploadedBy": "Uploaded By",
+      "uploadedAt": "Uploaded At",
+      "fileName": "File Name",
+      "fileSize": "Size",
+      "isLatest": "Latest",
+      "download": "Download",
+      "delete": "Delete",
+      "deleteConfirm": "Delete this attachment?",
+      "uploadSuccess": "Attachment uploaded",
+      "uploadFailed": "Upload failed",
+      "deleteSuccess": "Attachment deleted",
+      "deleteFailed": "Delete failed",
+      "loadFailed": "Failed to load attachments",
+      "empty": "No attachments",
+      "versionPlaceholder": "Version, e.g. V1.0"
+    },
+    "version": {
+      "tabAttachments": "Attachments",
+      "tabVersions": "Versions",
+      "version": "Version",
+      "changeType": "Change Type",
+      "changeSummary": "Summary",
+      "changedBy": "Changed By",
+      "changedAt": "Changed At",
+      "empty": "No version history",
+      "loadFailed": "Failed to load versions",
+      "changeTypeCreate": "Create",
+      "changeTypeUpdate": "Update",
+      "changeTypeImport": "Import",
+      "changeTypeRevise": "Revise"
+    },
+    "action": {
+      "title": "Action",
+      "create": "Add Risk",
+      "createTitle": "Add Risk",
+      "editTitle": "Edit Risk",
+      "edit": "Edit",
+      "view": "View",
+      "delete": "Delete",
+      "deleteConfirm": "Delete this risk?",
+      "confirmDelete": "Delete",
+      "cancel": "Cancel",
+      "export": "Export",
+      "reset": "Reset"
+    },
+    "validate": {
+      "nameRequired": "Please enter risk name",
+      "nameLength": "Name length: 2-100 chars",
+      "levelRequired": "Please select risk level",
+      "measuresRequired": "Please enter control measures",
+      "areaRequired": "Please select area"
+    },
+    "message": {
+      "createSuccess": "Created",
+      "updateSuccess": "Updated",
+      "deleteSuccess": "Deleted"
+    },
+    "export": {
+      "success": "Export succeeded",
+      "failed": "Export failed, please try again"
+    },
+    "linkage": {
+      "generateHazard": "Generate Hazard",
+      "generateConfirm": "Are you sure you want to generate a hazard record from this risk point? The system will auto-fill risk level, control measures, etc.",
+      "generateSuccess": "Hazard record generated, view it in the 'Related Hazards' tab",
+      "generateFailed": "Failed to generate hazard record",
+      "tabRelatedHazards": "Related Hazards",
+      "noRelatedHazards": "No related hazards. Click 'Generate Hazard' button above to create one",
+      "lastHazardCheck": "Last Hazard Check",
+      "hazardCount": "Hazard Count",
+      "hazardDescription": "Description",
+      "hazardChecker": "Checker",
+      "hazardCheckDate": "Check Date",
+      "hazardFixDate": "Fix Date",
+      "hazardStatus": "Status",
+      "linkType": "Link Type",
+      "linkTypeManual": "Manual",
+      "linkTypeAuto": "Auto",
+      "linkTypeExpiring": "Expiring"
+    },
+    "assess": {
+      "tab": "Risk Assessment",
+      "title": "Risk Assessment Workbench",
+      "method": "Method",
+      "methodLEC": "LEC (Job Hazard Analysis)",
+      "methodLS": "LS (Risk Matrix)",
+      "formula": "Formula",
+      "score": "Risk Score",
+      "scoreHint": "Live: {formula}",
+      "level": "Risk Level",
+      "levelLabel": "Judged Level",
+      "reviewCycle": "Review Cycle",
+      "reviewCycleHint": "Re-assessment required after expiry",
+      "assessmentDate": "Assessment Date",
+      "remark": "Remark",
+      "save": "Save Assessment",
+      "saving": "Saving...",
+      "currentTitle": "Current Assessment",
+      "currentEmpty": "No assessment yet. Select a method and enter factors.",
+      "currentMethod": "Method",
+      "currentScore": "Score",
+      "currentLevel": "Level",
+      "currentDate": "Date",
+      "currentCycle": "Review Cycle",
+      "factorRequired": "Please select {symbol} ({label})",
+      "saveSuccess": "Risk assessment saved",
+      "saveFailed": "Failed to save assessment",
+      "scaleMissing": "Assessment scales not loaded",
+      "scaleLoadFailed": "Failed to load assessment scales"
+    }
+  },
+  "documents": {
+    "title": "Safety Document Center",
+    "library": "Document Library",
+    "review": "Document Review",
+    "upload": "Upload File",
+    "uploadTitle": "Upload Safety Document",
+    "search": "Search file name or summary",
+    "category": "Category",
+    "categoryTree": "File Categories",
+    "tags": "Tags",
+    "validDate": "Validity Period",
+    "validRange": "Validity Period",
+    "validStartDate": "Start Date",
+    "validEndDate": "End Date",
+    "remindDays": "Reminder Days",
+    "remindDaysHint": "Remind N days before expiry",
+    "summary": "Remark",
+    "summaryPlaceholder": "File description (optional)",
+    "reviewStatus": "Review Status",
+    "reviewComment": "Review Comment",
+    "reviewCommentPlaceholder": "Enter review comment",
+    "reviewRejectPlaceholder": "Enter rejection reason",
+    "approved": "Approved",
+    "rejected": "Rejected",
+    "pending": "Pending",
+    "valid": "Valid",
+    "expiring": "Expiring",
+    "expired": "Expired",
+    "none": "No Expiry",
+    "fileType": {
+      "pdf": "PDF",
+      "word": "Word",
+      "excel": "Excel",
+      "image": "Image",
+      "video": "Video",
+      "other": "Other"
+    },
+    "action": {
+      "upload": "Upload",
+      "download": "Download",
+      "detail": "Detail",
+      "delete": "Delete",
+      "deleteConfirm": "Confirm to delete this file?",
+      "approve": "Approve",
+      "reject": "Reject",
+      "confirmApprove": "Approve",
+      "confirmReject": "Reject",
+      "confirm": "Confirm",
+      "cancel": "Cancel"
+    },
+    "message": {
+      "uploadSuccess": "File uploaded successfully",
+      "uploadFailed": "File upload failed",
+      "deleteSuccess": "Deleted successfully",
+      "deleteFailed": "Delete failed",
+      "downloadFailed": "Download failed",
+      "approveSuccess": "Approved",
+      "rejectSuccess": "Rejected",
+      "reviewFailed": "Review operation failed",
+      "rejectCommentRequired": "Please fill in the rejection reason"
+    },
+    "detail": {
+      "title": "File Detail",
+      "fileName": "File Name",
+      "fileType": "File Type",
+      "fileSize": "File Size",
+      "category": "Category",
+      "uploadBy": "Uploaded By",
+      "uploadAt": "Upload Time",
+      "reviewBy": "Reviewer",
+      "reviewAt": "Review Time"
+    }
+  },
+  "advanced": {
+    "title": "Advanced Analytics",
+    "cockpit": "HSE Cockpit",
+    "bi": "BI Dashboard",
+    "ai": "AI Analytics",
+    "iot": "IoT Platform",
+    "supplyChain": "Supply Chain Safety",
+    "reports": "Report Center"
+  },
+  "message": {
+    "fetchListFailed": "Failed to load {module} list, please check network or contact admin",
+    "fetchStatsFailed": "Failed to load statistics",
+    "fetchFailed": "Failed to load data",
+    "fetchDetailFailed": "Failed to load detail",
+    "createFailed": "Create failed, please try again later",
+    "updateFailed": "Update failed, please try again later",
+    "deleteFailed": "Delete failed, please try again later",
+    "saveFailed": "Save failed, please try again later",
+    "importFailed": "Import failed, please try again later",
+    "importParseFailed": "File parse failed: {reason}",
+    "operationFailed": "Operation failed, please try again later"
+  },
+  "standard": {
+    "title": "Safety Standard Clause Library",
+    "stats": {
+      "total": "Total Clauses",
+      "level1": "Level 1 Elements",
+      "active": "Active",
+      "inactive": "Inactive"
+    },
+    "tree": {
+      "search": "Search code or name",
+      "includeAll": "All",
+      "includeActive": "Active"
+    },
+    "action": {
+      "add": "Add",
+      "addSub": "Add Sub",
+      "edit": "Edit",
+      "enable": "Enable",
+      "disable": "Disable",
+      "import": "Import",
+      "export": "Export",
+      "save": "Save",
+      "cancel": "Cancel"
+    },
+    "detail": {
+      "empty": "Select a clause from the left to view details",
+      "code": "Code",
+      "level": "Level",
+      "elementName": "Element Name",
+      "scoreWeight": "Score Weight",
+      "sortOrder": "Sort Order",
+      "createdAt": "Created At",
+      "clauseContent": "Clause Requirements",
+      "checkMethod": "Check Method",
+      "keywords": "Keywords",
+      "requiredDocTypes": "Required Doc Types"
+    },
+    "modal": {
+      "createTitle": "Add Clause",
+      "editTitle": "Edit Clause",
+      "importTitle": "Batch Import Clauses",
+      "downloadTemplate": "Download Template"
+    },
+    "message": {
+      "createSuccess": "Clause created successfully",
+      "updateSuccess": "Clause updated successfully",
+      "enableSuccess": "Clause enabled",
+      "disableSuccess": "Clause disabled",
+      "exportSuccess": "Exported {count} clauses successfully",
+      "importSuccess": "Import completed: {success} succeeded",
+      "importPartial": "Import completed: {success} succeeded, {failed} failed"
+    }
+  },
+  "relation": {
+    "title": "Clause-Document Relation",
+    "stats": {
+      "total": "Total Relations",
+      "valid": "Confirmed",
+      "pending": "Pending",
+      "files": "Linked Files"
+    },
+    "tree": {
+      "title": "Standard Clause Tree"
+    },
+    "table": {
+      "fileName": "File Name",
+      "matchType": "Match Type",
+      "confidence": "Confidence",
+      "status": "Status",
+      "action": "Action",
+      "clause": "Clause",
+      "reason": "Match Reason"
+    },
+    "status": {
+      "pending": "Pending",
+      "valid": "Confirmed",
+      "invalid": "Invalid"
+    },
+    "matchType": {
+      "auto": "Auto",
+      "manual": "Manual"
+    },
+    "action": {
+      "add": "Add Relation",
+      "confirm": "Confirm",
+      "batchConfirm": "Batch Confirm",
+      "cancel": "Unlink",
+      "generate": "Generate Suggestions"
+    },
+    "modal": {
+      "addTitle": "Add Relation",
+      "selectFile": "Select File",
+      "confirmDelete": "Unlink \"{name}\" from this clause? The file itself will not be deleted."
+    },
+    "message": {
+      "createSuccess": "Relation created",
+      "confirmSuccess": "Relation confirmed",
+      "deleteSuccess": "Relation removed",
+      "generateSuccess": "Matching done: scanned {clauses} clauses, generated {created} suggestions",
+      "batchSuccess": "Confirmed: {success} succeeded",
+      "batchPartial": "Confirmed: {success} succeeded, {failed} failed",
+      "selectFirst": "Please select a clause first",
+      "selectRows": "Please select rows to confirm"
+    },
+    "suggestions": {
+      "title": "Match Suggestions",
+      "minConfidence": "Min Confidence",
+      "empty": "No pending match suggestions",
+      "emptyHint": "Click \"Generate Suggestions\" button to start auto matching"
+    }
+  },
+  "module": {
+    "risk": "Risk",
+    "riskControl": "Risk Control",
+    "hazards": "Hazard",
+    "accidents": "Accident",
+    "emergencyPlan": "Emergency Plan",
+    "emergencyDrill": "Drill Record",
+    "goals": "Goal",
+    "regulations": "Regulation",
+    "training": "Training",
+    "trainingRecords": "Training Record",
+    "trainingNewEmployee": "New Employee Training",
+    "trainingLedger": "Training Ledger",
+    "trainingDriver": "Driver Training",
+    "personnel": "Personnel",
+    "budget": "Budget",
+    "assessment": "Assessment",
+    "committee": "Safety Personnel",
+    "notifications": "Notification",
+    "workflow": "Workflow",
+    "users": "User",
+    "roles": "Role",
+    "audit": "Audit Log",
+    "batchImport": "Batch Import"
+  },
+  "batchImport": {
+    "title": "Batch Import Center",
+    "taskList": "Import Tasks",
+    "newImport": "New Import",
+    "taskNo": "Task No.",
+    "importType": "Import Type",
+    "status": "Status",
+    "progress": "Progress",
+    "total": "Total",
+    "success": "Success",
+    "failed": "Failed",
+    "pending": "Pending",
+    "createdBy": "Created By",
+    "createdAt": "Created At",
+    "action": "Action",
+    "detail": "Detail",
+    "retry": "Retry",
+    "batchRetry": "Retry All Failed",
+    "precheck": "Pre-check",
+    "confirm": "Confirm & Execute",
+    "template": "Download Template",
+    "search": {
+      "keyword": "Search task no./creator",
+      "typePlaceholder": "Import Type",
+      "statusPlaceholder": "Task Status"
+    },
+    "types": {
+      "document": "Documents",
+      "standard_clause": "Standard Clauses",
+      "safety_record": "Safety Records"
+    },
+    "taskStatus": {
+      "pending": "Pending Pre-check",
+      "prechecking": "Pre-checking",
+      "prechecked": "Pre-checked",
+      "confirmed": "Confirmed",
+      "processing": "Processing",
+      "completed": "Completed",
+      "failed": "Failed",
+      "cancelled": "Cancelled"
+    },
+    "itemStatus": {
+      "pending": "Pending",
+      "prechecking": "Pre-checking",
+      "prechecked": "Pre-check Passed",
+      "invalid": "Invalid File",
+      "duplicate": "Duplicate File",
+      "processing": "Processing",
+      "success": "Success",
+      "failed": "Failed",
+      "skipped": "Skipped",
+      "retrying": "Retrying"
+    },
+    "drawer": {
+      "title": "New Batch Import",
+      "uploadTitle": "Upload Files",
+      "dragText": "Click or drag files to this area to upload",
+      "dragHint": "Support {type} files, max 500 files, max 100MB per file",
+      "startPrecheck": "Start Pre-check",
+      "prechecking": "Pre-checking files...",
+      "precheckingDesc": "Checking file type, size, and duplicates",
+      "precheckComplete": "Pre-check Complete",
+      "precheckDetail": "Pre-check Details",
+      "confirmExecute": "Confirm & Execute",
+      "processing": "Importing...",
+      "processingDesc": "Please wait, will auto-refresh when done",
+      "completed": "Import Complete",
+      "completedDesc": "Task completed. You can view details in the task list.",
+      "cancel": "Cancel",
+      "done": "Done",
+      "concurrentLimit": "Concurrent task limit reached ({current}/{max}), please try again later"
+    },
+    "instructions": {
+      "title": "Batch Import Instructions",
+      "item1": "Support up to 500 files at once",
+      "item2": "Max 100MB per file",
+      "item3": "System auto pre-checks for duplicate and invalid files",
+      "item4": "Manual confirmation required after pre-check"
+    }
+  }
+}

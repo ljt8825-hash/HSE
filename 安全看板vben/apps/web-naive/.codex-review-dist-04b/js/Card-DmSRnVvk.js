@@ -1,0 +1,1 @@
+import{On as e,Zn as t,b as n,k as r,mt as i,xt as a}from"./runtime-core.esm-bundler-Blp3D1W4.js";import{t as o}from"./cn-D3V-o1ny.js";var s=r({__name:`Card`,props:{class:{}},setup(r){let s=r;return(r,c)=>(i(),n(`div`,{class:t(e(o)(`border-border bg-card text-card-foreground rounded-xl border`,s.class))},[a(r.$slots,`default`)],2))}});export{s as t};

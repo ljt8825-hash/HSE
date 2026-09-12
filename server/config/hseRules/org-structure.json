@@ -1,0 +1,28 @@
+{
+  "version": "1.0.0",
+  "description": "HSE组织层级配置 - 支持部门/中心/乡镇作业中心/岗位/员工",
+  "orgTypes": {
+    "group": "集团公司",
+    "company": "公司",
+    "department": "部门",
+    "center": "中心",
+    "township": "乡镇作业中心",
+    "team": "班组",
+    "station": "转运站"
+  },
+  "defaultOrgPath": ["group", "company", "department", "township", "team"],
+  "positionTypes": {
+    "manager": "管理岗",
+    "technical": "技术岗",
+    "operation": "操作岗",
+    "safety": "安全岗",
+    "support": "辅助岗"
+  },
+  "employeeStatus": {
+    "active": "在职",
+    "probation": "试用期",
+    "leave": "休假",
+    "resigned": "离职",
+    "retired": "退休"
+  }
+}

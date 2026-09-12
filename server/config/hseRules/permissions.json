@@ -1,0 +1,41 @@
+{
+  "version": "1.0.0",
+  "description": "HSE权限规则配置 - 查看/新增/编辑/删除/审核/导入/导出",
+  "defaults": {
+    "admin": ["view", "create", "edit", "delete", "approve", "import", "export"],
+    "manager": ["view", "create", "edit", "approve", "import", "export"],
+    "supervisor": ["view", "create", "edit", "import"],
+    "viewer": ["view", "export"]
+  },
+  "byRole": {
+    "general_manager": ["view", "create", "edit", "delete", "approve", "import", "export"],
+    "dept_manager": ["view", "create", "edit", "approve", "import", "export"],
+    "township_manager": ["view", "create", "edit", "approve", "import", "export"],
+    "admin": ["view", "create", "edit", "delete", "approve", "import", "export"],
+    "safety_manager": ["view", "create", "edit", "approve", "import", "export"],
+    "safety_officer": ["view", "create", "edit", "import"],
+    "employee": ["view"]
+  },
+  "actions": {
+    "view": "查看",
+    "create": "新增",
+    "edit": "编辑",
+    "delete": "删除",
+    "approve": "审核",
+    "import": "导入",
+    "export": "导出"
+  },
+  "modules": {
+    "overview": "安全总览",
+    "objectives": "目标职责",
+    "regulations": "制度标准",
+    "risk-control": "风险管控",
+    "hazards": "隐患治理",
+    "site-mgmt": "现场管理",
+    "personnel": "人员管理",
+    "training": "培训考核",
+    "emergency": "应急管理",
+    "insurance": "保险管理",
+    "system": "系统管理"
+  }
+}

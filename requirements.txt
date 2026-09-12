@@ -1,0 +1,14 @@
+# Python 依赖 — HSE 智能导入解析引擎 + 可观测性
+# 数据处理
+polars>=1.18.0
+pyarrow>=17.0.0
+openpyxl>=3.1.2
+# 数据库
+psycopg2-binary>=2.9.9
+# 数据校验
+pydantic>=2.5.0
+# 可观测性 — OpenTelemetry
+opentelemetry-api>=1.28.0
+opentelemetry-sdk>=1.28.0
+opentelemetry-exporter-otlp-proto-http>=1.28.0
+opentelemetry-instrumentation-psycopg2>=0.49b0

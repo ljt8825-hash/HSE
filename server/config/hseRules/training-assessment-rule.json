@@ -1,0 +1,179 @@
+{
+  "version": "1.0.0",
+  "description": "HSE培训考核业务规则配置（Sprint11-6）",
+  "declaration": "assessment_rule仅作只读影子数据，不参与当前业务计算",
+
+  "trainingTypes": [
+    { "code": "new_employee", "label": "新员工培训", "defaultHours": 24, "semanticColor": "info" },
+    { "code": "regular", "label": "常规培训", "defaultHours": 8, "semanticColor": "success" },
+    { "code": "special", "label": "专项培训", "defaultHours": 16, "semanticColor": "warning" },
+    { "code": "seasonal", "label": "季节性培训", "defaultHours": 4, "semanticColor": "info" },
+    { "code": "re_training", "label": "复审培训", "defaultHours": 8, "semanticColor": "warning" },
+    { "code": "emergency", "label": "应急演练", "defaultHours": 4, "semanticColor": "danger" },
+    { "code": "driver", "label": "驾驶员实操", "defaultHours": 16, "semanticColor": "warning" },
+    { "code": "position", "label": "岗位技能", "defaultHours": 12, "semanticColor": "info" }
+  ],
+
+  "planStatusFlow": {
+    "statuses": [
+      { "code": "draft", "label": "草稿", "semanticColor": "info" },
+      { "code": "pending_approval", "label": "待审批", "semanticColor": "warning" },
+      { "code": "approved", "label": "已批准", "semanticColor": "success" },
+      { "code": "in_progress", "label": "进行中", "semanticColor": "info" },
+      { "code": "completed", "label": "已完成", "semanticColor": "success" },
+      { "code": "cancelled", "label": "已取消", "semanticColor": "danger" }
+    ],
+    "transitions": [
+      { "from": "draft", "to": "pending_approval", "action": "submit", "role": "admin/township_manager" },
+      { "from": "pending_approval", "to": "approved", "action": "approve", "role": "dept_manager" },
+      { "from": "pending_approval", "to": "draft", "action": "reject", "role": "dept_manager" },
+      { "from": "approved", "to": "in_progress", "action": "start", "role": "admin" },
+      { "from": "in_progress", "to": "completed", "action": "complete", "role": "admin" },
+      { "from": "approved", "to": "cancelled", "action": "cancel", "role": "dept_manager" }
+    ]
+  },
+
+  "assessmentTypes": [
+    { "code": "theory", "label": "理论考试", "defaultPassScore": 60, "semanticColor": "info" },
+    { "code": "practical", "label": "实操考核", "defaultPassScore": 70, "semanticColor": "warning" },
+    { "code": "comprehensive", "label": "综合考核", "defaultPassScore": 60, "semanticColor": "info" }
+  ],
+
+  "assessmentGrades": [
+    { "code": "excellent", "label": "优秀", "minScore": 90, "maxScore": 100, "semanticColor": "success" },
+    { "code": "good", "label": "良好", "minScore": 75, "maxScore": 89, "semanticColor": "info" },
+    { "code": "pass", "label": "合格", "minScore": 60, "maxScore": 74, "semanticColor": "warning" },
+    { "code": "fail", "label": "不合格", "minScore": 0, "maxScore": 59, "semanticColor": "danger" }
+  ],
+
+  "assessmentPassRule": {
+    "defaultPassScore": 60,
+    "gradeEnabled": true,
+    "requireAllPass": false,
+    "retakeMaxTimes": 3,
+    "retakeIntervalDays": 7
+  },
+
+  "certificateTypes": [
+    { "code": "safety_management", "label": "安全管理人员证", "validityYears": 3, "reviewMonthsBefore": 3, "semanticColor": "danger" },
+    { "code": "special_operation", "label": "特种作业操作证", "validityYears": 6, "reviewMonthsBefore": 3, "semanticColor": "danger" },
+    { "code": "work_license", "label": "岗位作业许可证", "validityYears": 1, "reviewMonthsBefore": 1, "semanticColor": "warning" },
+    { "code": "first_aid", "label": "急救证书", "validityYears": 2, "reviewMonthsBefore": 2, "semanticColor": "info" },
+    { "code": "fire_safety", "label": "消防安全证", "validityYears": 3, "reviewMonthsBefore": 2, "semanticColor": "danger" },
+    { "code": "hazard_chemical", "label": "危化品上岗证", "validityYears": 2, "reviewMonthsBefore": 2, "semanticColor": "warning" },
+    { "code": "training_certificate", "label": "培训合格证书", "validityYears": 0, "reviewMonthsBefore": 0, "semanticColor": "success" }
+  ],
+
+  "certificateStatus": [
+    { "code": "valid", "label": "有效", "semanticColor": "success" },
+    { "code": "expiring", "label": "临期", "semanticColor": "warning" },
+    { "code": "expired", "label": "已过期", "semanticColor": "danger" },
+    { "code": "revoked", "label": "已吊销", "semanticColor": "danger" }
+  ],
+
+  "expiryRules": {
+    "expiringThresholdDays": 30,
+    "reminderFrequencies": {
+      "expiring_30": "1次/周",
+      "expiring_15": "2次/周",
+      "expiring_7": "1次/天",
+      "expired": "2次/天"
+    },
+    "certificateReviewAdvanceDays": 90
+  },
+
+  "comprehensiveAssessment": {
+    "enabled": true,
+    "weightConfig": {
+      "trainingHours": { "weight": 40, "enabled": true, "source": "training_records.hours_actual" },
+      "assessmentScore": { "weight": 40, "enabled": true, "source": "assessment_records.score" },
+      "violationRecord": { "weight": 0, "enabled": false, "source": "violations.score_deducted" },
+      "hazardRectification": { "weight": 10, "enabled": true, "source": "hazards.rectification_timeliness" },
+      "riskResponsibility": { "weight": 10, "enabled": true, "source": "risk_sources.implementation_rate" }
+    },
+    "gradeThresholds": [
+      { "code": "A", "label": "优秀", "minScore": 90, "semanticColor": "success" },
+      { "code": "B", "label": "良好", "minScore": 75, "semanticColor": "info" },
+      { "code": "C", "label": "合格", "minScore": 60, "semanticColor": "warning" },
+      { "code": "D", "label": "不合格", "minScore": 0, "semanticColor": "danger" }
+    ],
+    "calculationPeriod": "quarterly",
+    "dataTraceability": true
+  },
+
+  "hoursRules": {
+    "minAnnualHours": {
+      "safety_manager": 48,
+      "special_operator": 24,
+      "general_employee": 16,
+      "new_employee": 24
+    },
+    "validityPeriod": {
+      "regular": 1,
+      "special": 2,
+      "certificate": "按证书有效期"
+    },
+    "hourRounding": "向下取整到0.5小时"
+  },
+
+  "responsibilityMatrix": {
+    "roles": [
+      { "code": "company_gm", "label": "公司总经理", "scope": "全公司" },
+      { "code": "dept_manager", "label": "部门/中心负责人", "scope": "本部门" },
+      { "code": "township_manager", "label": "乡镇作业中心经理", "scope": "本中心" },
+      { "code": "admin", "label": "管理员", "scope": "数据维护" },
+      { "code": "employee", "label": "员工", "scope": "个人相关" }
+    ],
+    "permissions": {
+      "training_plan": {
+        "company_gm": ["create", "approve", "view", "edit", "delete"],
+        "dept_manager": ["create", "approve", "view", "edit"],
+        "township_manager": ["create", "submit", "view", "edit"],
+        "admin": ["create", "view", "edit", "delete"],
+        "employee": ["view_own"]
+      },
+      "training_record": {
+        "company_gm": ["view"],
+        "dept_manager": ["view", "edit"],
+        "township_manager": ["create", "view", "edit"],
+        "admin": ["create", "view", "edit", "import", "export"],
+        "employee": ["view_own", "checkin"]
+      },
+      "assessment": {
+        "company_gm": ["view"],
+        "dept_manager": ["view", "approve"],
+        "township_manager": ["create", "view"],
+        "admin": ["create", "view", "edit", "score", "import", "export"],
+        "employee": ["view_own"]
+      },
+      "certificate": {
+        "company_gm": ["view"],
+        "dept_manager": ["view"],
+        "township_manager": ["view", "remind"],
+        "admin": ["create", "view", "edit", "remind", "import", "export"],
+        "employee": ["view_own", "apply"]
+      },
+      "comprehensive": {
+        "company_gm": ["view", "approve", "export"],
+        "dept_manager": ["view_dept", "export"],
+        "township_manager": ["view_center"],
+        "admin": ["view", "recalculate", "export"],
+        "employee": ["view_own"]
+      }
+    }
+  },
+
+  "violationAssessmentLink": {
+    "enabled": true,
+    "scoreDeductPerViolation": 5,
+    "maxDeductPerPeriod": 20,
+    "resetPeriod": "quarterly"
+  },
+
+  "hazardAssessmentLink": {
+    "enabled": true,
+    "timelinessBonus": 5,
+    "overdueDeduct": 3,
+    "maxDeductPerPeriod": 15
+  }
+}

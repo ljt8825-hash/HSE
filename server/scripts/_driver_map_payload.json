@@ -1,0 +1,1283 @@
+{
+  "scope": [
+    "2025-08",
+    "2025-09",
+    "2025-10",
+    "2025-11",
+    "2025-12",
+    "2026-01",
+    "2026-02",
+    "2026-03",
+    "2026-04",
+    "2026-05",
+    "2026-06",
+    "2026-07"
+  ],
+  "cycle": {
+    "2025-08": "44",
+    "2025-09": "45",
+    "2025-10": "46",
+    "2025-11": "47",
+    "2025-12": "48",
+    "2026-01": "49",
+    "2026-02": "50",
+    "2026-03": "51",
+    "2026-04": "52",
+    "2026-05": "53",
+    "2026-06": "28",
+    "2026-07": "27"
+  },
+  "months": [
+    {
+      "ym": "2025-08",
+      "hasSheet": false,
+      "rows": [
+        {
+          "ym": "2025-08",
+          "town": "宁城街道",
+          "name": "张万恒",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2025-08",
+          "town": "长官镇",
+          "name": "张华平",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2025-08",
+          "town": "保店镇",
+          "name": "杨清华",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2025-08",
+          "town": "柴胡店镇",
+          "name": "王臣祥",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2025-08",
+          "town": "杜集镇",
+          "name": "张卫新",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2025-08",
+          "town": "张大庄镇",
+          "name": "徐凤山",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2025-08",
+          "town": "相衙镇",
+          "name": "李振恒",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2025-08",
+          "town": "时集镇",
+          "name": "郭志强",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2025-08",
+          "town": "刘营伍乡",
+          "name": "张和祥",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2025-08",
+          "town": "大曹镇",
+          "name": "周福贵",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2025-08",
+          "town": "大柳镇",
+          "name": "谢俊章",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "ym": "2025-09",
+      "hasSheet": false,
+      "rows": [
+        {
+          "ym": "2025-09",
+          "town": "乡镇主管",
+          "name": "张华平",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2025-09",
+          "town": "乡镇主管",
+          "name": "张万恒",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2025-09",
+          "town": "乡镇主管",
+          "name": "张和祥",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2025-09",
+          "town": "乡镇主管",
+          "name": "王臣祥",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2025-09",
+          "town": "乡镇主管",
+          "name": "徐凤山",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2025-09",
+          "town": "乡镇主管",
+          "name": "李振恒",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2025-09",
+          "town": "乡镇主管",
+          "name": "杨清华",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2025-09",
+          "town": "乡镇主管",
+          "name": "郭志强",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2025-09",
+          "town": "乡镇主管",
+          "name": "张卫新",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2025-09",
+          "town": "乡镇主管",
+          "name": "谢俊章",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2025-09",
+          "town": "乡镇主管",
+          "name": "周福贵",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "ym": "2025-10",
+      "hasSheet": true,
+      "rows": [
+        {
+          "ym": "2025-10",
+          "town": "长官镇",
+          "name": "张华平",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2025-10",
+          "town": "柴胡店镇",
+          "name": "王臣祥",
+          "sheet1": 2,
+          "mapped": 2,
+          "diff": 0,
+          "detail": "号牌/转向灯2"
+        },
+        {
+          "ym": "2025-10",
+          "town": "杜集镇",
+          "name": "张卫新",
+          "sheet1": 1,
+          "mapped": 1,
+          "diff": 0,
+          "detail": "号牌/转向灯1"
+        },
+        {
+          "ym": "2025-10",
+          "town": "大柳镇",
+          "name": "谢俊章",
+          "sheet1": 2,
+          "mapped": 2,
+          "diff": 0,
+          "detail": "号牌/转向灯2"
+        },
+        {
+          "ym": "2025-10",
+          "town": "时集镇",
+          "name": "郭志强",
+          "sheet1": 2,
+          "mapped": 2,
+          "diff": 0,
+          "detail": "号牌/转向灯2"
+        },
+        {
+          "ym": "2025-10",
+          "town": "刘营伍乡",
+          "name": "张和祥",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2025-10",
+          "town": "宁城街道",
+          "name": "张万恒",
+          "sheet1": 3,
+          "mapped": 3,
+          "diff": 0,
+          "detail": "号牌/转向灯2+摄像头1"
+        },
+        {
+          "ym": "2025-10",
+          "town": "相衙镇",
+          "name": "李振恒",
+          "sheet1": 2,
+          "mapped": 2,
+          "diff": 0,
+          "detail": "三检2"
+        },
+        {
+          "ym": "2025-10",
+          "town": "张大庄镇",
+          "name": "徐凤山",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2025-10",
+          "town": "保店镇",
+          "name": "杨清华",
+          "sheet1": 1,
+          "mapped": 1,
+          "diff": 0,
+          "detail": "号牌/转向灯1"
+        },
+        {
+          "ym": "2025-10",
+          "town": "大曹镇",
+          "name": "周福贵",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "ym": "2025-11",
+      "hasSheet": true,
+      "rows": [
+        {
+          "ym": "2025-11",
+          "town": "时集镇",
+          "name": "郭志强",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2025-11",
+          "town": "大柳镇",
+          "name": "谢俊章",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2025-11",
+          "town": "长官镇",
+          "name": "张华平",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2025-11",
+          "town": "柴胡店镇",
+          "name": "王臣祥",
+          "sheet1": 1,
+          "mapped": 1,
+          "diff": 0,
+          "detail": "号牌/转向灯1"
+        },
+        {
+          "ym": "2025-11",
+          "town": "宁城街道",
+          "name": "张万恒",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2025-11",
+          "town": "杜集镇",
+          "name": "张卫新",
+          "sheet1": 2,
+          "mapped": 2,
+          "diff": 0,
+          "detail": "号牌/转向灯2"
+        },
+        {
+          "ym": "2025-11",
+          "town": "大曹镇",
+          "name": "周福贵",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2025-11",
+          "town": "刘营伍乡",
+          "name": "张和祥",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2025-11",
+          "town": "相衙镇",
+          "name": "李振恒",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2025-11",
+          "town": "保店镇",
+          "name": "杨清华",
+          "sheet1": 6,
+          "mapped": 6,
+          "diff": 0,
+          "detail": "号牌/转向灯6"
+        }
+      ]
+    },
+    {
+      "ym": "2025-12",
+      "hasSheet": true,
+      "rows": [
+        {
+          "ym": "2025-12",
+          "town": "长官镇",
+          "name": "张华平",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2025-12",
+          "town": "宁城街道",
+          "name": "张万恒",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2025-12",
+          "town": "大曹镇",
+          "name": "周福贵",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2025-12",
+          "town": "刘营伍乡",
+          "name": "张和祥",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2025-12",
+          "town": "大柳镇",
+          "name": "谢俊章",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2025-12",
+          "town": "时集镇",
+          "name": "郭志强",
+          "sheet1": 1,
+          "mapped": 0,
+          "diff": -1,
+          "detail": ""
+        },
+        {
+          "ym": "2025-12",
+          "town": "杜集镇",
+          "name": "张卫新",
+          "sheet1": 4,
+          "mapped": 4,
+          "diff": 0,
+          "detail": "号牌/转向灯4"
+        },
+        {
+          "ym": "2025-12",
+          "town": "柴胡店镇",
+          "name": "王臣祥",
+          "sheet1": 1,
+          "mapped": 1,
+          "diff": 0,
+          "detail": "号牌/转向灯1"
+        },
+        {
+          "ym": "2025-12",
+          "town": "保店镇",
+          "name": "杨清华",
+          "sheet1": 1,
+          "mapped": 0,
+          "diff": -1,
+          "detail": ""
+        },
+        {
+          "ym": "2025-12",
+          "town": "张大庄镇",
+          "name": "靳洪刚",
+          "sheet1": 20,
+          "mapped": 0,
+          "diff": -20,
+          "detail": ""
+        },
+        {
+          "ym": "2025-12",
+          "town": "相衙镇",
+          "name": "李振恒",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "ym": "2026-01",
+      "hasSheet": true,
+      "rows": [
+        {
+          "ym": "2026-01",
+          "town": "大曹镇",
+          "name": "孙建栋",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-01",
+          "town": "刘营伍乡",
+          "name": "张和祥",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-01",
+          "town": "大柳镇",
+          "name": "谢俊章",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-01",
+          "town": "宁城街道",
+          "name": "张万恒",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-01",
+          "town": "时集镇",
+          "name": "郭志强",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-01",
+          "town": "杜集镇",
+          "name": "张卫新",
+          "sheet1": 2,
+          "mapped": 2,
+          "diff": 0,
+          "detail": "号牌/转向灯2"
+        },
+        {
+          "ym": "2026-01",
+          "town": "相衙镇",
+          "name": "李振恒",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-01",
+          "town": "长官镇",
+          "name": "张华平",
+          "sheet1": 2,
+          "mapped": 2,
+          "diff": 0,
+          "detail": "号牌/转向灯2"
+        },
+        {
+          "ym": "2026-01",
+          "town": "柴胡店镇",
+          "name": "王臣祥",
+          "sheet1": 1,
+          "mapped": 1,
+          "diff": 0,
+          "detail": "三检1"
+        },
+        {
+          "ym": "2026-01",
+          "town": "保店镇",
+          "name": "杨清华",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-01",
+          "town": "张大庄镇",
+          "name": "靳洪刚",
+          "sheet1": 7,
+          "mapped": 7,
+          "diff": 0,
+          "detail": "三检7"
+        }
+      ]
+    },
+    {
+      "ym": "2026-02",
+      "hasSheet": true,
+      "rows": [
+        {
+          "ym": "2026-02",
+          "town": "大曹镇",
+          "name": "孙建栋",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-02",
+          "town": "时集镇",
+          "name": "郭志强",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-02",
+          "town": "大柳镇",
+          "name": "谢俊章",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-02",
+          "town": "相衙镇",
+          "name": "李振恒",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-02",
+          "town": "杜集镇",
+          "name": "张卫新",
+          "sheet1": 1,
+          "mapped": 0,
+          "diff": -1,
+          "detail": ""
+        },
+        {
+          "ym": "2026-02",
+          "town": "张大庄镇",
+          "name": "靳洪刚",
+          "sheet1": 1,
+          "mapped": 0,
+          "diff": -1,
+          "detail": ""
+        },
+        {
+          "ym": "2026-02",
+          "town": "宁城街道",
+          "name": "张万恒",
+          "sheet1": 2,
+          "mapped": 0,
+          "diff": -2,
+          "detail": ""
+        },
+        {
+          "ym": "2026-02",
+          "town": "刘营伍乡",
+          "name": "张和祥",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-02",
+          "town": "柴胡店镇",
+          "name": "王臣祥",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-02",
+          "town": "保店镇",
+          "name": "杨清华",
+          "sheet1": 6,
+          "mapped": 0,
+          "diff": -6,
+          "detail": ""
+        },
+        {
+          "ym": "2026-02",
+          "town": "长官镇",
+          "name": "张华平",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "ym": "2026-03",
+      "hasSheet": true,
+      "rows": [
+        {
+          "ym": "2026-03",
+          "town": "宁城街道",
+          "name": "张万恒",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-03",
+          "town": "时集镇",
+          "name": "郭志强",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-03",
+          "town": "杜集镇",
+          "name": "张卫新",
+          "sheet1": 1,
+          "mapped": 1,
+          "diff": 0,
+          "detail": "号牌/转向灯1"
+        },
+        {
+          "ym": "2026-03",
+          "town": "保店镇",
+          "name": "杨清华",
+          "sheet1": 1,
+          "mapped": 1,
+          "diff": 0,
+          "detail": "号牌/转向灯1"
+        },
+        {
+          "ym": "2026-03",
+          "town": "大曹镇",
+          "name": "孙建栋",
+          "sheet1": 3,
+          "mapped": 3,
+          "diff": 0,
+          "detail": "号牌/转向灯3"
+        },
+        {
+          "ym": "2026-03",
+          "town": "柴胡店镇",
+          "name": "王臣祥",
+          "sheet1": 1,
+          "mapped": 1,
+          "diff": 0,
+          "detail": "号牌/转向灯1"
+        },
+        {
+          "ym": "2026-03",
+          "town": "刘营伍乡",
+          "name": "张和祥",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-03",
+          "town": "长官镇",
+          "name": "张华平",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-03",
+          "town": "大柳镇",
+          "name": "谢俊章",
+          "sheet1": 1,
+          "mapped": 1,
+          "diff": 0,
+          "detail": "号牌/转向灯1"
+        },
+        {
+          "ym": "2026-03",
+          "town": "张大庄镇",
+          "name": "靳洪刚",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-03",
+          "town": "相衙镇",
+          "name": "李振恒",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "ym": "2026-04",
+      "hasSheet": true,
+      "rows": [
+        {
+          "ym": "2026-04",
+          "town": "大曹镇",
+          "name": "孙建栋",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-04",
+          "town": "刘营伍乡",
+          "name": "张和祥",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-04",
+          "town": "大柳镇",
+          "name": "谢俊章",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-04",
+          "town": "宁城街道",
+          "name": "张万恒",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-04",
+          "town": "时集镇",
+          "name": "郭志强",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-04",
+          "town": "杜集镇",
+          "name": "张卫新",
+          "sheet1": 3,
+          "mapped": 3,
+          "diff": 0,
+          "detail": "号牌/转向灯3"
+        },
+        {
+          "ym": "2026-04",
+          "town": "相衙镇",
+          "name": "李振恒",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-04",
+          "town": "长官镇",
+          "name": "张华平",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-04",
+          "town": "柴胡店镇",
+          "name": "王臣祥",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-04",
+          "town": "保店镇",
+          "name": "杨清华",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-04",
+          "town": "张大庄镇",
+          "name": "靳洪刚",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "ym": "2026-05",
+      "hasSheet": true,
+      "rows": [
+        {
+          "ym": "2026-05",
+          "town": "大曹镇",
+          "name": "孙建栋",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-05",
+          "town": "刘营伍乡",
+          "name": "张和祥",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-05",
+          "town": "宁城街道",
+          "name": "张万恒",
+          "sheet1": 0.5,
+          "mapped": 0.5,
+          "diff": 0,
+          "detail": "车厢整洁0.5"
+        },
+        {
+          "ym": "2026-05",
+          "town": "柴胡店镇",
+          "name": "王臣祥",
+          "sheet1": 1,
+          "mapped": 0,
+          "diff": -1,
+          "detail": ""
+        },
+        {
+          "ym": "2026-05",
+          "town": "长官镇",
+          "name": "张华平",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-05",
+          "town": "张大庄镇",
+          "name": "靳洪刚",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-05",
+          "town": "杜集镇",
+          "name": "张卫新",
+          "sheet1": 2.5,
+          "mapped": 1.5,
+          "diff": -1,
+          "detail": "号牌/转向灯1+车厢整洁0.5"
+        },
+        {
+          "ym": "2026-05",
+          "town": "时集镇",
+          "name": "郭志强",
+          "sheet1": 1,
+          "mapped": 1,
+          "diff": 0,
+          "detail": "车厢整洁1"
+        },
+        {
+          "ym": "2026-05",
+          "town": "保店镇",
+          "name": "杨清华",
+          "sheet1": 1,
+          "mapped": 0,
+          "diff": -1,
+          "detail": ""
+        },
+        {
+          "ym": "2026-05",
+          "town": "大柳镇",
+          "name": "谢俊章",
+          "sheet1": 1.5,
+          "mapped": 0.5,
+          "diff": -1,
+          "detail": "车厢整洁0.5"
+        },
+        {
+          "ym": "2026-05",
+          "town": "相衙镇",
+          "name": "李振恒",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "ym": "2026-06",
+      "hasSheet": true,
+      "rows": [
+        {
+          "ym": "2026-06",
+          "town": "宁城街道",
+          "name": "张万恒",
+          "sheet1": 0,
+          "mapped": 0.5,
+          "diff": 0.5,
+          "detail": "车厢整洁0.5"
+        },
+        {
+          "ym": "2026-06",
+          "town": "时集镇",
+          "name": "郭志强",
+          "sheet1": 0,
+          "mapped": 1,
+          "diff": 1,
+          "detail": "车厢整洁1"
+        },
+        {
+          "ym": "2026-06",
+          "town": "杜集镇",
+          "name": "张卫新",
+          "sheet1": 0,
+          "mapped": 1.5,
+          "diff": 1.5,
+          "detail": "号牌/转向灯1+车厢整洁0.5"
+        },
+        {
+          "ym": "2026-06",
+          "town": "保店镇",
+          "name": "杨清华",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-06",
+          "town": "大曹镇",
+          "name": "孙建栋",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-06",
+          "town": "长官镇",
+          "name": "张华平",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-06",
+          "town": "大柳镇",
+          "name": "谢俊章",
+          "sheet1": 0,
+          "mapped": 0.5,
+          "diff": 0.5,
+          "detail": "车厢整洁0.5"
+        },
+        {
+          "ym": "2026-06",
+          "town": "张大庄镇",
+          "name": "靳洪刚",
+          "sheet1": 1,
+          "mapped": 0,
+          "diff": -1,
+          "detail": ""
+        },
+        {
+          "ym": "2026-06",
+          "town": "相衙镇",
+          "name": "李振恒",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-06",
+          "town": "刘营伍乡",
+          "name": "张和祥",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-06",
+          "town": "柴胡店镇",
+          "name": "王臣祥",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "ym": "2026-07",
+      "hasSheet": true,
+      "rows": [
+        {
+          "ym": "2026-07",
+          "town": "大曹镇",
+          "name": "孙建栋",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-07",
+          "town": "刘营伍乡",
+          "name": "张和祥",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-07",
+          "town": "大柳镇",
+          "name": "谢俊章",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-07",
+          "town": "宁城街道",
+          "name": "张万恒",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-07",
+          "town": "时集镇",
+          "name": "郭志强",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-07",
+          "town": "杜集镇",
+          "name": "张卫新",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-07",
+          "town": "相衙镇",
+          "name": "李振恒",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-07",
+          "town": "长官镇",
+          "name": "张华平",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-07",
+          "town": "柴胡店镇",
+          "name": "王臣祥",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-07",
+          "town": "保店镇",
+          "name": "杨清华",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        },
+        {
+          "ym": "2026-07",
+          "town": "张大庄镇",
+          "name": "靳洪刚",
+          "sheet1": 0,
+          "mapped": 0,
+          "diff": 0,
+          "detail": ""
+        }
+      ]
+    }
+  ]
+}

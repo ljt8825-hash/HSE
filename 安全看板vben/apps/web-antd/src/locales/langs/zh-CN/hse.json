@@ -1,0 +1,1333 @@
+{
+  "alerts": {
+    "title": "告警中心",
+    "stats": {
+      "total": "告警总数",
+      "critical": "严重告警",
+      "new": "待处理",
+      "resolved": "已解决"
+    },
+    "list": "告警列表",
+    "batchResolve": "批量处置",
+    "export": "导出",
+    "search": {
+      "keyword": "关键词",
+      "level": "级别",
+      "status": "状态",
+      "timeRange": "时间范围"
+    },
+    "level": {
+      "critical": "严重",
+      "high": "高危",
+      "medium": "中危",
+      "low": "低危",
+      "info": "提示"
+    },
+    "status": {
+      "new": "待处理",
+      "processing": "处理中",
+      "resolved": "已关闭"
+    },
+    "action": {
+      "view": "查看",
+      "resolve": "处置"
+    },
+    "detail": "告警详情",
+    "resolveModal": {
+      "title": "告警处置",
+      "remark": "处置备注",
+      "count": "处置数量"
+    }
+  },
+  "workflow": {
+    "title": "工作流引擎",
+    "definitions": "流程定义",
+    "instances": "流程实例",
+    "tasks": "待办任务",
+    "create": "新建流程",
+    "start": "发起流程",
+    "approve": "通过",
+    "reject": "驳回",
+    "history": "审批历史",
+    "view": "查看",
+    "edit": "编辑",
+    "delete": "删除",
+    "status": {
+      "pending": "待处理",
+      "processing": "处理中",
+      "approved": "已通过",
+      "rejected": "已驳回",
+      "cancelled": "已取消"
+    }
+  },
+  "notifications": {
+    "title": "通知中心",
+    "unread": "未读",
+    "all": "全部",
+    "system": "系统通知",
+    "alert": "告警通知",
+    "workflow": "工作流",
+    "markAllRead": "全部已读",
+    "clearAll": "清空通知",
+    "markRead": "标为已读",
+    "delete": "删除",
+    "type": {
+      "system": "系统通知",
+      "alert": "告警通知",
+      "workflow": "工作流",
+      "task": "任务通知"
+    },
+    "bell": {
+      "title": "通知",
+      "unreadTip": "未读 {count} 条",
+      "empty": "暂无未读通知",
+      "viewAll": "查看全部通知",
+      "priority": {
+        "urgent": "紧急",
+        "warning": "临期",
+        "normal": "普通"
+      },
+      "loadFailed": "通知加载失败",
+      "markReadFailed": "标记已读失败",
+      "clearFailed": "清空通知失败",
+      "jumpFailed": "跳转失败，请稍后重试",
+      "ws": {
+        "connected": "实时连接已建立",
+        "connecting": "正在连接实时服务...",
+        "disconnected": "实时连接已断开",
+        "degraded": "实时连接不可用，已切换到轮询模式",
+        "reconnecting": "正在重连（第 {count} 次）...",
+        "authFailed": "认证失败，请重新登录",
+        "heartbeatOk": "心跳正常"
+      }
+    }
+  },
+  "system": {
+    "title": "系统管理",
+    "users": {
+      "title": "用户管理",
+      "create": "新增用户",
+      "edit": "编辑用户",
+      "delete": "删除用户",
+      "resetPwd": "重置密码",
+      "enable": "启用",
+      "disable": "禁用",
+      "search": {
+        "keyword": "关键词",
+        "status": "状态"
+      },
+      "form": {
+        "username": "用户名",
+        "realName": "真实姓名",
+        "email": "邮箱",
+        "phone": "手机号",
+        "department": "部门",
+        "password": "密码",
+        "status": "状态"
+      }
+    },
+    "roles": {
+      "title": "角色管理",
+      "create": "新增角色",
+      "edit": "编辑角色",
+      "delete": "删除角色",
+      "permission": "权限配置",
+      "search": {
+        "keyword": "关键词"
+      },
+      "form": {
+        "code": "角色编码",
+        "name": "角色名称",
+        "description": "角色描述",
+        "sortOrder": "排序",
+        "status": "状态"
+      }
+    }
+  },
+  "security": {
+    "title": "安全审计",
+    "audit": {
+      "title": "审计日志",
+      "export": "导出",
+      "search": {
+        "operator": "操作人",
+        "actionType": "操作类型",
+        "module": "模块",
+        "timeRange": "时间范围"
+      },
+      "detail": "审计详情",
+      "action": {
+        "login": "登录",
+        "logout": "登出",
+        "create": "新增",
+        "update": "修改",
+        "delete": "删除",
+        "export": "导出",
+        "import": "导入"
+      }
+    }
+  },
+  "hazards": {
+    "title": "隐患排查",
+    "stats": {
+      "total": "隐患总数",
+      "pending": "待整改",
+      "processing": "整改中",
+      "completed": "已完成"
+    },
+    "create": "新增隐患",
+    "view": "查看",
+    "edit": "编辑",
+    "complete": "完成",
+    "delete": "删除",
+    "search": {
+      "keyword": "关键词",
+      "year": "年份",
+      "month": "月份",
+      "level": "等级",
+      "status": "状态",
+      "category": "分类",
+      "location": "区域"
+    },
+    "level": {
+      "critical": "重大",
+      "high": "较大",
+      "medium": "一般",
+      "low": "低"
+    },
+    "status": {
+      "pending": "待整改",
+      "processing": "整改中",
+      "completed": "已完成",
+      "resolved": "已整改",
+      "unresolved": "未整改"
+    },
+    "detail": "隐患详情",
+    "form": {
+      "title": "隐患标题",
+      "description": "隐患描述",
+      "level": "隐患等级",
+      "category": "隐患分类",
+      "location": "发现区域",
+      "discoveredAt": "发现日期",
+      "reporter": "上报人",
+      "handler": "整改负责人",
+      "remark": "整改备注"
+    },
+    "linkage": {
+      "relatedRiskTitle": "关联风险点",
+      "riskName": "风险点名称",
+      "riskLocation": "风险位置",
+      "riskMeasures": "管控措施",
+      "lastHazardCheck": "最近隐患检查",
+      "hazardCount": "关联隐患数",
+      "viewRiskDetail": "查看风险详情",
+      "noRelatedRisk": "暂无关联风险点"
+    }
+  },
+  "insurance": {
+    "title": "保险管理",
+    "personnel": {
+      "title": "人员保险",
+      "stats": {
+        "total": "人员总数",
+        "insured": "已参保",
+        "expiring": "即将到期",
+        "highRisk": "高危人员"
+      },
+      "tabs": {
+        "all": "全部人员",
+        "highRisk": "高危人员",
+        "expiring": "即将到期",
+        "expired": "已过期"
+      },
+      "viewMode": {
+        "list": "列表视图",
+        "category": "分类视图",
+        "calendar": "日历视图"
+      },
+      "create": "新增人员",
+      "edit": "编辑人员",
+      "delete": "删除人员",
+      "renewal": "续保",
+      "batchRenewal": "批量续保",
+      "search": {
+        "keyword": "关键词",
+        "department": "部门",
+        "insuranceStatus": "保险状态",
+        "highRiskCategory": "高危工种"
+      },
+      "highRiskCategories": {
+        "driver": "司机",
+        "transfer_station": "转运站",
+        "high_altitude": "高空作业",
+        "underground": "市政井下",
+        "other_special": "其他特种"
+      },
+      "insuranceStatus": {
+        "insured": "已参保",
+        "expiring": "即将到期",
+        "expired": "已过期",
+        "uninsured": "未参保"
+      },
+      "form": {
+        "name": "姓名",
+        "idCard": "身份证号",
+        "phone": "手机号",
+        "department": "部门",
+        "position": "岗位/工种",
+        "employeeType": "用工类型",
+        "entryDate": "入职日期",
+        "insuranceType": "保险类型",
+        "policyNumber": "保单号",
+        "premium": "保费",
+        "policyStartDate": "保险起期",
+        "policyEndDate": "保险到期",
+        "remark": "备注"
+      },
+      "renewalModal": {
+        "title": "续保操作",
+        "policyEndDate": "新到期日期",
+        "policyStartDate": "保险起期",
+        "premium": "保费",
+        "remark": "续保备注"
+      }
+    }
+  },
+  "accidents": {
+    "title": "事故管理",
+    "visibilityTitle": "事故统计卡可见性",
+    "totalRecords": "共 {total} 条记录",
+    "deadUnit": "人",
+    "injuredUnit": "人",
+    "yearUnit": "年",
+    "monthUnit": "月",
+    "dayUnit": "天",
+    "stats": {
+      "total": "事故总数",
+      "major": "重大事故",
+      "open": "未结案件",
+      "casualties": "伤亡人数",
+      "loss": "经济损失",
+      "expiring": "临期事故",
+      "expired": "过期事故"
+    },
+    "level": {
+      "major": "重大",
+      "serious": "较大",
+      "general": "一般",
+      "minor": "轻微"
+    },
+    "type": {
+      "traffic": "交通事故",
+      "occupational": "工伤事故",
+      "equipment": "设备事故",
+      "fire": "火灾事故",
+      "environmental": "环境事故",
+      "other": "其他"
+    },
+    "status": {
+      "open": "未结案",
+      "reported": "已上报",
+      "investigating": "调查中",
+      "processing": "处理中",
+      "closed": "已结案"
+    },
+    "expiry": {
+      "title": "到期提醒",
+      "normal": "正常",
+      "expiring": "临期",
+      "expired": "过期",
+      "closed": "已结案",
+      "permanent": "长期有效",
+      "unknown": "未知"
+    },
+    "search": {
+      "keyword": "关键词",
+      "keywordPlaceholder": "搜索事故名称/发生地点",
+      "year": "年份",
+      "allYear": "全部年份",
+      "month": "月份",
+      "allMonth": "全部月份",
+      "level": "事故等级",
+      "allLevel": "全部等级",
+      "type": "事故类型",
+      "allType": "全部类型",
+      "status": "处理状态",
+      "allStatus": "全部状态",
+      "allExpiry": "全部时效"
+    },
+    "form": {
+      "title": "事故名称",
+      "titlePlaceholder": "请输入事故名称",
+      "description": "事故描述",
+      "descriptionPlaceholder": "请输入事故经过、原因初步分析等",
+      "level": "事故等级",
+      "levelPlaceholder": "请选择事故等级",
+      "type": "事故类型",
+      "typePlaceholder": "请选择事故类型",
+      "status": "处理状态",
+      "statusPlaceholder": "请选择处理状态",
+      "location": "发生地点",
+      "locationPlaceholder": "请输入发生地点",
+      "occurredAt": "发生日期",
+      "occurredAtPlaceholder": "请选择发生日期",
+      "reporter": "报告人",
+      "reporterPlaceholder": "请输入报告人姓名",
+      "casualties": "死亡人数",
+      "injuries": "受伤人数",
+      "economicLoss": "经济损失(元)",
+      "economicLossPlaceholder": "请输入经济损失金额",
+      "rectificationDeadlineDays": "整改期限(天)",
+      "rectificationDeadlineDaysPlaceholder": "如 30（自发生日起算）",
+      "relatedHazardId": "关联隐患",
+      "relatedHazardIdPlaceholder": "选择关联的隐患记录",
+      "relatedEmergencyId": "关联预案",
+      "relatedEmergencyIdPlaceholder": "选择关联的应急预案",
+      "remark": "备注",
+      "remarkPlaceholder": "其他需要说明的事项"
+    },
+    "column": {
+      "title": "事故名称",
+      "level": "事故等级",
+      "type": "事故类型",
+      "status": "处理状态",
+      "occurredAt": "发生时间",
+      "casualties": "伤亡情况",
+      "economicLoss": "经济损失",
+      "reportGroup": "报送集团"
+    },
+    "reportGroup": {
+      "reported": "报送",
+      "unreported": "未报",
+      "reportedSuccess": "已报送集团",
+      "unreportedSuccess": "已取消报送集团"
+    },
+    "detail": {
+      "title": "事故详情",
+      "level": "事故等级：",
+      "type": "事故类型：",
+      "status": "处理状态：",
+      "location": "发生地点：",
+      "occurredAt": "发生时间：",
+      "reportedAt": "上报时间：",
+      "reporter": "报告人：",
+      "casualties": "伤亡情况：",
+      "economicLoss": "经济损失：",
+      "rectificationDeadlineDays": "整改期限：",
+      "handler": "处理人：",
+      "closedAt": "结案时间：",
+      "relatedHazardId": "关联隐患：",
+      "relatedEmergencyId": "关联预案：",
+      "description": "事故描述",
+      "remark": "备注"
+    },
+    "attachment": {
+      "title": "附件列表",
+      "upload": "上传附件",
+      "version": "版本号",
+      "uploadedBy": "上传人",
+      "uploadedAt": "上传时间",
+      "fileName": "文件名",
+      "fileSize": "文件大小",
+      "isLatest": "最新",
+      "download": "下载",
+      "delete": "删除附件",
+      "deleteConfirm": "确定要删除此附件吗？",
+      "uploadSuccess": "附件上传成功",
+      "uploadFailed": "附件上传失败",
+      "deleteSuccess": "附件删除成功",
+      "deleteFailed": "附件删除失败",
+      "loadFailed": "获取附件列表失败",
+      "empty": "暂无附件，请上传",
+      "versionPlaceholder": "请输入版本号，如 V1.0"
+    },
+    "version": {
+      "tabAttachments": "附件列表",
+      "tabVersions": "历史版本",
+      "version": "版本",
+      "changeType": "变更类型",
+      "changeSummary": "变更摘要",
+      "changedBy": "变更人",
+      "changedAt": "变更时间",
+      "empty": "暂无历史版本",
+      "loadFailed": "获取历史版本失败",
+      "changeTypeCreate": "创建",
+      "changeTypeUpdate": "更新",
+      "changeTypeImport": "导入",
+      "changeTypeRevise": "修订"
+    },
+    "action": {
+      "title": "操作",
+      "create": "新增事故",
+      "createTitle": "新增事故",
+      "editTitle": "编辑事故",
+      "edit": "编辑",
+      "view": "查看",
+      "delete": "删除",
+      "deleteConfirm": "确定要删除此事故吗？",
+      "confirmDelete": "删除",
+      "cancel": "取消",
+      "export": "导出报表",
+      "import": "导入",
+      "reset": "重置",
+      "startInvestigate": "开始调查",
+      "startInvestigateConfirm": "确认将此事故状态变更为调查中？",
+      "startProcessing": "开始处理",
+      "startProcessingConfirm": "确认将此事故状态变更为处理中？",
+      "close": "结案",
+      "closeConfirm": "确认将此事故标记为已结案？"
+    },
+    "validate": {
+      "titleRequired": "请输入事故名称",
+      "titleLength": "名称长度为3-100字符",
+      "levelRequired": "请选择事故等级",
+      "typeRequired": "请选择事故类型",
+      "locationRequired": "请输入发生地点",
+      "occurredAtRequired": "请选择发生日期",
+      "reporterRequired": "请输入报告人",
+      "casualtiesRequired": "请输入死亡人数",
+      "casualtiesMin": "死亡人数不能小于0",
+      "injuriesRequired": "请输入受伤人数",
+      "injuriesMin": "受伤人数不能小于0",
+      "economicLossRequired": "请输入经济损失",
+      "economicLossMin": "经济损失不能小于0"
+    },
+    "message": {
+      "createSuccess": "创建成功",
+      "updateSuccess": "更新成功",
+      "statusUpdated": "状态更新成功",
+      "deleteSuccess": "删除成功",
+      "statusChangeSuccess": "状态变更成功",
+      "statusChangeFailed": "状态变更失败"
+    },
+    "export": {
+      "success": "导出成功",
+      "failed": "导出失败，请稍后重试"
+    }
+  },
+  "training": {
+    "title": "培训管理",
+    "stats": {
+      "total": "培训计划",
+      "ongoing": "进行中",
+      "completed": "已完成",
+      "attendees": "参训人次",
+      "passRate": "通过率"
+    },
+    "type": {
+      "safety": "安全培训",
+      "skills": "技能培训",
+      "emergency": "应急培训",
+      "induction": "入职培训",
+      "regular": "常规培训"
+    },
+    "status": {
+      "draft": "草稿",
+      "planned": "已计划",
+      "ongoing": "进行中",
+      "completed": "已完成",
+      "cancelled": "已取消"
+    }
+  },
+  "emergency": {
+    "title": "应急管理",
+    "stats": {
+      "totalPlans": "预案总数",
+      "active": "启用中",
+      "drills": "演练总数",
+      "participants": "参演人次"
+    },
+    "type": {
+      "fire": "火灾",
+      "traffic": "交通",
+      "chemical": "危化品",
+      "natural_disaster": "自然灾害",
+      "equipment": "设备",
+      "public_health": "公共卫生",
+      "other": "其他"
+    },
+    "level": {
+      "level1": "I级",
+      "level2": "II级",
+      "level3": "III级",
+      "level4": "IV级"
+    },
+    "status": {
+      "active": "启用",
+      "inactive": "停用",
+      "drilling": "演练中",
+      "archived": "已归档"
+    }
+  },
+  "goals": {
+    "title": "目标管理",
+    "stats": {
+      "total": "目标总数",
+      "achieved": "已达成",
+      "onTrack": "进行中",
+      "atRisk": "风险预警",
+      "avgProgress": "平均进度"
+    },
+    "status": {
+      "on_track": "正常",
+      "at_risk": "风险",
+      "behind": "滞后",
+      "achieved": "已达成",
+      "failed": "未达成"
+    }
+  },
+  "inspection": {
+    "title": "现场管理",
+    "stats": {
+      "total": "检查总数",
+      "completed": "已完成",
+      "issues": "发现问题",
+      "pending": "待整改",
+      "overdue": "逾期整改",
+      "avgScore": "平均分"
+    },
+    "type": {
+      "routine": "日常检查",
+      "special": "专项检查",
+      "periodic": "定期检查",
+      "temporary": "临时检查"
+    },
+    "status": {
+      "pending": "待检查",
+      "completed": "已完成",
+      "issues_found": "发现问题"
+    }
+  },
+  "regulations": {
+    "title": "规章制度",
+    "stats": {
+      "total": "制度总数",
+      "effective": "有效",
+      "revised": "修订中",
+      "draft": "草案"
+    },
+    "category": {
+      "national": "国家级",
+      "provincial": "省级",
+      "municipal": "市级",
+      "internal": "内部",
+      "industry": "行业"
+    },
+    "type": {
+      "law": "法律",
+      "regulation": "法规",
+      "standard": "标准",
+      "procedure": "规程",
+      "guideline": "指南"
+    },
+    "status": {
+      "effective": "有效",
+      "draft": "草案",
+      "revised": "修订中",
+      "abolished": "已废止"
+    },
+    "expiry": {
+      "title": "到期提醒",
+      "normal": "正常",
+      "expiring": "临期",
+      "expired": "过期",
+      "permanent": "长期有效",
+      "unknown": "未知"
+    },
+    "attachment": {
+      "title": "附件列表",
+      "upload": "上传附件",
+      "version": "版本号",
+      "uploadedBy": "上传人",
+      "uploadedAt": "上传时间",
+      "fileName": "文件名",
+      "fileSize": "文件大小",
+      "isLatest": "最新",
+      "download": "下载",
+      "preview": "预览",
+      "delete": "删除附件",
+      "deleteConfirm": "确定要删除此附件吗？",
+      "uploadSuccess": "附件上传成功",
+      "uploadFailed": "附件上传失败",
+      "deleteSuccess": "附件删除成功",
+      "deleteFailed": "附件删除失败",
+      "loadFailed": "获取附件列表失败",
+      "empty": "暂无附件，请上传",
+      "versionPlaceholder": "请输入版本号，如 V1.0"
+    },
+    "version": {
+      "tabAttachments": "附件列表",
+      "tabVersions": "历史版本",
+      "version": "版本",
+      "changeType": "变更类型",
+      "changeSummary": "变更摘要",
+      "changedBy": "变更人",
+      "changedAt": "变更时间",
+      "empty": "暂无历史版本",
+      "loadFailed": "获取历史版本失败",
+      "changeTypeCreate": "创建",
+      "changeTypeUpdate": "更新",
+      "changeTypeImport": "导入",
+      "changeTypeRevise": "修订"
+    },
+    "action": {
+      "create": "新增制度",
+      "edit": "编辑制度",
+      "view": "查看详情",
+      "delete": "删除制度",
+      "export": "导出报表",
+      "import": "导入数据"
+    },
+    "search": {
+      "keyword": "关键词",
+      "category": "分类",
+      "type": "类型",
+      "status": "状态"
+    },
+    "validate": {
+      "titleRequired": "请输入制度标题",
+      "titleLength": "标题长度为3-200字符",
+      "categoryRequired": "请选择分类",
+      "typeRequired": "请选择类型",
+      "documentNoRequired": "请输入文号",
+      "versionRequired": "请输入版本",
+      "issueDateRequired": "请选择发布日期",
+      "effectiveDateRequired": "请选择生效日期",
+      "issuerRequired": "请输入发布机构",
+      "summaryRequired": "请输入摘要",
+      "validityPeriodNumber": "有效期必须为数字",
+      "importRequiredField": "第 {row} 行必填项 {field} 缺失",
+      "importDateFormat": "第 {row} 行日期格式错误：{value}（应为 YYYY-MM-DD）"
+    },
+    "export": {
+      "success": "导出成功",
+      "failed": "导出失败，请稍后重试"
+    }
+  },
+  "riskControl": {
+    "title": "安全风险管控",
+    "riskMap": "风险地图",
+    "riskSuffix": "风险",
+    "totalRecords": "共 {total} 条记录",
+    "stats": {
+      "total": "风险点总数",
+      "level1": "一级风险",
+      "level2": "二级风险",
+      "level3": "三级风险",
+      "level4": "四级风险"
+    },
+    "level": {
+      "level1": "一级（重大风险）",
+      "level2": "二级（较大风险）",
+      "level3": "三级（一般风险）",
+      "level4": "四级（低风险）"
+    },
+    "type": {
+      "mechanical": "机械伤害",
+      "falling": "高处坠落",
+      "strike": "物体打击",
+      "electric": "触电",
+      "fire": "火灾",
+      "explosion": "爆炸",
+      "poisoning": "中毒窒息",
+      "other": "其他"
+    },
+    "area": {
+      "production": "生产区",
+      "warehouse": "仓储区",
+      "office": "办公区",
+      "maintenance": "检修区",
+      "dangerous": "危险品区",
+      "public": "公共区域"
+    },
+    "status": {
+      "normal": "正常",
+      "resolved": "已处置",
+      "monitoring": "监控中"
+    },
+    "expiry": {
+      "title": "到期提醒",
+      "normal": "正常",
+      "expiring": "临期",
+      "expired": "过期",
+      "permanent": "长期有效",
+      "unknown": "未知"
+    },
+    "search": {
+      "keyword": "关键词",
+      "keywordPlaceholder": "搜索风险点名称/位置",
+      "level": "风险等级",
+      "allLevel": "全部等级",
+      "type": "风险类型",
+      "allType": "全部类型",
+      "area": "所属区域",
+      "allArea": "全部区域",
+      "allExpiry": "全部时效"
+    },
+    "form": {
+      "name": "风险点名称",
+      "namePlaceholder": "请输入风险点名称",
+      "level": "风险等级",
+      "levelPlaceholder": "请选择风险等级",
+      "type": "风险类型",
+      "typePlaceholder": "请选择风险类型",
+      "status": "状态",
+      "statusPlaceholder": "请选择状态",
+      "location": "风险位置",
+      "locationPlaceholder": "请输入风险位置",
+      "lng": "经度 (lng)",
+      "lat": "纬度 (lat)",
+      "area": "所属区域",
+      "areaPlaceholder": "请选择所属区域",
+      "assessmentDate": "评估日期",
+      "assessmentDatePlaceholder": "请选择评估日期",
+      "reviewCycle": "复评周期(月)",
+      "reviewCyclePlaceholder": "如 12",
+      "measures": "管控措施",
+      "measuresPlaceholder": "请输入管控措施",
+      "emergency": "应急措施",
+      "emergencyPlaceholder": "请输入应急措施",
+      "accidentType": "事故类型",
+      "accidentTypePlaceholder": "可能引发的事故类型",
+      "sheet": "所属网格",
+      "sheetPlaceholder": "所属网格编号"
+    },
+    "column": {
+      "index": "序号",
+      "name": "风险点名称",
+      "level": "风险等级",
+      "type": "风险类型",
+      "location": "风险位置",
+      "area": "所属区域",
+      "status": "状态",
+      "assessmentDate": "评估日期",
+      "createdAt": "创建时间"
+    },
+    "detail": {
+      "title": "风险点详情",
+      "type": "风险类型：",
+      "location": "风险位置：",
+      "area": "所属区域：",
+      "sheet": "所属网格：",
+      "gps": "GPS 坐标：",
+      "gpsEmpty": "未设置（显示近似位置）",
+      "accidentType": "事故类型：",
+      "assessmentDate": "评估日期：",
+      "reviewCycle": "复评周期：",
+      "createdAt": "创建时间：",
+      "measures": "管控措施",
+      "emergency": "应急措施",
+      "empty": "暂无",
+      "monthUnit": "月"
+    },
+    "attachment": {
+      "title": "附件列表",
+      "upload": "上传附件",
+      "version": "版本号",
+      "uploadedBy": "上传人",
+      "uploadedAt": "上传时间",
+      "fileName": "文件名",
+      "fileSize": "文件大小",
+      "isLatest": "最新",
+      "download": "下载",
+      "delete": "删除附件",
+      "deleteConfirm": "确定要删除此附件吗？",
+      "uploadSuccess": "附件上传成功",
+      "uploadFailed": "附件上传失败",
+      "deleteSuccess": "附件删除成功",
+      "deleteFailed": "附件删除失败",
+      "loadFailed": "获取附件列表失败",
+      "empty": "暂无附件，请上传",
+      "versionPlaceholder": "请输入版本号，如 V1.0"
+    },
+    "version": {
+      "tabAttachments": "附件列表",
+      "tabVersions": "历史版本",
+      "version": "版本",
+      "changeType": "变更类型",
+      "changeSummary": "变更摘要",
+      "changedBy": "变更人",
+      "changedAt": "变更时间",
+      "empty": "暂无历史版本",
+      "loadFailed": "获取历史版本失败",
+      "changeTypeCreate": "创建",
+      "changeTypeUpdate": "更新",
+      "changeTypeImport": "导入",
+      "changeTypeRevise": "修订"
+    },
+    "action": {
+      "title": "操作",
+      "create": "新增风险点",
+      "createTitle": "新增风险点",
+      "editTitle": "编辑风险点",
+      "edit": "编辑",
+      "view": "查看",
+      "delete": "删除",
+      "deleteConfirm": "确定要删除此风险点吗？",
+      "confirmDelete": "删除",
+      "cancel": "取消",
+      "export": "导出报表",
+      "reset": "重置"
+    },
+    "validate": {
+      "nameRequired": "请输入风险点名称",
+      "nameLength": "名称长度为2-100字符",
+      "levelRequired": "请选择风险等级",
+      "measuresRequired": "请输入管控措施",
+      "areaRequired": "请选择所属区域"
+    },
+    "message": {
+      "createSuccess": "创建成功",
+      "updateSuccess": "更新成功",
+      "deleteSuccess": "删除成功"
+    },
+    "export": {
+      "success": "导出成功",
+      "failed": "导出失败，请稍后重试"
+    },
+    "linkage": {
+      "generateHazard": "生成隐患",
+      "generateConfirm": "确定要基于此风险点生成隐患记录吗？系统将自动预填风险等级、管控措施等字段。",
+      "generateSuccess": "隐患记录已生成，可在「关联隐患」Tab 查看",
+      "generateFailed": "隐患记录生成失败",
+      "tabRelatedHazards": "关联隐患",
+      "noRelatedHazards": "暂无关联隐患，点击上方「生成隐患」按钮创建",
+      "lastHazardCheck": "最近隐患检查",
+      "hazardCount": "关联隐患数",
+      "hazardDescription": "隐患描述",
+      "hazardChecker": "检查人员",
+      "hazardCheckDate": "检查日期",
+      "hazardFixDate": "整改日期",
+      "hazardStatus": "整改状态",
+      "linkType": "关联类型",
+      "linkTypeManual": "手动",
+      "linkTypeAuto": "自动",
+      "linkTypeExpiring": "临期触发"
+    },
+    "assess": {
+      "tab": "风险评估",
+      "title": "风险评估工作台",
+      "method": "评估方法",
+      "methodLEC": "LEC 作业条件危险性评价法",
+      "methodLS": "LS 风险矩阵评价法",
+      "formula": "计算公式",
+      "score": "风险值",
+      "scoreHint": "实时计算：{formula}",
+      "level": "风险等级",
+      "levelLabel": "判定等级",
+      "reviewCycle": "复评周期",
+      "reviewCycleHint": "到期后需重新评估",
+      "assessmentDate": "评估日期",
+      "remark": "评估备注",
+      "save": "保存评估",
+      "saving": "保存中...",
+      "currentTitle": "当前评估记录",
+      "currentEmpty": "暂无评估记录，请选择评估方法后录入因子",
+      "currentMethod": "方法",
+      "currentScore": "风险值",
+      "currentLevel": "等级",
+      "currentDate": "评估日期",
+      "currentCycle": "复评周期",
+      "factorRequired": "请选择 {symbol}（{label}）",
+      "saveSuccess": "风险评估已保存",
+      "saveFailed": "评估保存失败，请稍后重试",
+      "scaleMissing": "评估量表未加载，请稍后重试",
+      "scaleLoadFailed": "评估量表加载失败"
+    }
+  },
+  "documents": {
+    "title": "安全资料中心",
+    "library": "文件库",
+    "review": "文件审核",
+    "upload": "上传文件",
+    "uploadTitle": "上传安全资料",
+    "search": "搜索文件名或摘要",
+    "category": "文件分类",
+    "categoryTree": "文件分类",
+    "tags": "标签",
+    "validDate": "有效期",
+    "validRange": "有效期",
+    "validStartDate": "开始日期",
+    "validEndDate": "结束日期",
+    "remindDays": "到期提醒天数",
+    "remindDaysHint": "到期前 N 天开始提醒",
+    "summary": "备注",
+    "summaryPlaceholder": "文件说明（可选）",
+    "reviewStatus": "审核状态",
+    "reviewComment": "审核意见",
+    "reviewCommentPlaceholder": "请输入审核意见",
+    "reviewRejectPlaceholder": "请输入驳回原因",
+    "approved": "已通过",
+    "rejected": "已驳回",
+    "pending": "待审核",
+    "valid": "有效",
+    "expiring": "即将过期",
+    "expired": "已过期",
+    "none": "无有效期",
+    "fileType": {
+      "pdf": "PDF",
+      "word": "Word",
+      "excel": "Excel",
+      "image": "图片",
+      "video": "视频",
+      "other": "其他"
+    },
+    "action": {
+      "upload": "上传文件",
+      "download": "下载",
+      "detail": "详情",
+      "delete": "删除",
+      "deleteConfirm": "确认删除该文件？",
+      "approve": "通过",
+      "reject": "驳回",
+      "confirmApprove": "审核通过",
+      "confirmReject": "审核驳回",
+      "confirm": "确认",
+      "cancel": "取消"
+    },
+    "message": {
+      "uploadSuccess": "文件上传成功",
+      "uploadFailed": "文件上传失败",
+      "deleteSuccess": "删除成功",
+      "deleteFailed": "删除失败",
+      "downloadFailed": "下载失败",
+      "approveSuccess": "审核通过",
+      "rejectSuccess": "已驳回",
+      "reviewFailed": "审核操作失败",
+      "rejectCommentRequired": "驳回请填写原因"
+    },
+    "detail": {
+      "title": "文件详情",
+      "fileName": "文件名",
+      "fileType": "文件类型",
+      "fileSize": "文件大小",
+      "category": "分类",
+      "uploadBy": "上传人",
+      "uploadAt": "上传时间",
+      "reviewBy": "审核人",
+      "reviewAt": "审核时间"
+    },
+    "aiAnalysis": {
+      "title": "AI 分析结果",
+      "analyze": "AI分析",
+      "analyzing": "AI正在分析中，请稍候...",
+      "completed": "AI分析已完成",
+      "failed": "分析失败",
+      "retry": "重新分析",
+      "noData": "暂无分析记录",
+      "taskCreated": "分析任务已创建",
+      "analyzeFailed": "触发分析失败",
+      "completenessScore": "完整性评分",
+      "riskLevel": "风险等级",
+      "riskLow": "低风险",
+      "riskMedium": "中风险",
+      "riskHigh": "高风险",
+      "riskCritical": "严重",
+      "summary": "文档摘要",
+      "missingItems": "缺项提醒",
+      "suggestions": "标准建议",
+      "keywords": "关键词标签",
+      "triggeredBy": "触发人",
+      "duration": "用时 {seconds} 秒",
+      "disclaimer": "AI 分析结果仅供参考，不替代人工审核",
+      "basisFullText": "全文解析",
+      "basisFullTextDesc": "已提取完整文本内容（{len}字），分析可信度高",
+      "basisMetadata": "仅元数据分析",
+      "basisMetadataDesc": "仅基于文件名、分类、摘要等元数据分析，结果仅供参考",
+      "basisFilename": "仅文件名推断",
+      "basisFilenameDesc": "仅基于文件名推断，可信度极低，建议人工核实"
+    }
+  },
+  "advanced": {
+    "title": "高级分析",
+    "cockpit": "HSE驾驶舱",
+    "bi": "BI数据看板",
+    "ai": "AI智能分析",
+    "iot": "IoT物联网",
+    "supplyChain": "供应链安全",
+    "reports": "报表中心"
+  },
+  "reportCenter": {
+    "title": "安全生产汇报中心",
+    "monthlyReport": "安全生产月报",
+    "groupReport": "公司汇报材料",
+    "allReports": "全部报告",
+    "generate": "生成报告",
+    "generateMonthly": "生成月报",
+    "generateGroup": "生成汇报",
+    "period": "报告周期",
+    "selectPeriod": "请选择周期",
+    "aiAssist": "AI 辅助",
+    "generating": "生成中...",
+    "status": {
+      "pending": "等待生成",
+      "collecting": "数据采集中",
+      "aiGenerating": "AI 生成中",
+      "completed": "已完成",
+      "failed": "生成失败"
+    },
+    "aiStatus": {
+      "none": "未启用",
+      "pending": "等待中",
+      "processing": "处理中",
+      "completed": "已完成",
+      "failed": "失败"
+    },
+    "confirmStatus": {
+      "unconfirmed": "待确认",
+      "confirmed": "已确认",
+      "rejected": "已驳回"
+    },
+    "actions": {
+      "view": "查看",
+      "export": "导出",
+      "exportHtml": "导出 HTML",
+      "exportWord": "导出 Word",
+      "regenerate": "重新生成",
+      "archive": "归档",
+      "delete": "删除",
+      "confirm": "确认发布",
+      "edit": "编辑",
+      "close": "关闭"
+    },
+    "search": "搜索报告名称",
+    "filterConfirm": "确认状态",
+    "totalReports": "报告总数",
+    "thisMonth": "本月生成",
+    "pendingConfirm": "待确认",
+    "templates": "可用模板",
+    "aiNotice": "本报告部分内容由 AI 辅助生成，仅供参考，请以实际数据为准",
+    "dataSource": "数据来源",
+    "referencedDocs": "引用制度文件"
+  },
+  "message": {
+    "fetchListFailed": "获取{module}列表失败，请检查网络或联系管理员",
+    "fetchStatsFailed": "获取统计数据失败",
+    "fetchFailed": "获取数据失败",
+    "fetchDetailFailed": "获取详情失败",
+    "createFailed": "新增失败，请稍后重试",
+    "updateFailed": "更新失败，请稍后重试",
+    "deleteFailed": "删除失败，请稍后重试",
+    "saveFailed": "保存失败，请稍后重试",
+    "importFailed": "导入失败，请稍后重试",
+    "importParseFailed": "文件解析失败：{reason}",
+    "operationFailed": "操作失败，请稍后重试"
+  },
+  "standard": {
+    "title": "安全生产标准化条款库",
+    "stats": {
+      "total": "条款总数",
+      "level1": "一级要素",
+      "active": "启用条款",
+      "inactive": "停用条款"
+    },
+    "tree": {
+      "search": "搜索编码或名称",
+      "includeAll": "全部",
+      "includeActive": "启用"
+    },
+    "action": {
+      "add": "新增",
+      "addSub": "新增子项",
+      "edit": "编辑",
+      "enable": "启用",
+      "disable": "停用",
+      "import": "导入",
+      "export": "导出",
+      "save": "保存",
+      "cancel": "取消"
+    },
+    "detail": {
+      "empty": "请从左侧选择条款查看详情",
+      "code": "条款编码",
+      "level": "层级",
+      "elementName": "要素名称",
+      "scoreWeight": "分值权重",
+      "sortOrder": "排序",
+      "createdAt": "创建时间",
+      "clauseContent": "条款要求",
+      "checkMethod": "检查方法",
+      "keywords": "关键词标签",
+      "requiredDocTypes": "要求资料类型"
+    },
+    "modal": {
+      "createTitle": "新增条款",
+      "editTitle": "编辑条款",
+      "importTitle": "批量导入条款",
+      "downloadTemplate": "下载模板"
+    },
+    "message": {
+      "createSuccess": "条款创建成功",
+      "updateSuccess": "条款更新成功",
+      "enableSuccess": "条款已启用",
+      "disableSuccess": "条款已停用",
+      "exportSuccess": "导出成功，共 {count} 条条款",
+      "importSuccess": "导入完成：成功 {success} 条",
+      "importPartial": "导入完成：成功 {success} 条，失败 {failed} 条"
+    }
+  },
+  "relation": {
+    "title": "条款资料关联",
+    "stats": {
+      "total": "关联总数",
+      "valid": "已确认",
+      "pending": "待确认",
+      "files": "关联文件"
+    },
+    "tree": {
+      "title": "标准条款树"
+    },
+    "table": {
+      "fileName": "文件名",
+      "matchType": "匹配类型",
+      "confidence": "匹配度",
+      "status": "状态",
+      "action": "操作",
+      "clause": "条款",
+      "reason": "命中说明"
+    },
+    "status": {
+      "pending": "待确认",
+      "valid": "已确认",
+      "invalid": "已失效"
+    },
+    "matchType": {
+      "auto": "自动",
+      "manual": "人工"
+    },
+    "action": {
+      "add": "新增关联",
+      "confirm": "确认",
+      "batchConfirm": "批量确认",
+      "cancel": "取消关联",
+      "generate": "生成匹配建议"
+    },
+    "modal": {
+      "addTitle": "新增关联",
+      "selectFile": "选择文件",
+      "confirmDelete": "确定要取消「{name}」与该条款的关联吗？文件本身不会被删除。"
+    },
+    "message": {
+      "createSuccess": "关联创建成功",
+      "confirmSuccess": "关联已确认",
+      "deleteSuccess": "关联已取消",
+      "generateSuccess": "匹配完成：扫描 {clauses} 个条款，生成 {created} 条建议",
+      "batchSuccess": "确认完成：成功 {success} 条",
+      "batchPartial": "确认完成：成功 {success} 条，失败 {failed} 条",
+      "selectFirst": "请先选择条款",
+      "selectRows": "请先选择要确认的建议"
+    },
+    "suggestions": {
+      "title": "匹配建议",
+      "minConfidence": "最低匹配度",
+      "empty": "暂无待确认的匹配建议",
+      "emptyHint": "点击右上角\"生成匹配建议\"按钮开始自动匹配"
+    }
+  },
+  "module": {
+    "risk": "风险",
+    "riskControl": "安全风险管控",
+    "hazards": "隐患",
+    "accidents": "事故",
+    "emergencyPlan": "应急预案",
+    "emergencyDrill": "演练记录",
+    "goals": "目标",
+    "regulations": "规章制度",
+    "training": "培训",
+    "trainingRecords": "培训记录",
+    "trainingNewEmployee": "新员工培训",
+    "trainingLedger": "培训台账",
+    "trainingDriver": "驾驶员培训",
+    "personnel": "人员",
+    "budget": "预算",
+    "assessment": "考核记录",
+    "committee": "安全人员",
+    "notifications": "通知",
+    "workflow": "工作流",
+    "users": "用户",
+    "roles": "角色",
+    "audit": "审计日志",
+    "batchImport": "批量导入"
+  },
+  "batchImport": {
+    "title": "批量导入中心",
+    "taskList": "导入任务",
+    "newImport": "新建导入",
+    "taskNo": "任务编号",
+    "importType": "导入类型",
+    "status": "状态",
+    "progress": "进度",
+    "total": "总数",
+    "success": "成功",
+    "failed": "失败",
+    "pending": "待处理",
+    "createdBy": "创建人",
+    "createdAt": "创建时间",
+    "action": "操作",
+    "detail": "详情",
+    "retry": "重试",
+    "batchRetry": "批量重试失败",
+    "precheck": "预检查",
+    "confirm": "确认执行",
+    "template": "下载模板",
+    "search": {
+      "keyword": "搜索任务编号/创建人",
+      "typePlaceholder": "导入类型",
+      "statusPlaceholder": "任务状态"
+    },
+    "types": {
+      "document": "安全资料",
+      "standard_clause": "标准条款",
+      "safety_record": "安全记录"
+    },
+    "taskStatus": {
+      "pending": "待预检查",
+      "prechecking": "预检查中",
+      "prechecked": "预检查完成",
+      "confirmed": "待执行",
+      "processing": "处理中",
+      "completed": "已完成",
+      "failed": "失败",
+      "cancelled": "已取消"
+    },
+    "itemStatus": {
+      "pending": "待处理",
+      "prechecking": "预检查中",
+      "prechecked": "预检查通过",
+      "invalid": "无效文件",
+      "duplicate": "重复文件",
+      "processing": "处理中",
+      "success": "成功",
+      "failed": "失败",
+      "skipped": "已跳过",
+      "retrying": "重试中"
+    },
+    "drawer": {
+      "title": "新建批量导入",
+      "uploadTitle": "上传文件",
+      "dragText": "点击或拖拽文件到此区域上传",
+      "dragHint": "支持 {type} 文件，最多 500 个，单文件最大 100MB",
+      "startPrecheck": "开始预检查",
+      "prechecking": "正在预检查文件...",
+      "precheckingDesc": "正在检测文件类型、大小、重复文件",
+      "precheckComplete": "预检查完成",
+      "precheckDetail": "预检查明细",
+      "confirmExecute": "确认执行",
+      "processing": "正在导入...",
+      "processingDesc": "请耐心等待，完成后将自动刷新",
+      "completed": "导入完成",
+      "completedDesc": "任务已完成，您可以在任务列表中查看详细结果",
+      "cancel": "取消",
+      "done": "完成",
+      "concurrentLimit": "当前运行任务数已达上限（{current}/{max}），请稍后再试"
+    },
+    "instructions": {
+      "title": "批量导入说明",
+      "item1": "支持一次性上传最多 500 个文件",
+      "item2": "单文件大小不超过 100MB",
+      "item3": "系统将自动进行预检查，检测重复文件和无效文件",
+      "item4": "预检查通过后需人工确认方可正式执行"
+    }
+  }
+}

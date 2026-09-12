@@ -1,0 +1,6 @@
+psql:server/sql/hse_fk_orphan_cleanup_phase2.sql:38: 注意:  === 清洗门控结果（两表均无 is_deleted 列，所有孤儿均为活跃 NOT NULL）===
+psql:server/sql/hse_fk_orphan_cleanup_phase2.sql:38: 注意:  hse_deduction_adjustment.adjusted_by 活跃孤儿数 = 4（NOT NULL，需人工介入，未修改数据）
+psql:server/sql/hse_fk_orphan_cleanup_phase2.sql:38: 注意:  hse_assessment_audit_log.operator_id 活跃孤儿数 = 49（NOT NULL，需人工介入，未修改数据）
+psql:server/sql/hse_fk_orphan_cleanup_phase2.sql:38: 注意:  本脚本未执行任何 UPDATE：NOT NULL 活跃孤儿不得强制 SET NULL（红线约束）。
+psql:server/sql/hse_fk_orphan_cleanup_phase2.sql:38: 注意:  FK 补建（fk_deduction_adjust_adjusted_by / fk_assessment_audit_operator）本轮跳过，待人工决策后执行。
+DO

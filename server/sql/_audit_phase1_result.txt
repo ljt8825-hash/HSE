@@ -1,0 +1,115 @@
+           tbl_col           | orphan_count 
+-----------------------------+--------------
+ training_record.employee_id |            0
+(1 row)
+
+           tbl_col           | orphan_count 
+-----------------------------+--------------
+ training_record.position_id |            0
+(1 row)
+
+                 tbl_col                 | orphan_count 
+-----------------------------------------+--------------
+ employee_induction_training.employee_id |           16
+(1 row)
+
+                 tbl_col                 | orphan_count 
+-----------------------------------------+--------------
+ employee_induction_training.position_id |           16
+(1 row)
+
+               tbl_col                | orphan_count 
+--------------------------------------+--------------
+ employee_training_status.employee_id |           16
+(1 row)
+
+               tbl_col                | orphan_count 
+--------------------------------------+--------------
+ employee_training_status.position_id |           16
+(1 row)
+
+                  tbl_col                  | orphan_count 
+-------------------------------------------+--------------
+ position_training_requirement.position_id |            0
+(1 row)
+
+               tbl_col               | orphan_count 
+-------------------------------------+--------------
+ position_safety_profile.position_id |           24
+(1 row)
+
+            tbl_col            | orphan_count 
+-------------------------------+--------------
+ violation_records.violator_id |            0
+(1 row)
+
+            tbl_col             | orphan_count 
+--------------------------------+--------------
+ violation_records.inspector_id |            0
+(1 row)
+
+           tbl_col            | orphan_count 
+------------------------------+--------------
+ violation_records.handler_id |            0
+(1 row)
+
+            tbl_col            | orphan_count 
+-------------------------------+--------------
+ violation_records.punisher_id |            0
+(1 row)
+
+              tbl_col               | orphan_count 
+------------------------------------+--------------
+ safety_goals.responsible_person_id |            0
+(1 row)
+
+                 tbl_col                 | orphan_count 
+-----------------------------------------+--------------
+ hse_target_contracts.signer_employee_id |            0
+(1 row)
+
+                 tbl_col                 | orphan_count 
+-----------------------------------------+--------------
+ hse_target_contracts.signee_employee_id |            0
+(1 row)
+
+             tbl_col              | orphan_count 
+----------------------------------+--------------
+ hse_target_contracts.org_unit_id |            0
+(1 row)
+
+             tbl_col              | orphan_count 
+----------------------------------+--------------
+ hse_safety_committee.employee_id |            0
+(1 row)
+
+             tbl_col              | orphan_count 
+----------------------------------+--------------
+ hse_safety_committee.org_unit_id |            0
+(1 row)
+
+                  tbl_col                  | orphan_count 
+-------------------------------------------+--------------
+ hse_responsibility_assessment.employee_id |            0
+(1 row)
+
+                  tbl_col                  | orphan_count 
+-------------------------------------------+--------------
+ hse_responsibility_assessment.org_unit_id |            0
+(1 row)
+
+            tbl_col            | orphan_count 
+-------------------------------+--------------
+ hse_safety_budget.org_unit_id |            0
+(1 row)
+
+                  tbl_col                  | orphan_count 
+-------------------------------------------+--------------
+ hse_safety_budget.responsible_employee_id |            0
+(1 row)
+
+   summary    | orphan_count 
+--------------+--------------
+ TOTAL_ORPHAN |           88
+(1 row)
+

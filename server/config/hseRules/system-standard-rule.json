@@ -1,0 +1,126 @@
+{
+  "version": "1.0.0",
+  "description": "HSE制度标准业务模块规则配置 - Sprint11-11",
+  "forbidden": {
+    "assessmentRuleInCalculation": false,
+    "hardcodeAnyRule": false,
+    "note": "assessment_rule仅作只读影子数据，禁止参与计算；禁止硬编码文件状态流转、审核时效、匹配规则、条款有效期等逻辑"
+  },
+  "regulation": {
+    "categories": ["comprehensive", "specialty", "operation", "management", "emergency", "training", "other"],
+    "categoryLabels": {
+      "comprehensive": "综合管理制度",
+      "specialty": "专业管理制度",
+      "operation": "操作规程",
+      "management": "人员管理",
+      "emergency": "应急管理",
+      "training": "培训教育",
+      "other": "其他"
+    },
+    "statuses": ["draft", "pending_review", "published", "archived", "abolished"],
+    "statusLabels": {
+      "draft": "草稿",
+      "pending_review": "审核中",
+      "published": "已发布",
+      "archived": "已归档",
+      "abolished": "已废止"
+    },
+    "reviewCycleMonths": 12,
+    "applicableLevels": ["company", "department", "township", "team"]
+  },
+  "library": {
+    "fileTypes": ["regulation", "standard", "training", "checklist", "template", "other"],
+    "fileTypeLabels": {
+      "regulation": "制度文件",
+      "standard": "标准文件",
+      "training": "培训材料",
+      "checklist": "检查表",
+      "template": "模板文件",
+      "other": "其他"
+    },
+    "accessLevels": ["public", "internal", "confidential"],
+    "maxUploadSizeMB": 50,
+    "previewExtensions": [".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".jpg", ".jpeg", ".png"]
+  },
+  "review": {
+    "workflow": ["submit", "review", "approve", "reject"],
+    "workflowLabels": {
+      "submit": "提交审核",
+      "review": "审核中",
+      "approve": "审核通过",
+      "reject": "审核驳回"
+    },
+    "reviewTimeoutHours": 72,
+    "autoEscalateHours": 48,
+    "requireCommentOnReject": true,
+    "reviewerLevels": ["department_head", "safety_manager", "company_gm"]
+  },
+  "clause": {
+    "types": ["national", "industry", "enterprise"],
+    "typeLabels": {
+      "national": "国家标准(GB)",
+      "industry": "行业标准(AQ)",
+      "enterprise": "企业标准(Q)"
+    },
+    "levels": ["element_1", "element_2", "clause"],
+    "effectStatuses": ["valid", "invalid", "draft"],
+    "effectStatusLabels": {
+      "valid": "现行有效",
+      "invalid": "已废止",
+      "draft": "征求意见稿"
+    },
+    "domains": ["safety_management", "risk_control", "hazard_governance", "training", "emergency", "occupational_health", "fire_safety", "equipment"],
+    "domainLabels": {
+      "safety_management": "安全管理",
+      "risk_control": "风险管控",
+      "hazard_governance": "隐患治理",
+      "training": "培训教育",
+      "emergency": "应急管理",
+      "occupational_health": "职业健康",
+      "fire_safety": "消防安全",
+      "equipment": "设备设施"
+    }
+  },
+  "relation": {
+    "relationTypes": ["clause_to_regulation", "clause_to_training", "clause_to_checklist", "clause_to_hazard"],
+    "relationTypeLabels": {
+      "clause_to_regulation": "条款→制度",
+      "clause_to_training": "条款→培训",
+      "clause_to_checklist": "条款→检查表",
+      "clause_to_hazard": "条款→隐患"
+    },
+    "batchRelationEnabled": true
+  },
+  "suggestion": {
+    "matchThreshold": 0.6,
+    "keywordMatchWeight": 0.7,
+    "contentMatchWeight": 0.3,
+    "statuses": ["pending", "confirmed", "ignored"],
+    "statusLabels": {
+      "pending": "待处理",
+      "confirmed": "已确认",
+      "ignored": "已忽略"
+    },
+    "autoGenerateOnNewClause": true,
+    "maxSuggestionsPerClause": 10
+  },
+  "responsibilityMatrix": {
+    "company_gm": ["regulation_approve", "review_final", "standard_issue", "full_access"],
+    "department_head": ["regulation_draft", "review_department", "library_manage"],
+    "township_manager": ["regulation_execute", "review_township", "file_view"],
+    "administrator": ["data_maintenance", "review_coordination", "library_upload"],
+    "employee": ["published_view", "file_download", "suggestion_submit"]
+  },
+  "dashboardCards": [
+    { "code": "STD-001", "title": "制度总数", "semanticColor": "info" },
+    { "code": "STD-002", "title": "已发布制度", "semanticColor": "success" },
+    { "code": "STD-003", "title": "待审核制度", "semanticColor": "warning" },
+    { "code": "STD-004", "title": "待复审制度", "semanticColor": "warning" },
+    { "code": "STD-005", "title": "文件库总数", "semanticColor": "info" },
+    { "code": "STD-006", "title": "标准条款总数", "semanticColor": "info" },
+    { "code": "STD-007", "title": "有效条款数", "semanticColor": "success" },
+    { "code": "STD-008", "title": "本月审核通过", "semanticColor": "success" },
+    { "code": "STD-009", "title": "本月审核驳回", "semanticColor": "danger" },
+    { "code": "STD-010", "title": "匹配建议待处理", "semanticColor": "warning" }
+  ]
+}

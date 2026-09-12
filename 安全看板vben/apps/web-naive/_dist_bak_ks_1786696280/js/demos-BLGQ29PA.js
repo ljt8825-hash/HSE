@@ -1,0 +1,1 @@
+var e=`演示`,t=`Naive UI`,n=`Table`,r=`表单`,i={title:`项目`,about:`关于`,document:`文档`,antdv:`Ant Design Vue 版本`,"antdv-next":`Antdv Next 版本`,"naive-ui":`Naive UI 版本`,"element-plus":`Element Plus 版本`,tdesign:`TDesign Vue 版本`},a={title:e,naive:t,table:n,form:r,vben:i};export{a as default,r as form,t as naive,n as table,e as title,i as vben};

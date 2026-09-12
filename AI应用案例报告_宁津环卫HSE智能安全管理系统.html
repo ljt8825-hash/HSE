@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI应用案例报告：宁津环卫HSE智能安全管理系统</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', 'PingFang SC', 'Helvetica Neue', Arial, sans-serif; background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); min-height: 100vh; padding: 40px 20px; color: #2d3436; line-height: 1.7; }
+        .container { max-width: 1180px; margin: 0 auto; background: #fff; border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,0.1); overflow: hidden; }
+        .header { background: linear-gradient(135deg, #0077b6 0%, #00b4d8 100%); color: #fff; padding: 44px 60px; text-align: center; }
+        .header h1 { font-size: 30px; font-weight: 700; margin-bottom: 12px; letter-spacing: 1px; }
+        .header p { font-size: 16px; opacity: 0.92; }
+        .header .meta { margin-top: 16px; font-size: 13.5px; opacity: 0.82; }
+        .header .meta span { margin: 0 6px; }
+        .nav { background: #f8f9fa; border-bottom: 1px solid #e9ecef; padding: 13px 60px; display: flex; gap: 18px; overflow-x: auto; position: sticky; top: 0; z-index: 10; }
+        .nav a { color: #495057; text-decoration: none; font-size: 14px; padding: 5px 11px; border-radius: 6px; transition: all 0.25s; white-space: nowrap; }
+        .nav a:hover { background: #e7f5ff; color: #0077b6; }
+        .section { padding: 38px 60px; border-bottom: 1px solid #f0f0f0; }
+        .section:last-child { border-bottom: none; }
+        .section-title { font-size: 22px; font-weight: 700; color: #2d3436; margin-bottom: 22px; display: flex; align-items: center; gap: 11px; }
+        .section-title::before { content: ''; width: 5px; height: 25px; background: linear-gradient(135deg, #0077b6, #00b4d8); border-radius: 3px; }
+        .sub-title { font-size: 17px; font-weight: 600; color: #0077b6; margin: 22px 0 12px; }
+        .lead { font-size: 15px; color: #495057; margin-bottom: 14px; }
+        p.body { font-size: 14.5px; color: #495057; margin-bottom: 10px; }
+        ul.list { padding-left: 22px; margin-bottom: 12px; }
+        ul.list li { font-size: 14.5px; color: #495057; margin-bottom: 9px; }
+        ul.list li b { color: #2d3436; }
+        .report-table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 14px; }
+        .report-table th, .report-table td { padding: 12px 14px; text-align: left; border-bottom: 1px solid #e9ecef; }
+        .report-table th { background: #f8f9fa; font-weight: 600; color: #495057; }
+        .report-table tr:hover { background: #f8f9fa; }
+        .report-table td:first-child, .report-table th:first-child { font-weight: 600; color: #2d3436; }
+        .highlight-box { background: linear-gradient(135deg, #e7f5ff 0%, #f0fcff 100%); border-radius: 12px; padding: 22px 26px; margin-top: 18px; }
+        .highlight-box h4 { color: #0077b6; margin-bottom: 12px; font-size: 17px; }
+        .num { color: #0077b6; font-weight: 700; }
+        .timeline { position: relative; margin-top: 26px; padding-left: 30px; }
+        .timeline::before { content: ''; position: absolute; left: 11px; top: 4px; bottom: 4px; width: 2px; background: #d0e6f5; }
+        .tl-group { position: relative; margin-bottom: 26px; }
+        .tl-group::before { content: ''; position: absolute; left: -24px; top: 6px; width: 13px; height: 13px; background: #00b4d8; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 0 0 2px #00b4d8; }
+        .tl-date { font-size: 16px; font-weight: 700; color: #2d3436; margin-bottom: 8px; }
+        .tl-date .badge { display: inline-block; background: #e7f5ff; color: #0077b6; padding: 3px 11px; border-radius: 12px; font-size: 12px; font-weight: 600; margin-left: 8px; }
+        .tl-item { font-size: 13.5px; color: #495057; padding: 4px 0; border-bottom: 1px dashed #eef1f4; }
+        .tl-item .idx { color: #00b4d8; font-weight: 600; margin-right: 8px; }
+        .tl-item .fname { font-family: 'Consolas', 'Courier New', monospace; color: #2d3436; font-size: 13px; }
+        .conclusion { background: #f8f9fa; padding: 28px 30px; border-radius: 12px; margin-top: 18px; }
+        .conclusion h4 { color: #2d3436; margin-bottom: 13px; font-size: 17px; }
+        .conclusion ul { padding-left: 22px; }
+        .conclusion li { margin-bottom: 9px; color: #495057; font-size: 14.5px; }
+        .footer { text-align: center; padding: 22px; font-size: 12.5px; color: #868e96; background: #f8f9fa; }
+        @media (max-width: 720px) {
+            .header, .nav, .section { padding-left: 22px; padding-right: 22px; }
+            .header h1 { font-size: 23px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>AI 应用案例报告：一名安全管理人员的智能化转型</h1>
+            <p>我用 AI 造了一套 HSE 系统，然后我的安全管理彻底变了样</p>
+            <div class="meta">
+                <span>申报人身份：基层安全管理人员（系统的创建者，也是每天的使用者）</span><br>
+                <span>应用形态：AI辅助全栈开发 + 智能闭环引擎 + BI驾驶舱 + AI辅助分析</span><br>
+                <span>建设周期：2026-06-20 ～ 2026-07-14（约 24 天）</span> |
+                <span>报告日期：2026-07-16</span>
+            </div>
+        </div>
+
+        <div class="section" style="background:#f8fbfe;">
+            <h2 class="section-title">写在前面：我是谁，我遇到了什么</h2>
+            <p class="body">我是宁津环卫的一名<b>安全管理人员</b>。我们单位人员分散、作业车辆多、道路与露天作业环境复杂，安全风险点位密集。过去我（连带几位科室同事）要盯着上千名职工的保险合规、上千条三违台账、隐患排查、事故处理、教育培训、应急演练、目标责任考核……这些活儿全靠<b>纸质台账 + 一堆散落的 Excel</b>，我每天像救火队员一样疲于奔命，却总感觉"心里没底"。</p>
+            <p class="body">我不是专业程序员，但我决定<b>借助 AI 来改变现状</b>——用"提示词工程 + 全栈开发 Agent"的方式，在约 24 天里，亲手把这套覆盖 9 大业务模块的 HSE 智能安全管理系统"造"了出来。下面这四项，就是我作为安全管理人员，<b>用系统前 vs 用系统后</b>的真实对比。</p>
+        </div>
+
+        <div class="nav">
+            <a href="#s1">一、场景概述</a>
+            <a href="#s2">二、创新做法</a>
+            <a href="#s3">三、应用成效</a>
+            <a href="#s4">四、推广价值</a>
+            <a href="#appendix">附录：文档时间线</a>
+        </div>
+
+        <!-- ============ 一、场景概述 ============ -->
+        <div class="section" id="s1">
+            <h2 class="section-title">一、场景概述：我作为安全管理人员，到底被什么困住了</h2>
+            <p class="lead">作为安全管理人员，我的核心职责是"<b>保安全、防事故、盯合规</b>"，但用系统前，我被五件事死死困住：</p>
+            <ul class="list">
+                <li><b>数据全在各处，我永远凑不齐一张全局图。</b>责任书、机构配置、责任制考核、费用预算、隐患、事故、培训、保险、应急演练几十类数据，分散在我和同事的电脑里，口径不一。领导随便问一句"全单位现在有多少条未整改隐患""超龄职工工伤险覆盖率多少"，我往往要翻半天表格、打好几个电话才能拼出答案。</li>
+                <li><b>隐患和事故我只能"事后记账"，没法闭环。</b>隐患发现了、整改了没有、验证了没有、销号了没有——全靠我脑子记 + 手工登记，经常"查而不改、改而不验"，同类隐患反复出现，我心里始终悬着。</li>
+                <li><b>合规报送季季压顶，人工统计我算到头晕还容易错。</b>人员保险要分适龄/超龄/公益岗，1330 人花名册要跟工伤险 1146 人、雇主险 1324 人逐一比对找漏保、险种异常；培训学时、应急演练、目标考核也都要月度/年度报送。这类统计我以前手工做，一次要耗掉好几天，还提心吊胆怕漏怕错。</li>
+                <li><b>一线积累的海量数据，我根本用不起来。</b>1251 条三违、上千条培训记录、上千人保险数据……这些是宝贵的安全资产，但过去只是"沉睡的表格"，我没有看板、没有预警、没有辅助决策，风险苗头往往等出了事才发现。</li>
+                <li><b>想上个信息系统？</b>外包报价数十万、周期数月，基层根本等不起、也掏不起。</li>
+            </ul>
+            <div class="highlight-box">
+                <h4>这套系统要替我解决的核心问题</h4>
+                <p class="body">把安全管理从"<b>我一个人拿命扛的事后记账</b>"，升级为"<b>系统帮我看、帮我算、帮我盯的事前预警 + 过程闭环 + 数据决策</b>"。我用 <b>AI 辅助全栈开发</b>，在约 <span class="num">24 天</span>内造出覆盖 <span class="num">9 大业务模块</span> 的生产级平台，让自己从救火队员变成有据可依的安全管理者。</p>
+            </div>
+        </div>
+
+        <!-- ============ 二、创新做法 ============ -->
+        <div class="section" id="s2">
+            <h2 class="section-title">二、创新做法：我是怎么把这套系统"造"出来并用起来的</h2>
+
+            <h3 class="sub-title">做法 1：我用 AI 当"全栈开发团队"，24 天把系统造出来（我最自豪的创新）</h3>
+            <p class="body">我不写传统代码，而是用"<b>提示词工程 + 全栈开发 Agent</b>"驱动开发：</p>
+            <ul class="list">
+                <li><b>前端</b>：基于 Vben Admin（Vue 3 + TypeScript + Ant Design Vue）官方框架二次开发，不侵入官方核心包，保证以后还能持续升级。</li>
+                <li><b>后端</b>：Node.js + Express + PostgreSQL 17，JWT 双令牌认证、参数校验、统一响应。</li>
+                <li><b>我的实际体感</b>：以前我以为"上系统"是遥不可及的大工程，现在我一个安全管理人员，靠 AI 就在约 <span class="num">24 天</span>里做出了 30+ 页面、30 个后端接口、90 张数据表的生产级平台。<b>这条路径本身，就是安全管理人员可以复制的创新。</b></li>
+            </ul>
+
+            <h3 class="sub-title">做法 2：我把"隐患→整改→验证→销号"做成了系统自动盯的闭环</h3>
+            <p class="body">我把日常最头疼的隐患/事故闭环，固化成标准化工作流引擎（流程定义/实例/任务，支持审批通过、驳回、权限配置）。</p>
+            <p class="body"><b>我怎么用它</b>：隐患一登记，系统自动把整改任务派下去、卡住时限、到期提醒、验收销号。我不用再靠脑子记、靠微信催，系统替我盯着每一条闭环。</p>
+
+            <h3 class="sub-title">做法 3：我给系统装了"AI 分析大脑"，帮我提前看风险</h3>
+            <p class="body">后端集成大模型能力，能做风险预测和预警列表；还做了 <b>Grok / Ollama 双模型降级</b>——AI 服务万一不可用，系统自动降级，我的日常业务一点不受影响。</p>
+            <p class="body"><b>我怎么用它</b>：早上打开系统，AI 已经把高风险点、异常趋势列给我，我能先一步去盯、去防，而不是等出事再补救。</p>
+
+            <h3 class="sub-title">做法 4：我给自己配了一个"秒级入库"的智能导入工具</h3>
+            <p class="body">我设计了 Node.js → Python（Polars + calamine）→ PostgreSQL 的自动导入链路，配字段映射和冲突检测：</p>
+            <ul class="list">
+                <li>Excel 读取提速约 <span class="num">14×</span>、去重提速约 <span class="num">10.7×</span>、端到端提速约 <span class="num">2.1×</span>；</li>
+                <li>支持导入前自动备份、增量持久化（新增/更新/删除三层）。</li>
+                <li><b>我怎么用它</b>：以前 1251 条三违、1330 人花名册要一条条核、导半天，现在我把 Excel 往里一拖，秒级入库还自动查重、自动备份，我再也不怕导错、导重。</li>
+            </ul>
+
+            <h3 class="sub-title">做法 5：我做了"领导驾驶舱 + 智能报告中心"，把写月报的活交给系统</h3>
+            <p class="body">基于 ECharts 的领导安全驾驶舱和 BI 看板，指标趋势、风险分布、预警一屏看全；智能报告中心自动汇总生成管理报告。</p>
+            <p class="body"><b>我怎么用它</b>：领导要数据，我不再翻表格，直接调出驾驶舱；月报、台账汇总系统自动生成，我从"重复劳动"里解放出来，专心去做真正防风险的事。</p>
+
+            <h3 class="sub-title">做法 6：我把系统按"企业级安全 + 永不掉线"的标准建起来</h3>
+            <ul class="list">
+                <li><b>JWT 双令牌</b> + 启动强制校验密钥，杜绝硬编码泄露；</li>
+                <li><b>AES-256-GCM</b> 自动加解密手机号/身份证等敏感数据，保护职工隐私；</li>
+                <li><b>36 处审计日志</b>，谁改了什么全程留痕，安全管理有据可查；</li>
+                <li><b>PostgreSQL + 内存双模式降级</b>：数据库万一挂了，系统自动切内存继续跑，我汇报、演示、日常都不断档；</li>
+                <li><b>Docker 一键部署 + 回滚脚本</b>，运维不求人。</li>
+            </ul>
+        </div>
+
+        <!-- ============ 三、应用成效 ============ -->
+        <div class="section" id="s3">
+            <h2 class="section-title">三、应用成效：用了系统之后，我的工作到底好了多少</h2>
+            <p class="lead">下面是我作为安全管理人员，<b>用系统前 vs 用系统后</b>的真实对比：</p>
+            <table class="report-table">
+                <thead>
+                    <tr><th>我的工作场景</th><th>用系统前（我的日常）</th><th>用系统后（现在）</th><th>成效</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>上系统这件事</td><td>外包报价数十万、周期数月，基层等不起</td><td>我用 AI 约 <span class="num">24 天</span>亲手造出生产级系统</td><td>零商业授权成本，周期缩短到"周"级</td></tr>
+                    <tr><td>凑全局数据</td><td>翻表、打电话，半天拼不齐</td><td>打开驾驶舱一屏看全 9 大模块</td><td>数据口径统一，随问随答</td></tr>
+                    <tr><td>隐患/事故闭环</td><td>靠脑子记、微信催，查而不改</td><td>系统自动派单、卡时限、提醒、销号</td><td>闭环有引擎盯着，同类隐患不再反复</td></tr>
+                    <tr><td>保险合规比对</td><td>1330 人手工比对漏保/异常，耗时数天、易错</td><td>导入即自动比对分类（适龄/超龄/公益岗）</td><td>统计从"数天"压到"分钟"，异常一目了然</td></tr>
+                    <tr><td>海量台账入库</td><td>1251 条三违逐条核、导半天</td><td>Excel 一拖秒级入库，自动查重备份</td><td>读取提速约 <span class="num">14×</span>、去重 <span class="num">10.7×</span></td></tr>
+                    <tr><td>写月报做台账</td><td>熬夜手工汇总统计</td><td>智能报告中心自动生成</td><td>重复劳动大幅释放，专注防风险</td></tr>
+                    <tr><td>风险预警</td><td>出事才发现</td><td>AI 每天推高风险点/异常趋势</td><td>从事后补救转向事前预防</td></tr>
+                </tbody>
+            </table>
+
+            <h3 class="sub-title">支撑上面对比的几组硬指标</h3>
+            <table class="report-table">
+                <thead>
+                    <tr><th>维度</th><th>量化指标</th><th>数据</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>建设效率</td><td>全栈系统建设周期</td><td>约 <span class="num">24 天</span>（v1.0→v5.7，传统定制通常需数月）</td></tr>
+                    <tr><td>功能覆盖</td><td>核心业务模块 API/CRUD/导入覆盖率</td><td><span class="num">9 大模块 100%</span> 覆盖</td></tr>
+                    <tr><td>代码规模</td><td>后端 API 路由模块</td><td><span class="num">30 个</span></td></tr>
+                    <tr><td>代码规模</td><td>前端业务页面</td><td><span class="num">30+ 个</span>（14 完整 + 6 框架）</td></tr>
+                    <tr><td>代码规模</td><td>数据库表</td><td><span class="num">90 张</span>（32 核心表），SQL 迁移脚本 8 个</td></tr>
+                    <tr><td>综合完成度</td><td>v4.1 生产就绪</td><td><span class="num">96%</span></td></tr>
+                    <tr><td>综合完成度</td><td>最终交付版本</td><td><span class="num">98%</span>（API/CRUD/导入 100%，UI 一致性 96%）</td></tr>
+                    <tr><td>质量改善</td><td>安全漏洞修复</td><td><span class="num">7 处</span>（2 Critical + 3 High + 2 Medium）100% 清零</td></tr>
+                    <tr><td>质量改善</td><td>审计日志埋点</td><td><span class="num">36 处</span> 全量覆盖</td></tr>
+                    <tr><td>质量改善</td><td>CI/CD 质量门禁</td><td><span class="num">6 个</span> 工作流（集成/质量门禁/构建/安全扫描/部署）</td></tr>
+                    <tr><td>性能提升</td><td>数据导入 Excel 读取</td><td>提速约 <span class="num">14×</span></td></tr>
+                    <tr><td>性能提升</td><td>导入 Row Hash 去重</td><td>提速约 <span class="num">10.7×</span></td></tr>
+                    <tr><td>性能提升</td><td>导入端到端解析</td><td>提速约 <span class="num">2.1×</span></td></tr>
+                    <tr><td>安全合规</td><td>敏感数据加密</td><td>AES-256-GCM，手机号等自动加解密</td></tr>
+                    <tr><td>安全合规</td><td>认证体系</td><td>JWT 双令牌，密钥启动强制校验</td></tr>
+                    <tr><td>可用性</td><td>双模式降级</td><td>PostgreSQL + 内存，断库自动切换，系统零中断</td></tr>
+                </tbody>
+            </table>
+            <div class="highlight-box">
+                <h4>一句话总结成效</h4>
+                <p class="body" style="margin-bottom:14px;">我从一个"<b>拿命扛、靠手工、总没底</b>"的救火队员，变成了一个"<b>有看板、有预警、有闭环、有据可查</b>"的安全管理者——<b>统计从数天压到分钟，隐患从反复变闭环，风险从事后变事前</b>。</p>
+                <ul class="list" style="margin-bottom:0;">
+                    <li><b>质量改善</b>：7 处高危安全漏洞 100% 清零、36 处操作全程审计留痕，系统达到生产级标准。</li>
+                    <li><b>效率提升</b>：AI 辅助建设压缩至约 24 天；智能导入提速 2~14 倍，海量台账秒级入库；闭环引擎 + 驾驶舱 + 智能报告，大幅释放人工统计/写报告时间。</li>
+                    <li><b>成本节约</b>：基于开源 Vben + PostgreSQL + Docker，零商业授权成本；内存降级降低部署门槛；一键部署 + 回滚显著降低运维人力。</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- ============ 四、推广价值 ============ -->
+        <div class="section" id="s4">
+            <h2 class="section-title">四、推广价值：我这套做法，别的安全管理人员也能复制</h2>
+
+            <h3 class="sub-title">可复制推广的经验做法</h3>
+            <ul class="list">
+                <li><b>"安全管理人员 + AI 全栈开发"这条路能复制。</b>我不是程序员都能做到，其他单位的安全/生产/设备管理人员，同样可以用"提示词工程 + 全栈 Agent"快速造出贴合自己业务的系统，尤其适合"表单多、统计重、合规压力大"的政企场景。</li>
+                <li><b>不侵入官方框架的二次开发铁律值得沿用</b>，既享受官方升级红利，又能沉淀自己的业务资产。</li>
+                <li><b>双模式降级架构降低推广门槛</b>：没数据库也能跑演示，基层单位试用零阻力。</li>
+                <li><b>智能导入引擎可通用</b>：任何"Excel 台账 → 结构化数据库"的历史数据电子化难题都能套用。</li>
+                <li><b>隐患/事故闭环 + 智能报告的方法论</b>，可直接推广到住建、交通、化工、物业等高危行业的安全管理。</li>
+            </ul>
+
+            <h3 class="sub-title">我的下一步优化方向</h3>
+            <table class="report-table">
+                <thead>
+                    <tr><th>方向</th><th>我想做的事</th><th>优先级</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>深化 AI</td><td>训练风险预测模型、大模型辅助隐患智能识别分级、安全知识库问答</td><td>高</td></tr>
+                    <tr><td>IoT 物联网</td><td>车辆/人员/设备实时定位、视频 AI 识别违章作业</td><td>高</td></tr>
+                    <tr><td>移动端</td><td>H5 / 小程序，支撑我和一线现场随手拍、即时上报</td><td>高</td></tr>
+                    <tr><td>数据资产化</td><td>全模块导出、报表中心、实时推送</td><td>中</td></tr>
+                    <tr><td>测试与高可用</td><td>补单元/E2E 测试、迁移 K8s 支撑多单位推广</td><td>中</td></tr>
+                    <tr><td>国际化</td><td>中英双语，支撑集团更大范围推广</td><td>低</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- ============ 附录：文档时间线 ============ -->
+        <div class="section" id="appendix">
+            <h2 class="section-title">附录：项目全流程文档时间线（全部 .MD / .HTML 按时间排序）</h2>
+            <p class="body">以下为文件夹内全部报告文档，按时间顺序（从开始到现在）排列，呈现我用 AI 建设这套系统的完整演进脉络（共 143 份）。</p>
+
+            <div class="timeline">
+                <div class="tl-group">
+                    <div class="tl-date">2026-05-21 <span class="badge">项目启动 / 框架基线</span></div>
+                    <div class="tl-item"><span class="idx">1.</span><span class="fname">安全看板vben/README.zh-CN.md</span></div>
+                    <div class="tl-item"><span class="idx">2.</span><span class="fname">安全看板vben/README.ja-JP.md</span></div>
+                </div>
+                <div class="tl-group">
+                    <div class="tl-date">2026-06-21 <span class="badge">三违管理 / 飞书协同</span></div>
+                    <div class="tl-item"><span class="idx">3.</span><span class="fname">三违管理/快速安装指南.md</span></div>
+                    <div class="tl-item"><span class="idx">4.</span><span class="fname">三违管理/安装飞书CLI指南.md</span></div>
+                    <div class="tl-item"><span class="idx">5.</span><span class="fname">三违管理/数据导入完整指南.md</span></div>
+                    <div class="tl-item"><span class="idx">6.</span><span class="fname">三违管理/飞书多维表格同步指南.md</span></div>
+                    <div class="tl-item"><span class="idx">7.</span><span class="fname">三违管理/项目安全周工作总结使用说明.md</span></div>
+                </div>
+                <div class="tl-group">
+                    <div class="tl-date">2026-06-27 <span class="badge">现场管理数据</span></div>
+                    <div class="tl-item"><span class="idx">8.</span><span class="fname">现场管理/消防器材数据补充分析报告.md</span></div>
+                </div>
+                <div class="tl-group">
+                    <div class="tl-date">2026-06-29 <span class="badge">审计</span></div>
+                    <div class="tl-item"><span class="idx">9.</span><span class="fname">安全管理系统/audit-report-20260629.md</span></div>
+                </div>
+                <div class="tl-group">
+                    <div class="tl-date">2026-06-30 <span class="badge">原型与样式规范</span></div>
+                    <div class="tl-item"><span class="idx">10.</span><span class="fname">安全管理系统/项目结构分析报告.md</span></div>
+                    <div class="tl-item"><span class="idx">11.</span><span class="fname">安全管理系统/全项目硬编码背景排查报告.md</span></div>
+                    <div class="tl-item"><span class="idx">12.</span><span class="fname">安全管理系统/overview_配色方案调整.md</span></div>
+                    <div class="tl-item"><span class="idx">13.</span><span class="fname">安全管理系统/卡片识别与标准化系统规范.md</span></div>
+                    <div class="tl-item"><span class="idx">14.</span><span class="fname">安全管理系统/overview_网格卡片布局修复.md</span></div>
+                    <div class="tl-item"><span class="idx">15.</span><span class="fname">安全管理系统/overview_卡片样式统一.md</span></div>
+                    <div class="tl-item"><span class="idx">16.</span><span class="fname">安全管理系统/overview_隐患排查卡片样式统一.md</span></div>
+                    <div class="tl-item"><span class="idx">17.</span><span class="fname">安全管理系统/overview_风险卡片样式继承.md</span></div>
+                    <div class="tl-item"><span class="idx">18.</span><span class="fname">安全管理系统/overview_隐患排查卡片左侧色条风格.md</span></div>
+                    <div class="tl-item"><span class="idx">19.</span><span class="fname">安全管理系统/kanban-prototype.html</span></div>
+                    <div class="tl-item"><span class="idx">20.</span><span class="fname">安全管理系统/任务管理界面.html</span></div>
+                </div>
+                <div class="tl-group">
+                    <div class="tl-date">2026-07-01 <span class="badge">日常更新</span></div>
+                    <div class="tl-item"><span class="idx">21.</span><span class="fname">daily_update/README.md</span></div>
+                </div>
+                <div class="tl-group">
+                    <div class="tl-date">2026-07-03 <span class="badge">工具</span></div>
+                    <div class="tl-item"><span class="idx">22.</span><span class="fname">tools/README.md</span></div>
+                </div>
+                <div class="tl-group">
+                    <div class="tl-date">2026-07-05 <span class="badge">后端筛选 / 坐标</span></div>
+                    <div class="tl-item"><span class="idx">23.</span><span class="fname">安全管理系统/后端筛选功能实施指南.md</span></div>
+                    <div class="tl-item"><span class="idx">24.</span><span class="fname">安全管理系统/后端筛选功能测试指南.md</span></div>
+                    <div class="tl-item"><span class="idx">25.</span><span class="fname">安全管理系统/坐标偏差根因分析报告.md</span></div>
+                    <div class="tl-item"><span class="idx">26.</span><span class="fname">安全管理系统/index_original.html</span></div>
+                </div>
+                <div class="tl-group">
+                    <div class="tl-date">2026-07-07 <span class="badge">前端重构 / 数据迁移 / 部署提示词</span></div>
+                    <div class="tl-item"><span class="idx">27.</span><span class="fname">安全管理系统/保险及人员管理模块使用手册.md</span></div>
+                    <div class="tl-item"><span class="idx">28.</span><span class="fname">保险及人员管理模块优化规划文档.md</span></div>
+                    <div class="tl-item"><span class="idx">29.</span><span class="fname">安全管理系统/frontend-refactor-report-step1.md</span></div>
+                    <div class="tl-item"><span class="idx">30.</span><span class="fname">安全管理系统/frontend-refactor-report-step2.md</span></div>
+                    <div class="tl-item"><span class="idx">31.</span><span class="fname">安全管理系统/frontend-refactor-report-step3.md</span></div>
+                    <div class="tl-item"><span class="idx">32.</span><span class="fname">安全管理系统/frontend-refactor-report-step4.md</span></div>
+                    <div class="tl-item"><span class="idx">33.</span><span class="fname">安全管理系统/API_INTEGRATION.md</span></div>
+                    <div class="tl-item"><span class="idx">34.</span><span class="fname">安全管理系统/frontend-refactor-report-step5.md</span></div>
+                    <div class="tl-item"><span class="idx">35.</span><span class="fname">2026-07-07_变更记录文档.md</span></div>
+                    <div class="tl-item"><span class="idx">36.</span><span class="fname">安全管理系统/CHANGELOG_20260707.md</span></div>
+                    <div class="tl-item"><span class="idx">37.</span><span class="fname">安全管理系统/index.html</span></div>
+                    <div class="tl-item"><span class="idx">38.</span><span class="fname">prompts/step1-data-migration.md</span></div>
+                    <div class="tl-item"><span class="idx">39.</span><span class="fname">prompts/step2-auth-integration.md</span></div>
+                    <div class="tl-item"><span class="idx">40.</span><span class="fname">prompts/step3-backend-consolidation.md</span></div>
+                    <div class="tl-item"><span class="idx">41.</span><span class="fname">prompts/step4-database-security.md</span></div>
+                    <div class="tl-item"><span class="idx">42.</span><span class="fname">prompts/step5-api-testing-validation.md</span></div>
+                    <div class="tl-item"><span class="idx">43.</span><span class="fname">prompts/step6-production-deployment.md</span></div>
+                    <div class="tl-item"><span class="idx">44.</span><span class="fname">prompts/step1-data-migration-report.md</span></div>
+                    <div class="tl-item"><span class="idx">45.</span><span class="fname">prompts/step2-auth-integration-report.md</span></div>
+                    <div class="tl-item"><span class="idx">46.</span><span class="fname">prompts/step3-backend-consolidation-report.md</span></div>
+                </div>
+                <div class="tl-group">
+                    <div class="tl-date">2026-07-08 <span class="badge">架构规范 / 模块扩展 / 收尾</span></div>
+                    <div class="tl-item"><span class="idx">47.</span><span class="fname">prompts/step4-database-security-report.md</span></div>
+                    <div class="tl-item"><span class="idx">48.</span><span class="fname">prompts/step5-api-testing-report.md</span></div>
+                    <div class="tl-item"><span class="idx">49.</span><span class="fname">安全管理系统/DEPLOY.md</span></div>
+                    <div class="tl-item"><span class="idx">50.</span><span class="fname">安全管理系统/README.md</span></div>
+                    <div class="tl-item"><span class="idx">51.</span><span class="fname">prompts/step6-production-deployment-report.md</span></div>
+                    <div class="tl-item"><span class="idx">52.</span><span class="fname">vue3-project-structure.md</span></div>
+                    <div class="tl-item"><span class="idx">53.</span><span class="fname">API层封装与数据建模规范.md</span></div>
+                    <div class="tl-item"><span class="idx">54.</span><span class="fname">Pinia状态管理与Composables最佳实践.md</span></div>
+                    <div class="tl-item"><span class="idx">55.</span><span class="fname">路由守卫权限控制与布局系统.md</span></div>
+                    <div class="tl-item"><span class="idx">56.</span><span class="fname">安全看板Dashboard具体实现规划与代码.md</span></div>
+                    <div class="tl-item"><span class="idx">57.</span><span class="fname">安全看板集成最终优化与代码调整.md</span></div>
+                    <div class="tl-item"><span class="idx">58.</span><span class="fname">审计日志模块扩展实现.md</span></div>
+                    <div class="tl-item"><span class="idx">59.</span><span class="fname">用户管理模块扩展实现.md</span></div>
+                    <div class="tl-item"><span class="idx">60.</span><span class="fname">项目部署与生产环境配置.md</span></div>
+                    <div class="tl-item"><span class="idx">61.</span><span class="fname">实时告警中心模块扩展实现.md</span></div>
+                    <div class="tl-item"><span class="idx">62.</span><span class="fname">项目最终收尾与部署指南.md</span></div>
+                </div>
+                <div class="tl-group">
+                    <div class="tl-date">2026-07-10 <span class="badge">发布 / 文档 / 可观测性提示词</span></div>
+                    <div class="tl-item"><span class="idx">63.</span><span class="fname">CHANGELOG.md</span></div>
+                    <div class="tl-item"><span class="idx">64.</span><span class="fname">SECURITY.md</span></div>
+                    <div class="tl-item"><span class="idx">65.</span><span class="fname">docs/api-reference.md</span></div>
+                    <div class="tl-item"><span class="idx">66.</span><span class="fname">docs/deployment-checklist.md</span></div>
+                    <div class="tl-item"><span class="idx">67.</span><span class="fname">docs/RELEASE_v3.0.0.md</span></div>
+                    <div class="tl-item"><span class="idx">68.</span><span class="fname">docs/UI-ARCHITECTURE-DECISION.md</span></div>
+                    <div class="tl-item"><span class="idx">69.</span><span class="fname">README.md</span></div>
+                    <div class="tl-item"><span class="idx">70.</span><span class="fname">docs/UI-MIGRATION-LOG.md</span></div>
+                    <div class="tl-item"><span class="idx">71.</span><span class="fname">src/README_LEGACY.md</span></div>
+                    <div class="tl-item"><span class="idx">72.</span><span class="fname">项目交付说明.md</span></div>
+                    <div class="tl-item"><span class="idx">73.</span><span class="fname">分析结果示例.md</span></div>
+                    <div class="tl-item"><span class="idx">74.</span><span class="fname">项目完成情况总览.md</span></div>
+                    <div class="tl-item"><span class="idx">75.</span><span class="fname">deploy/security-checklist.md</span></div>
+                    <div class="tl-item"><span class="idx">76.</span><span class="fname">TRAE_Work_CN_可观测性平台搭建_提示词.md</span></div>
+                    <div class="tl-item"><span class="idx">77.</span><span class="fname">index.html</span></div>
+                </div>
+                <div class="tl-group">
+                    <div class="tl-date">2026-07-11 <span class="badge">生产就绪 / 安全加固 / HSE专项</span></div>
+                    <div class="tl-item"><span class="idx">78.</span><span class="fname">进度报告_20260711_安全漏洞修复与CI_CD准备.md</span></div>
+                    <div class="tl-item"><span class="idx">79.</span><span class="fname">进度报告_20260711_阶段2_生产配置_CI调试与审计日志完善.md</span></div>
+                    <div class="tl-item"><span class="idx">80.</span><span class="fname">进度报告_20260711_阶段3_审计日志全局集成与emergency_objectives持久化.md</span></div>
+                    <div class="tl-item"><span class="idx">81.</span><span class="fname">进度报告_20260711_阶段4_objectives表名修复_CI验证与敏感数据加密准备.md</span></div>
+                    <div class="tl-item"><span class="idx">82.</span><span class="fname">进度报告_20260711_阶段5_数据库迁移_敏感数据加密集成与前端准备.md</span></div>
+                    <div class="tl-item"><span class="idx">83.</span><span class="fname">monitoring/README.md</span></div>
+                    <div class="tl-item"><span class="idx">84.</span><span class="fname">TRAE_Work_CN_质量保障与测试体系_提示词.md</span></div>
+                    <div class="tl-item"><span class="idx">85.</span><span class="fname">TRAE_Work_CN_E2E测试补全_提示词.md</span></div>
+                    <div class="tl-item"><span class="idx">86.</span><span class="fname">docs/test-report.md</span></div>
+                    <div class="tl-item"><span class="idx">87.</span><span class="fname">TRAE_Work_CN_性能压测与优化_提示词.md</span></div>
+                    <div class="tl-item"><span class="idx">88.</span><span class="fname">performance/README.md</span></div>
+                    <div class="tl-item"><span class="idx">89.</span><span class="fname">TRAE_Work_CN_安全加固与审计_提示词.md</span></div>
+                    <div class="tl-item"><span class="idx">90.</span><span class="fname">security/README.md</span></div>
+                    <div class="tl-item"><span class="idx">91.</span><span class="fname">项目完成情况总结报告.md</span></div>
+                    <div class="tl-item"><span class="idx">92.</span><span class="fname">进度报告_20260711_阶段6_加密集成_前端完善_CI验证与项目收尾.md</span></div>
+                    <div class="tl-item"><span class="idx">93.</span><span class="fname">宁津环卫HSE安全管理系统_v4.1_最终生产就绪报告_20260711.md</span></div>
+                    <div class="tl-item"><span class="idx">94.</span><span class="fname">内部使用快速指南.md</span></div>
+                    <div class="tl-item"><span class="idx">95.</span><span class="fname">进度报告_20260711_阶段7_加密处理_人员模块补齐与内部指南.md</span></div>
+                    <div class="tl-item"><span class="idx">96.</span><span class="fname">内部部署与运维简易指南.md</span></div>
+                    <div class="tl-item"><span class="idx">97.</span><span class="fname">进度报告_20260711_阶段8_前端人员页面开发与最终部署指南.md</span></div>
+                    <div class="tl-item"><span class="idx">98.</span><span class="fname">HSE数字化升级架构评估报告.md</span></div>
+                    <div class="tl-item"><span class="idx">99.</span><span class="fname">HSE核心数据模型设计报告.md</span></div>
+                    <div class="tl-item"><span class="idx">100.</span><span class="fname">HSE数据基础层实施报告.md</span></div>
+                    <div class="tl-item"><span class="idx">101.</span><span class="fname">HSE标准化闭环引擎实施报告.md</span></div>
+                    <div class="tl-item"><span class="idx">102.</span><span class="fname">HSE智能闭环工作流实施报告.md</span></div>
+                    <div class="tl-item"><span class="idx">103.</span><span class="fname">HSE安全数据分析中心实施报告.md</span></div>
+                    <div class="tl-item"><span class="idx">104.</span><span class="fname">HSE领导安全驾驶舱实施报告.md</span></div>
+                    <div class="tl-item"><span class="idx">105.</span><span class="fname">HSE智能报告中心实施报告.md</span></div>
+                    <div class="tl-item"><span class="idx">106.</span><span class="fname">deploy/README.md</span></div>
+                    <div class="tl-item"><span class="idx">107.</span><span class="fname">server/README.md</span></div>
+                    <div class="tl-item"><span class="idx">108.</span><span class="fname">项目全面审查报告.md</span></div>
+                </div>
+                <div class="tl-group">
+                    <div class="tl-date">2026-07-12 <span class="badge">功能演进可视化报告 · HTML</span></div>
+                    <div class="tl-item"><span class="idx">109.</span><span class="fname">HSE系统功能演进报告.html</span></div>
+                    <div class="tl-item"><span class="idx">110.</span><span class="fname">版本演进功能报告.html</span></div>
+                    <div class="tl-item"><span class="idx">111.</span><span class="fname">安全管理系统详细功能对比报告.html</span></div>
+                    <div class="tl-item"><span class="idx">112.</span><span class="fname">功能补全完成报告.html</span></div>
+                    <div class="tl-item"><span class="idx">113.</span><span class="fname">HSE_v4.1_生产上线最终操作手册_人工版.html</span></div>
+                </div>
+                <div class="tl-group">
+                    <div class="tl-date">2026-07-14 <span class="badge">Vben 恢复官方 / 优化</span></div>
+                    <div class="tl-item"><span class="idx">114.</span><span class="fname">Vben_Admin_Restore_to_Official_Report.md</span></div>
+                    <div class="tl-item"><span class="idx">115.</span><span class="fname">Vben_Admin_Post_Restore_Optimization_Report.md</span></div>
+                    <div class="tl-item"><span class="idx">116.</span><span class="fname">Vben_Admin_Final_Project_Status.md</span></div>
+                    <div class="tl-item"><span class="idx">117.</span><span class="fname">Vben_Admin_Delivery_Audit.md</span></div>
+                    <div class="tl-item"><span class="idx">118.</span><span class="fname">安全看板vben/恢复完成报告.md</span></div>
+                    <div class="tl-item"><span class="idx">119.</span><span class="fname">安全看板vben/HSE系统功能完善进度报告.md</span></div>
+                    <div class="tl-item"><span class="idx">120.</span><span class="fname">安全看板vben/HSE系统最终风格统一与商业化完善报告.md</span></div>
+                </div>
+                <div class="tl-group">
+                    <div class="tl-date">2026-07-15 <span class="badge">最终交付 / 模块优化</span></div>
+                    <div class="tl-item"><span class="idx">121.</span><span class="fname">安全看板vben/HSE系统用户操作手册.md</span></div>
+                    <div class="tl-item"><span class="idx">122.</span><span class="fname">安全看板vben/README.md</span></div>
+                    <div class="tl-item"><span class="idx">123.</span><span class="fname">安全看板vben/宁津环卫HSE安全管理系统最终交付报告.md</span></div>
+                    <div class="tl-item"><span class="idx">124.</span><span class="fname">安全看板vben/HSE系统菜单修复与最终验证报告.md</span></div>
+                    <div class="tl-item"><span class="idx">125.</span><span class="fname">安全看板vben/HSE系统菜单最终结构调整报告.md</span></div>
+                    <div class="tl-item"><span class="idx">126.</span><span class="fname">安全看板vben/HSE系统数据层建设报告.md</span></div>
+                    <div class="tl-item"><span class="idx">127.</span><span class="fname">HSE系统API对齐与数据导入最终修复报告.md</span></div>
+                    <div class="tl-item"><span class="idx">128.</span><span class="fname">最终落地验证报告.md</span></div>
+                    <div class="tl-item"><span class="idx">129.</span><span class="fname">安全看板vben/HSE系统导入功能全覆盖与标准化报告.md</span></div>
+                    <div class="tl-item"><span class="idx">130.</span><span class="fname">安全看板vben/人员保险高危人员Tab修复报告.md</span></div>
+                    <div class="tl-item"><span class="idx">131.</span><span class="fname">HSE系统最终交付确认报告.md</span></div>
+                    <div class="tl-item"><span class="idx">132.</span><span class="fname">HSE项目状态全面评估报告.md</span></div>
+                    <div class="tl-item"><span class="idx">133.</span><span class="fname">HSE系统前端UI标准化审计报告.md</span></div>
+                    <div class="tl-item"><span class="idx">134.</span><span class="fname">HSE系统UI最终锁定与工作流简化报告.md</span></div>
+                    <div class="tl-item"><span class="idx">135.</span><span class="fname">HSE系统人员保险管理模块优化报告.md</span></div>
+                    <div class="tl-item"><span class="idx">136.</span><span class="fname">HSE系统隐患排查治理模块优化报告.md</span></div>
+                    <div class="tl-item"><span class="idx">137.</span><span class="fname">HSE系统事故管理模块优化报告.md</span></div>
+                    <div class="tl-item"><span class="idx">138.</span><span class="fname">HSE系统目标职责管理模块优化报告.md</span></div>
+                    <div class="tl-item"><span class="idx">139.</span><span class="fname">HSE系统培训管理模块优化报告.md</span></div>
+                </div>
+                <div class="tl-group">
+                    <div class="tl-date">2026-07-16 <span class="badge">模块化收尾 · 当前</span></div>
+                    <div class="tl-item"><span class="idx">140.</span><span class="fname">HSE系统应急管理模块优化报告.md</span></div>
+                    <div class="tl-item"><span class="idx">141.</span><span class="fname">HSE系统现场管理模块优化报告.md</span></div>
+                    <div class="tl-item"><span class="idx">142.</span><span class="fname">HSE系统模块化优化最终总结报告.md</span></div>
+                    <div class="tl-item"><span class="idx">143.</span><span class="fname">HSE系统最终交付准备报告.md</span></div>
+                </div>
+            </div>
+
+            <div class="conclusion">
+                <h4>报告说明</h4>
+                <ul>
+                    <li>本案例报告以"安全管理人员用 AI 创建并使用系统"的第一人称视角撰写，依据项目文件夹中全部 .MD / .HTML 文档内容汇总提炼，涵盖场景痛点、创新做法、量化成效与推广价值四个维度，并附完整文档时间线。</li>
+                    <li>对应 Markdown 版本：<code>AI应用案例报告_宁津环卫HSE智能安全管理系统.md</code></li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="footer">宁津环卫 HSE 智能安全管理系统 · AI应用案例报告 · 生成于 2026-07-16</div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>积分记录表设计方案 — 奖惩积分 · 模块联动 · 自动出分</title>
+<style>
+  :root{
+    --bg:#f4f7fb;
+    --card:#ffffff;
+    --ink:#1f2d3d;
+    --muted:#5c6b7f;
+    --line:#e3ebf3;
+    --brand:#0f7b5f;      /* 安全绿 */
+    --brand-2:#0a5f4a;
+    --accent:#d97706;
+    --accent-2:#b45309;
+    --code-bg:#0f2233;
+    --code-ink:#d6f0e8;
+    --tag-ok:#e6f6ef;
+    --tag-ok-ink:#0f7b5f;
+    --tag-warn:#fdf0e7;
+    --tag-warn-ink:#b45309;
+    --radius:14px;
+    --shadow:0 6px 24px rgba(15,123,95,.08);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font-family:"PingFang SC","Microsoft YaHei",-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.7;padding:0 20px 80px}
+  .wrap{max-width:1080px;margin:0 auto}
+
+  /* 封面 */
+  .hero{margin:40px 0 28px;background:linear-gradient(135deg,#0f7b5f 0%,#075544 100%);border-radius:20px;padding:44px 48px;color:#fff;box-shadow:0 12px 40px rgba(15,123,95,.25)}
+  .hero .kicker{display:inline-block;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.3);padding:4px 14px;border-radius:20px;font-size:13px;letter-spacing:1px;margin-bottom:16px}
+  .hero h1{font-size:30px;font-weight:700;letter-spacing:.5px}
+  .hero p{margin-top:14px;opacity:.92;font-size:15px;max-width:720px}
+  .hero .meta{margin-top:22px;display:flex;gap:24px;flex-wrap:wrap;font-size:13px;opacity:.85}
+  .hero .meta b{font-weight:600}
+
+  /* 章节 */
+  section{margin-top:44px}
+  h2{font-size:22px;font-weight:700;display:flex;align-items:center;gap:12px;margin-bottom:6px}
+  h2 .no{background:var(--brand);color:#fff;width:30px;height:30px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;font-size:15px;flex:none}
+  .lead{color:var(--muted);font-size:14.5px;margin:6px 0 20px;max-width:860px}
+
+  /* 卡片 */
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:28px 30px;margin-bottom:20px}
+  h3{font-size:16.5px;font-weight:700;margin-bottom:16px;color:var(--brand-2)}
+
+  /* 表格 */
+  table{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:8px}
+  th{background:#0b3d30;color:#fff;text-align:left;padding:9px 12px;font-weight:600;font-size:13px;letter-spacing:.3px;white-space:nowrap}
+  td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  tr:nth-child(even) td{background:#fafcfd}
+  code{font-family:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;font-size:12.5px;background:#eef4f1;color:#0a5f4a;padding:1px 6px;border-radius:5px}
+  .col-pk{color:var(--brand);font-weight:600}
+  .col-req{color:var(--accent);font-weight:600}
+
+  /* 标签 */
+  .tag{display:inline-block;font-size:12px;padding:1px 10px;border-radius:12px;font-weight:600}
+  .tag-ok{background:var(--tag-ok);color:var(--tag-ok-ink)}
+  .tag-warn{background:var(--tag-warn);color:var(--tag-warn-ink)}
+  .tag-diff{background:#eef2ff;color:#3b47c8}
+
+  /* SQL 代码块 */
+  .sql{background:var(--code-bg);color:var(--code-ink);border-radius:12px;padding:20px 22px;overflow:auto;font-family:"SFMono-Regular",Consolas,Menlo,monospace;font-size:12.5px;line-height:1.75;margin-top:14px}
+  .sql .cm{color:#7aa4c9}
+  .sql .kw{color:#7ee8c0;font-weight:600}
+  .sql .k{color:#ffcf8f}
+
+  /* 比较双栏 */
+  .compare{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:14px}
+  @media(max-width:760px){.compare{grid-template-columns:1fr}}
+  .pane{border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .pane .hd{padding:10px 16px;color:#fff;font-weight:600;font-size:14px}
+  .pane.rk .hd{background:#5b6b8a}
+  .pane.ours .hd{background:var(--brand)}
+  .pane .bd{padding:14px 16px}
+  .pane ul{margin:0;padding-left:4px;list-style:none}
+  .pane li{position:relative;padding-left:18px;margin-bottom:7px;font-size:13.5px;color:#37475a}
+  .pane li::before{content:"—";position:absolute;left:0;color:var(--muted)}
+
+  /* 亮点 / 建议 */
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:16px}
+  @media(max-width:900px){.grid3{grid-template-columns:1fr}}
+  .point{background:#fbfdfc;border:1px solid var(--line);border-top:3px solid var(--brand);border-radius:10px;padding:18px 18px 14px}
+  .point .pt{font-weight:700;font-size:14.5px;color:var(--brand-2);margin-bottom:8px}
+  .point p{font-size:13.5px;color:#41505f}
+  .point.warn{border-top-color:var(--accent)}
+  .point.warn .pt{color:var(--accent-2)}
+
+  .flow{display:flex;align-items:stretch;gap:8px;flex-wrap:wrap;margin-top:16px}
+  .flow .step{flex:1;min-width:150px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;text-align:center;font-size:13.5px;position:relative}
+  .flow .step b{display:block;font-size:14px;color:var(--brand-2);margin-bottom:4px}
+  .flow .arr{align-self:center;color:var(--muted);font-size:18px;font-weight:600}
+
+  .note{background:#fff8ed;border:1px solid #f3d9b8;border-left:4px solid var(--accent);border-radius:10px;padding:16px 20px;font-size:13.5px;color:#5b4320;margin-top:18px}
+
+  footer{margin-top:56px;padding-top:22px;border-top:1px solid var(--line);color:var(--muted);font-size:12.5px;text-align:center}
+  .databox{margin-top:10px}
+  .databox .row{display:grid;grid-template-columns:140px 1fr;gap:10px;padding:6px 0;border-bottom:1px dashed #edf2f6;font-size:13.5px}
+  .databox .row b{color:var(--brand-2)}
+  a{color:var(--brand);text-decoration:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hero">
+    <span class="kicker">数据库设计方案 · 参考对照</span>
+    <h1>积分记录表设计方案</h1>
+    <p>围绕「自定义奖惩分数 + 多业务模块联动 + 自动出分」的考核系统，先调研开源项目 <b>RankingBoard</b>，再与本项目「月度安全履职考核」的真实表结构做逐字段对照，给出可落地的设计建议。</p>
+    <div class="meta">
+      <span><b>对标开源</b> gwokwong/RankingBoard</span>
+      <span><b>对照现状</b> hse_assessment_deduction 等五张表</span>
+      <span><b>生成日期</b> 2026-08-27</span>
+    </div>
+  </div>
+
+  <!-- 1. 背景 -->
+  <section>
+    <h2><span class="no">1</span>研究背景</h2>
+    <div class="card">
+      <p class="lead">此前检索发现，GitHub 上没有完全等同「自定义奖惩分 + 模块联动 + 自动出分 + 月度周期」的现成开源系统；其中事件幂等、定时兜底、评分引擎多为企业自研。在候选项目里，<b>RankingBoard</b> 是最贴近「积分制管理 + 审批 + 排名」的开源项，故选定它作为表设计参考。</p>
+      <p class="lead">需要说明：<code>gwokwong/RankingBoard</code> 仓库<b>未公开任何建表脚本、实体类或数据库设计文档</b>（仅 README、CHANGELOG、LICENSE 与 23 张界面截图）。因此本文第 2 章是其功能暗示的「通用参考模型」，而非该仓库原始字段；第 3 章起为本项目真实的建表定义与对比。</p>
+    </div>
+  </section>
+
+  <!-- 2. RankingBoard 参考模型 -->
+  <section>
+    <h2><span class="no">2</span>RankingBoard 参考模型（功能推导）</h2>
+    <div class="card">
+      <p class="lead">README 明确其业务闭环："积分申请 → 多级审批 → 排名更新 → 福利兑换 → 数据分析"，并区分<b>固定积分</b>（学历/职称自动算分）与<b>动态积分</b>（任务/行为实时积分），支持积分补录与扣分替代罚款。据此可推导一套通用表模型：</p>
+      <table>
+        <thead><tr><th>表名</th><th>职责</th><th>关键字段</th></tr></thead>
+        <tbody>
+          <tr><td><code>points_rule</code></td><td>奖惩/固定项规则配置</td><td>rule_code、rule_name、rule_type、points、<b>is_fixed</b>、start_date/end_date、status</td></tr>
+          <tr><td><code>points_apply</code></td><td>积分申请 + 多级审批留痕</td><td>user_id、apply_type、biz_id、points、status、approver_id、approve_time、approve_comment、reason</td></tr>
+          <tr><td><code>points_record</code></td><td>积分流水（核心）</td><td>user_id、change_type、points(正加负减)、<b>balance_after</b>、biz_id/biz_type、source、status、approve_by、remark</td></tr>
+          <tr><td><code>user_points_balance</code></td><td>当前总积分（加速查询/排名）</td><td>user_id、total_points、last_updated</td></tr>
+          <tr><td><code>points_board</code></td><td>部门/员工排名</td><td>user_id、dept_id、points、rank、period</td></tr>
+        </tbody>
+      </table>
+      <div class="note">⚠ 表名与列名为<b>通用推导</b>，非 RankingBoard 原始定义。其 README 也未说明「审批状态放独立申请表还是流水表」——这是它留给实现者的取舍。</div>
+    </div>
+  </section>
+
+  <!-- 3. 本项目实际设计 -->
+  <section>
+    <h2><span class="no">3</span>本项目「月度自动考核」真实表设计</h2>
+    <div class="card">
+      <p class="lead">以下为本项目实际落库的建表定义（取自 <code>server/sql/sprint10d2_assessment_init.sql</code> 与 <code>sprint_assessment_auto_init.sql</code>），是与 RankingBoard 对照的真实基线。</p>
+
+      <h3>3.1 扣分明细表 <code>hse_assessment_deduction</code></h3>
+      <table>
+        <thead><tr><th>列名</th><th>类型</th><th>约束/默认</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td class="col-pk">id</td><td>BIGSERIAL</td><td class="col-req">PK</td><td>主键</td></tr>
+          <tr><td>score_id</td><td>BIGINT</td><td class="col-req">NOT NULL</td><td>关联评分记录</td></tr>
+          <tr><td>target_id</td><td>BIGINT</td><td class="col-req">NOT NULL</td><td>考核对象</td></tr>
+          <tr><td>cycle_id</td><td>BIGINT</td><td class="col-req">NOT NULL</td><td>考核周期</td></tr>
+          <tr><td>metric_id</td><td>BIGINT</td><td>可空（经 ALTER 放宽）</td><td>指标，引擎按 metric_code 扣分时可能为 null</td></tr>
+          <tr><td>metric_code</td><td>VARCHAR(50)</td><td class="col-req">NOT NULL</td><td>指标编码，如 HSE-KPI-RESP-004</td></tr>
+          <tr><td>deduction_item</td><td>VARCHAR(100)</td><td class="col-req">NOT NULL</td><td>扣分项名称</td></tr>
+          <tr><td>deduction_type</td><td>VARCHAR(30)</td><td class="col-req">NOT NULL</td><td>扣分类型</td></tr>
+          <tr><td>deduction_source</td><td>VARCHAR(30)</td><td class="col-req">NOT NULL</td><td>来源：<code>auto/import/manual</code></td></tr>
+          <tr><td>source_table / source_id</td><td>VARCHAR(50) / BIGINT</td><td>可空</td><td>业务来源表/记录</td></tr>
+          <tr><td>source_detail</td><td>JSONB</td><td>可空</td><td>来源详情快照（供追溯/审计）</td></tr>
+          <tr><td>suggested_score</td><td>NUMERIC(6,2)</td><td class="col-req">NOT NULL</td><td>引擎建议扣分</td></tr>
+          <tr><td>confirmed_score</td><td>NUMERIC(6,2)</td><td>可空</td><td>审核确认扣分</td></tr>
+          <tr><td>current_version</td><td>INT</td><td>DEFAULT 1</td><td>评分版本</td></tr>
+          <tr><td>review_status</td><td>VARCHAR(20)</td><td>DEFAULT 'pending'</td><td>考核/审核状态</td></tr>
+          <tr><td>review_id</td><td>BIGINT</td><td>可空</td><td>审核人/审核单</td></tr>
+          <tr><td>violation_level / date / id / name</td><td>VARCHAR/DATE/BIGINT/VARCHAR</td><td>可空</td><td>违章等级、日期、违规人</td></tr>
+          <tr><td>is_transmission</td><td>BOOLEAN</td><td>DEFAULT FALSE</td><td>是否上级传导扣分</td></tr>
+          <tr><td>remark / is_deleted / created_at / updated_at</td><td>TEXT/BOOL/TZ/TZ</td><td>—</td><td>通用审计字段</td></tr>
+        </tbody>
+      </table>
+
+      <h3>3.2 事件幂等表 <code>hse_assessment_event_log</code></h3>
+      <div class="sql"><span class="cm">-- RankingBoard 不具备的能力：跨模块事件消费的唯一性保障</span>
+<span class="kw">CREATE TABLE IF NOT EXISTS</span> <span class="k">hse_assessment_event_log</span> (
+  id            <span class="kw">BIGSERIAL</span> <span class="kw">PRIMARY KEY</span>,
+  event_type    <span class="kw">VARCHAR(50)</span>  <span class="kw">NOT NULL</span>,
+  event_key     <span class="kw">VARCHAR(200)</span> <span class="kw">NOT NULL</span>,  <span class="cm">-- 如 VIOLATION_CREATED:123</span>
+  payload       <span class="kw">JSONB</span>,
+  status        <span class="kw">VARCHAR(20)</span> <span class="kw">DEFAULT</span> 'pending',
+  related_cycle_id <span class="kw">BIGINT</span>,
+  processed_at  <span class="kw">TIMESTAMPTZ</span>,
+  created_at    <span class="kw">TIMESTAMPTZ</span> <span class="kw">NOT NULL</span> <span class="kw">DEFAULT</span> NOW(),
+  <span class="kw">CONSTRAINT</span> uq_assessment_event <span class="kw">UNIQUE</span> (event_type, event_key) <span class="cm">-- 同一业务事件只消费一次</span>
+);</div>
+      <p class="note" style="margin-top:12px">该表<b>禁止 DELETE</b>（触发器拦截），保证审计完整性；每日定时扫描作为幂等兜底，实时发布作为主链路。</p>
+
+      <h3>3.3 其余三张支柱表</h3>
+      <table>
+        <thead><tr><th>表名</th><th>职责</th><th>要点</th></tr></thead>
+        <tbody>
+          <tr><td><code>hse_assessment_cycle</code></td><td>考核周期</td><td>cycle_code 唯一、status 生命周期、year/month + target/scored/reviewed/frozen 计数快照</td></tr>
+          <tr><td><code>hse_assessment_target</code></td><td>考核对象</td><td>score_auto / score_manual / score_bonus / score_total 四分、grade、rank、review_status、appeal</td></tr>
+          <tr><td><code>hse_assessment_score</code></td><td>指标评分记录</td><td>metric_code、raw_value、deduction_total、original/final_score、is_auto、data_sources JSONB、(target_id, metric_id) 唯一</td></tr>
+        </tbody>
+      </table>
+
+      <div class="flow">
+        <div class="step"><b>业务模块</b>隐患/违章/事故/会议/任务/网格</div>
+        <div class="arr">→</div>
+        <div class="step"><b>事件发布</b>实时 + 每日扫描兜底</div>
+        <div class="arr">→</div>
+        <div class="step"><b>幂等消费</b>event_log 唯一约束</div>
+        <div class="arr">→</div>
+        <div class="step"><b>评分引擎</b>写 deduction 明细</div>
+        <div class="arr">→</div>
+        <div class="step"><b>自动出分</b>score_auto = 100 − Σ</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4. 逐字段对照 -->
+  <section>
+    <h2><span class="no">4</span>RankingBoard 参考 vs 本项目：逐字段对照</h2>
+    <div class="card">
+      <table>
+        <thead><tr><th>维度 / 字段</th><th>RankingBoard 参考模型</th><th>本项目 hse_assessment_deduction</th><th>对照结论</th></tr></thead>
+        <tbody>
+          <tr><td>变动对象</td><td>user_id（对个人积分）</td><td>target_id + cycle_id（对周期内考核对象）</td><td><span class="tag tag-ok">更强</span> 具备周期绑定，支持按月度溯因</td></tr>
+          <tr><td>加减方向</td><td>points 正负号区分</td><td>仅 suggested_score 扣分，加分走 score_bonus 列</td><td><span class="tag tag-warn">口径差异</span> 本项目按「100 − 有效扣分合计」，加分独立存储</td></tr>
+          <tr><td>业务溯源</td><td>biz_id + biz_type</td><td>source_table + source_id + source_detail(JSONB)</td><td><span class="tag tag-ok">更强</span> JSONB 快照便于审计断裂追溯</td></tr>
+          <tr><td>审批流程</td><td>独立 apply 表或流水 status</td><td>review_status 承载在流水表 + confirmed_score</td><td><span class="tag tag-ok">等效</span> 已选「流水承载审核态」方案</td></tr>
+          <tr><td>规则配置</td><td>points_rule（含 is_fixed）</td><td>metrics 按 metric_code 逻辑内嵌扣分梯度</td><td><span class="tag tag-warn">待增强</span> 阈值/梯度目前写死在引擎，未独立配置表</td></tr>
+          <tr><td>实时余额</td><td>balance_after + 汇总表</td><td>未存实时余额，分数由扣分明细实时合计</td><td><span class="tag tag-diff">可借鉴</span> 见第 5 章建议</td></tr>
+          <tr><td>幂等/防重</td><td>无</td><td>event_log 唯一约束 + 防删触发器</td><td><span class="tag tag-ok">更强</span> 自动化出分的可靠基石</td></tr>
+          <tr><td>版本/审计</td><td>approve_comment、remark</td><td>current_version、review_status、remark</td><td><span class="tag tag-ok">等效</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 5. 借鉴与建议 -->
+  <section>
+    <h2><span class="no">5</span>可落地的设计建议</h2>
+    <div class="card">
+      <div class="grid3">
+        <div class="point">
+          <div class="pt">建议一 · 补充 balance_after</div>
+          <p>在 <code>hse_assessment_deduction</code> 追加变端后快照 <code>balance_after NUMERIC(6,2)</code>，记录每次扣分生效后的累计结果，避免高分目标在查询明细时逐条重算，显著降低「扣分明细 ÷ 总分」推导的复杂度。</p>
+        </div>
+        <div class="point warn">
+          <div class="pt">建议二 · 抽离规则配置表</div>
+          <p>将引擎内嵌的指标梯度（频率阈值 × 扣分分值）抽为独立配置表（如 <code>hse_assessment_metric_rule</code>），对齐 RankingBoard 的 <code>points_rule</code> + <code>is_fixed</code> 思想，使「自定义奖惩分数」真正可配置、可灰度。</p>
+        </div>
+        <div class="point">
+          <div class="pt">建议三 · 沉淀周期汇总快照</div>
+          <p>参考其 user_points_balance / points_board，在冻结周期时沉淀 <code>score_auto</code> 快照（AUTO_TOTAL_SNAPSHOT），保证历史分数不随明细调整而漂移，满足审计口径。</p>
+        </div>
+      </div>
+      <div class="note">核心取向：本项目在<b>自动化出分链路</b>（事件幂等、周期绑定、JSONB 溯源、防删审计）上已明显领先 RankingBoard；可主要借鉴其「实时余额快照」与「规则配置独立化」两点。不建议引入它偏「福利兑换/积分商城」的模块。</div>
+    </div>
+  </section>
+
+  <!-- 6. 结论 -->
+  <section>
+    <h2><span class="no">6</span>结论</h2>
+    <div class="card">
+      <p class="lead">RankingBoard 提供了「积分制考核」参考价值（固定/动态积分并存、申请·审批·生效流程、积分补录、多级审批沉淀），但仓库层未开源表结构，且其偏「激励/兑换」而非「安全考核自動扣分」。本项目真实表设计在核心诉求上已覆盖甚至超出该模型的绝大部分字段，两者定位不同。</p>
+      <p class="lead">结论：<b>不改动现有主链路</b>，仅在后续迭代按第 5 章三条建议做增量增强即可；无需参照 RankingBoard 重建积分流水。</p>
+    </div>
+  </section>
+
+  <footer>
+    积分记录表设计方案 · HSE 安全看板 · 月度安全履职考核模块 · 生成于 2026-08-27
+  </footer>
+</div>
+</body>
+</html>

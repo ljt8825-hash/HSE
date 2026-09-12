@@ -1,0 +1,2495 @@
+/**
+ * 应急管理路由 - PostgreSQL + 内存降级双模式
+ *
+ * 路由结构:
+ *   /plans           → 应急预案列表
+ *   /plans/:id       → 应急预案详情
+ *   /drills          → 演练记录列表
+ *   /drills/:id      → 演练记录详情
+ *   /stats           → 应急统计
+ */
+
+const express = require('express');
+const router = express.Router();
+const { pool, isConnected } = require('../config/db');
+const { success, error } = require('../middleware/response');
+const { paginateMemory, buildListResponse, sendNotFound, buildMemoryRecord, camelKeys } = require('../utils/commonResponse');
+const { uploadDocument, getFileUrl, fixFilenameEncoding } = require('../middleware/upload');
+const { auditLog } = require('./audit');
+const { requireRole } = require('../middleware/auth');
+
+// ========== 数据库表初始化（IF NOT EXISTS，可重复执行） ==========
+let tablesInitialized = false;
+
+async function ensureTables() {
+  if (tablesInitialized) return;
+  if (!isConnected()) return;
+  try {
+    // 1. 预案附件表
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS emergency_plan_attachments (
+        id            BIGSERIAL PRIMARY KEY,
+        plan_id       BIGINT NOT NULL,
+        filename      VARCHAR(255) NOT NULL,
+        original_name VARCHAR(255) NOT NULL,
+        file_type     VARCHAR(64) NOT NULL DEFAULT 'document',
+        file_size     BIGINT NOT NULL DEFAULT 0,
+        file_url      VARCHAR(512) NOT NULL,
+        version       VARCHAR(32) NOT NULL DEFAULT '1.0',
+        uploaded_by   VARCHAR(64),
+        is_latest     BOOLEAN NOT NULL DEFAULT TRUE,
+        is_deleted    BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_plan_attachments_plan ON emergency_plan_attachments(plan_id)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_plan_attachments_latest ON emergency_plan_attachments(plan_id, is_latest) WHERE is_deleted = FALSE');
+
+    // 2. 预案版本履历表
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS emergency_plan_versions (
+        id             BIGSERIAL PRIMARY KEY,
+        plan_id        BIGINT NOT NULL,
+        version        VARCHAR(32) NOT NULL,
+        change_type    VARCHAR(32) NOT NULL DEFAULT 'update',
+        change_summary TEXT,
+        changed_by     VARCHAR(64),
+        snapshot       JSONB,
+        created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_plan_versions_plan ON emergency_plan_versions(plan_id)');
+
+    tablesInitialized = true;
+    console.log('[Emergency] 数据库表 attachments/versions 已就绪');
+  } catch (err) {
+    console.warn('[Emergency] 数据库表初始化失败:', err.message);
+  }
+}
+
+// ========== 内存降级存储 ==========
+let memoryPlans = [];
+let memoryDrills = [];
+let planIdCounter = 1;
+let drillIdCounter = 1;
+let memoryPlanAttachments = [];
+let memoryPlanAttachmentIdCounter = 1;
+let memoryPlanVersions = [];
+let memoryPlanVersionIdCounter = 1;
+
+function initMemoryData() {
+  if (memoryPlans.length > 0) return;
+  // 种子数据已移除，内存模式仅用于 API 兼容性（空数据）
+  memoryPlans = [];
+  memoryDrills = [];
+  planIdCounter = 1;
+  drillIdCounter = 1;
+  memoryPlanAttachments = [];
+  memoryPlanAttachmentIdCounter = 1;
+  memoryPlanVersions = [];
+  memoryPlanVersionIdCounter = 1;
+}
+
+// ========== 时效状态计算（临期/过期/正常） ==========
+// 规则：基于 effective_date + validity_period(月) 计算到期日
+// - 过期：当前日期 > 到期日
+// - 临期：距到期日 ≤ 30 天（含已过期）
+// - 正常：距到期日 > 30 天 或 长期有效（validity_period 为空）
+function calcExpiryStatus(expiryDate) {
+  if (!expiryDate) return 'permanent';
+  const now = new Date();
+  const expiry = new Date(expiryDate);
+  const diffDays = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
+  if (diffDays < 0) return 'expired';
+  if (diffDays <= 30) return 'expiring';
+  return 'valid';
+}
+
+// ========== formatRow: emergency_plans → 前端格式 ==========
+function formatPlanRow(row) {
+  const effectiveDate = row.effective_date || null;
+  const validityPeriod = row.validity_period || null;
+  return {
+    id: Number(row.id),
+    title: row.name || '',
+    type: row.type || 'other',
+    level: row.level || 'level4',
+    status: row.status || 'active',
+    department: row.responsible_dept || '',
+    responsiblePerson: row.responsible_person || '',
+    // P0-3: 预案责任人关联员工ID（花名册为基石）
+    responsiblePersonId: row.responsible_person_id || null,
+    contactPhone: row.contact_phone || '',
+    description: row.description || '',
+    procedures: row.plan_content || '',
+    resources: row.remark || '',
+    version: row.version || 'v1.0',
+    location: row.location || '',
+    planContent: row.plan_content || '',
+    effectiveDate: effectiveDate,
+    expiryDate: row.expiry_date || null,
+    validityPeriod: validityPeriod,
+    expiryStatus: calcExpiryStatus(row.expiry_date),
+    lastDrillDate: row.last_drill_date || null,
+    attachmentUrl: row.attachment_url || '',
+    remark: row.remark || '',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    name: row.name,
+    responsible_dept: row.responsible_dept,
+    responsible_person: row.responsible_person,
+    contact_phone: row.contact_phone,
+    plan_content: row.plan_content,
+    effective_date: row.effective_date,
+    expiry_date: row.expiry_date,
+    validity_period: row.validity_period,
+    last_drill_date: row.last_drill_date,
+    attachment_url: row.attachment_url,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+// ========== formatDrillRow: emergency_drills → 前端格式 ==========
+function formatDrillRow(row) {
+  return camelKeys({
+    id: Number(row.id),
+    no: row.no || '',
+    drillDate: row.drill_date,
+    township: row.township || '',
+    name: row.name || '',
+    drillLevel: row.drill_level || '',
+    drillType: row.drill_type || 'tabletop',
+    participants: row.participants || 0,
+    duration: row.duration || 0,
+    location: row.location || '',
+    organizer: row.organizer || '',
+    result: row.result || 'pass',
+    remark: row.remark || '',
+    status: row.status || '已完成',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    // 保留 snake_case 原始值供导出等场景使用
+    drill_date: row.drill_date,
+    drill_level: row.drill_level,
+    drill_type: row.drill_type,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  });
+}
+
+// ============================================================
+// 应急预案 CRUD
+// ============================================================
+
+// ========== GET /plans/stats — 预案统计 ==========
+router.get('/plans/stats', async (req, res) => {
+  try {
+    if (!isConnected()) {
+      initMemoryData();
+      const plans = memoryPlans.filter(r => !r.is_deleted);
+      return res.json(success({
+        total: plans.length,
+        published: plans.filter(p => p.status === 'active' || p.status === 'published').length,
+        pendingReview: plans.filter(p => p.status === 'pending' || p.status === 'review').length,
+        byType: {},
+      }, '统计成功(内存模式)'));
+    }
+    const [totalR, pubR, pendR, typeR] = await Promise.all([
+      pool.query('SELECT COUNT(*)::int AS total FROM emergency_plans WHERE is_deleted = false'),
+      pool.query("SELECT COUNT(*)::int AS count FROM emergency_plans WHERE is_deleted = false AND status IN ('active', 'published')"),
+      pool.query("SELECT COUNT(*)::int AS count FROM emergency_plans WHERE is_deleted = false AND status IN ('pending', 'review')"),
+      pool.query("SELECT type, COUNT(*)::int AS count FROM emergency_plans WHERE is_deleted = false GROUP BY type"),
+    ]);
+    const byType = {};
+    typeR.rows.forEach(r => { byType[r.type || 'unknown'] = parseInt(r.count); });
+    res.json(success({
+      total: parseInt(totalR.rows[0].total),
+      published: parseInt(pubR.rows[0].count),
+      pendingReview: parseInt(pendR.rows[0].count),
+      byType,
+    }, '统计成功'));
+  } catch (err) { res.json(error(-1, err.message)); }
+});
+
+// ========== GET /plans — 预案列表 ==========
+router.get('/plans', async (req, res) => {
+  try {
+    const { page = 1, pageSize = 20, keyword, type, level, status } = req.query;
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.min(Math.max(1, parseInt(pageSize) || 10), 200);
+    const offset = (pageNum - 1) * limitNum;
+
+    if (!isConnected()) {
+      initMemoryData();
+      let data = memoryPlans.filter(r => !r.is_deleted);
+      if (keyword) {
+        const kw = keyword.toLowerCase();
+        data = data.filter(r =>
+          (r.title && r.title.toLowerCase().includes(kw)) ||
+          (r.description && r.description.toLowerCase().includes(kw))
+        );
+      }
+      if (type) data = data.filter(r => r.type === type);
+      if (level) data = data.filter(r => r.level === level);
+      if (status) data = data.filter(r => r.status === status);
+      const { list: rawList, total } = paginateMemory(data, pageNum, limitNum);
+      const list = rawList.map(r => ({
+        ...r,
+        expiryStatus: calcExpiryStatus(r.expiryDate),
+      }));
+      return buildListResponse(res, list, total, pageNum, limitNum, '查询成功(内存模式)');
+    }
+
+    const conditions = [];
+    const params = [];
+    let paramIdx = 1;
+
+    if (keyword) {
+      conditions.push(`(name ILIKE $${paramIdx++} OR description ILIKE $${paramIdx++})`);
+      params.push(`%${keyword}%`, `%${keyword}%`);
+    }
+    if (type) { conditions.push(`type = $${paramIdx++}`); params.push(type); }
+    if (level) { conditions.push(`level = $${paramIdx++}`); params.push(level); }
+    if (status) { conditions.push(`status = $${paramIdx++}`); params.push(status); }
+
+    conditions.push('is_deleted = false');
+    const whereClause = `WHERE ${conditions.join(' AND ')}`;
+
+    const countResult = await pool.query(`SELECT COUNT(*)::int AS total FROM emergency_plans ${whereClause}`, params);
+    const total = countResult.rows[0].total;
+
+    params.push(limitNum, offset);
+    const result = await pool.query(
+      `SELECT * FROM emergency_plans ${whereClause} ORDER BY created_at DESC LIMIT $${paramIdx++} OFFSET $${paramIdx++}`,
+      params
+    );
+
+    res.json(success({ list: result.rows.map(formatPlanRow), total, page: pageNum, pageSize: limitNum }, '查询成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ============================================================
+// 报表导出端点（必须定义在 /:id 之前，避免被参数路由遮蔽）
+// ============================================================
+
+// ========== GET /plans/export — 导出预案清单（CSV） ==========
+router.get('/plans/export', requireRole('admin', 'safety_manager'), async (req, res, next) => {
+  try {
+    if (!isConnected()) {
+      initMemoryData();
+      const data = memoryPlans.filter(r => !r.is_deleted).map(r => ({
+        ...r,
+        expiry_status: calcExpiryStatus(r.expiryDate),
+      }));
+      return sendPlanCsvExport(res, data);
+    }
+
+    const result = await pool.query(`
+      SELECT id, name, type, level, responsible_dept, responsible_person,
+             contact_phone, effective_date, expiry_date, status, remark
+      FROM emergency_plans WHERE is_deleted = FALSE ORDER BY created_at DESC
+    `);
+    const list = result.rows.map(r => ({
+      ...r,
+      expiry_status: calcExpiryStatus(r.expiry_date),
+    }));
+    sendPlanCsvExport(res, list);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ========== GET /plans/:id — 单条预案 ==========
+router.get('/plans/:id', async (req, res) => {
+  try {
+    if (!isConnected()) {
+      initMemoryData();
+      const record = memoryPlans.find(r => r.id === parseInt(req.params.id) && !r.is_deleted);
+      if (!record) return sendNotFound(res);
+      return res.json(success(record, '查询成功(内存模式)'));
+    }
+    const result = await pool.query('SELECT * FROM emergency_plans WHERE id = $1 AND is_deleted = false', [req.params.id]);
+    if (result.rows.length === 0) return res.json(error(-2, '记录不存在'));
+    res.json(success(formatPlanRow(result.rows[0]), '查询成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ========== POST /plans — 创建预案 ==========
+router.post('/plans', requireRole('admin', 'safety_manager'), async (req, res) => {
+  try {
+    const b = req.body;
+    if (!isConnected()) {
+      initMemoryData();
+      const record = {
+        id: planIdCounter++,
+        title: b.title || '',
+        type: b.type || 'other',
+        level: b.level || 'level4',
+        status: b.status || 'active',
+        department: b.department || '',
+        responsiblePerson: b.responsiblePerson || '',
+        contactPhone: b.contactPhone || '',
+        description: b.description || '',
+        procedures: b.procedures || '',
+        resources: b.resources || '',
+        version: b.version || 'v1.0',
+        location: b.location || '',
+        is_deleted: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      memoryPlans.push(record);
+      return res.json(success(record, '创建成功(内存模式)'));
+    }
+
+    const result = await pool.query(`
+      INSERT INTO emergency_plans (name, type, level, location, description, responsible_dept, responsible_person, contact_phone, plan_content, attachment_url, status, effective_date, expiry_date, last_drill_date, remark, responsible_person_id)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+      RETURNING *
+    `, [
+      b.title || b.name || '',
+      b.type || 'other',
+      b.level || 'level4',
+      b.location || '',
+      b.description || '',
+      b.department || b.responsible_dept || '',
+      b.responsiblePerson || b.responsible_person || '',
+      b.contactPhone || b.contact_phone || '',
+      b.procedures || b.planContent || b.plan_content || '',
+      b.attachmentUrl || b.attachment_url || '',
+      b.status || 'active',
+      b.effectiveDate || b.effective_date || null,
+      b.expiryDate || b.expiry_date || null,
+      b.lastDrillDate || b.last_drill_date || null,
+      b.remark || b.resources || '',
+      b.responsiblePersonId || b.responsible_person_id || null,
+    ]);
+
+    await auditLog({ userId: req.user?.id, username: req.user?.username, action: 'create', module: 'emergency', description: `创建应急预案: ${b.title || b.name}`, ip: req.ip }).catch(() => {});
+    res.json(success(formatPlanRow(result.rows[0]), '创建成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ========== PUT /plans/:id — 更新预案 ==========
+router.put('/plans/:id', requireRole('admin', 'safety_manager'), async (req, res) => {
+  try {
+    const b = req.body;
+    if (!isConnected()) {
+      initMemoryData();
+      const idx = memoryPlans.findIndex(r => r.id === parseInt(req.params.id) && !r.is_deleted);
+      if (idx === -1) return res.json(error(-2, '记录不存在'));
+      Object.assign(memoryPlans[idx], b, { updatedAt: new Date().toISOString() });
+      return res.json(success(memoryPlans[idx], '更新成功(内存模式)'));
+    }
+
+    const result = await pool.query(`
+      UPDATE emergency_plans SET
+        name = COALESCE($1, name),
+        type = COALESCE($2, type),
+        level = COALESCE($3, level),
+        location = COALESCE($4, location),
+        description = COALESCE($5, description),
+        responsible_dept = COALESCE($6, responsible_dept),
+        responsible_person = COALESCE($7, responsible_person),
+        contact_phone = COALESCE($8, contact_phone),
+        plan_content = COALESCE($9, plan_content),
+        attachment_url = COALESCE($10, attachment_url),
+        status = COALESCE($11, status),
+        effective_date = COALESCE($12, effective_date),
+        expiry_date = COALESCE($13, expiry_date),
+        last_drill_date = COALESCE($14, last_drill_date),
+        remark = COALESCE($15, remark),
+        responsible_person_id = COALESCE($16, responsible_person_id),
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $17 AND is_deleted = false RETURNING *
+    `, [
+      b.title || b.name || null,
+      b.type || null,
+      b.level || null,
+      b.location || null,
+      b.description || null,
+      b.department || b.responsible_dept || null,
+      b.responsiblePerson || b.responsible_person || null,
+      b.contactPhone || b.contact_phone || null,
+      b.procedures || b.planContent || b.plan_content || null,
+      b.attachmentUrl || b.attachment_url || null,
+      b.status || null,
+      b.effectiveDate || b.effective_date || null,
+      b.expiryDate || b.expiry_date || null,
+      b.lastDrillDate || b.last_drill_date || null,
+      b.remark || b.resources || null,
+      b.responsiblePersonId || b.responsible_person_id || null,
+      req.params.id,
+    ]);
+
+    if (result.rows.length === 0) return res.json(error(-2, '记录不存在'));
+    await auditLog({ userId: req.user?.id, username: req.user?.username, action: 'update', module: 'emergency', description: `更新应急预案 ID=${req.params.id}`, ip: req.ip }).catch(() => {});
+    res.json(success(formatPlanRow(result.rows[0]), '更新成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ========== DELETE /plans/:id — 删除预案 ==========
+router.delete('/plans/:id', requireRole('admin', 'safety_manager'), async (req, res) => {
+  try {
+    if (!isConnected()) {
+      initMemoryData();
+      const record = memoryPlans.find(r => r.id === parseInt(req.params.id) && !r.is_deleted);
+      if (!record) return res.json(error(-2, '记录不存在'));
+      record.is_deleted = true;
+      return res.json(success(null, '删除成功(内存模式)'));
+    }
+
+    const result = await pool.query(
+      'UPDATE emergency_plans SET is_deleted = true, updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND is_deleted = false RETURNING id',
+      [req.params.id]
+    );
+    if (result.rows.length === 0) return res.json(error(-2, '记录不存在'));
+
+    await auditLog({ userId: req.user?.id, username: req.user?.username, action: 'delete', module: 'emergency', description: `删除应急预案 ID=${req.params.id}`, ip: req.ip }).catch(() => {});
+    res.json(success(null, '删除成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ============================================================
+// 演练记录 CRUD
+// ============================================================
+
+// ========== GET /drills/stats — 演练统计 ==========
+router.get('/drills/stats', async (req, res) => {
+  try {
+    const currentYear = new Date().getFullYear();
+    const yearStart = `${currentYear}-01-01`;
+    if (!isConnected()) {
+      initMemoryData();
+      const drills = memoryDrills.filter(r => !r.is_deleted);
+      const yearDrills = drills.filter(d => {
+        const dd = new Date(d.drillDate || d.drill_date);
+        return dd.getFullYear() === currentYear;
+      });
+      const passDrills = yearDrills.filter(d => d.result === 'pass' || d.result === 'excellent').length;
+      const failDrills = yearDrills.filter(d => d.result && !['pass', 'excellent'].includes(d.result)).length;
+      return res.json(success({
+        total: drills.length,
+        yearCount: yearDrills.length,
+        passRate: yearDrills.length > 0 ? Math.round((passDrills / yearDrills.length) * 100) : 0,
+        participantsTotal: drills.reduce((s, d) => s + (d.participants || 0), 0),
+        failed: failDrills,
+      }, '统计成功(内存模式)'));
+    }
+    const [totalR, yearR, passR, partR, failR] = await Promise.all([
+      pool.query('SELECT COUNT(*)::int AS total FROM emergency_drills WHERE is_deleted = false'),
+      pool.query('SELECT COUNT(*)::int AS total FROM emergency_drills WHERE is_deleted = false AND drill_date >= $1', [yearStart]),
+      pool.query("SELECT COUNT(*)::int AS count FROM emergency_drills WHERE is_deleted = false AND drill_date >= $1 AND result IN ('pass', 'excellent')", [yearStart]),
+      pool.query('SELECT COALESCE(SUM(participants), 0)::int AS total FROM emergency_drills WHERE is_deleted = false'),
+      pool.query("SELECT COUNT(*)::int AS count FROM emergency_drills WHERE is_deleted = false AND drill_date >= $1 AND result NOT IN ('pass', 'excellent')", [yearStart]),
+    ]);
+    const yearCount = parseInt(yearR.rows[0].total);
+    const passCount = parseInt(passR.rows[0].count);
+    const failCount = parseInt(failR.rows[0].count);
+    res.json(success({
+      total: parseInt(totalR.rows[0].total),
+      yearCount,
+      passRate: yearCount > 0 ? Math.round((passCount / yearCount) * 100) : 0,
+      participantsTotal: parseInt(partR.rows[0].total),
+      failed: failCount,
+    }, '统计成功'));
+  } catch (err) { res.json(error(-1, err.message)); }
+});
+
+// ========== GET /drills — 演练记录列表 ==========
+router.get('/drills', async (req, res) => {
+  try {
+    const { page = 1, pageSize = 20, keyword, drillType, result: resultFilter, planId } = req.query;
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.min(Math.max(1, parseInt(pageSize) || 10), 200);
+    const offset = (pageNum - 1) * limitNum;
+
+    if (!isConnected()) {
+      initMemoryData();
+      let data = memoryDrills.filter(r => !r.is_deleted);
+      if (keyword) {
+        const kw = keyword.toLowerCase();
+        data = data.filter(r =>
+          (r.name && r.name.toLowerCase().includes(kw)) ||
+          (r.township && r.township.toLowerCase().includes(kw)) ||
+          (r.organizer && r.organizer.toLowerCase().includes(kw))
+        );
+      }
+      if (drillType) data = data.filter(r => r.drillType === drillType);
+      if (resultFilter) data = data.filter(r => r.result === resultFilter);
+      const { list, total } = paginateMemory(data, pageNum, limitNum);
+      return buildListResponse(res, list, total, pageNum, limitNum, '查询成功(内存模式)');
+    }
+
+    const conditions = [];
+    const params = [];
+    let paramIdx = 1;
+
+    if (keyword) {
+      conditions.push(`(name ILIKE $${paramIdx++} OR township ILIKE $${paramIdx++} OR organizer ILIKE $${paramIdx++})`);
+      params.push(`%${keyword}%`, `%${keyword}%`, `%${keyword}%`);
+    }
+    if (drillType) { conditions.push(`drill_type = $${paramIdx++}`); params.push(drillType); }
+    if (resultFilter) { conditions.push(`result = $${paramIdx++}`); params.push(resultFilter); }
+
+    conditions.push('is_deleted = false');
+    const whereClause = `WHERE ${conditions.join(' AND ')}`;
+
+    const countResult = await pool.query(`SELECT COUNT(*)::int AS total FROM emergency_drills ${whereClause}`, params);
+    const total = countResult.rows[0].total;
+
+    params.push(limitNum, offset);
+    const result = await pool.query(
+      `SELECT * FROM emergency_drills ${whereClause} ORDER BY drill_date DESC NULLS LAST, id DESC LIMIT $${paramIdx++} OFFSET $${paramIdx++}`,
+      params
+    );
+
+    res.json(success({ list: result.rows.map(formatDrillRow), total, page: pageNum, pageSize: limitNum }, '查询成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ========== GET /drills/export — 导出演练记录（CSV） ==========
+router.get('/drills/export', requireRole('admin', 'safety_manager'), async (req, res, next) => {
+  try {
+    if (!isConnected()) {
+      initMemoryData();
+      const data = memoryDrills.filter(r => !r.is_deleted);
+      return sendDrillCsvExport(res, data);
+    }
+
+    const result = await pool.query(`
+      SELECT id, no, drill_date, township, name, drill_level, drill_type, participants,
+             duration, location, organizer, result, remark, status, created_at
+      FROM emergency_drills WHERE is_deleted = FALSE ORDER BY drill_date DESC NULLS LAST, id DESC
+    `);
+    sendDrillCsvExport(res, result.rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ========== GET /drills/:id — 单条演练 ==========
+router.get('/drills/:id', async (req, res) => {
+  try {
+    if (!isConnected()) {
+      initMemoryData();
+      const record = memoryDrills.find(r => r.id === parseInt(req.params.id) && !r.is_deleted);
+      if (!record) return sendNotFound(res);
+      return res.json(success(record, '查询成功(内存模式)'));
+    }
+    const result = await pool.query('SELECT * FROM emergency_drills WHERE id = $1 AND is_deleted = false', [req.params.id]);
+    if (result.rows.length === 0) return res.json(error(-2, '记录不存在'));
+    res.json(success(formatDrillRow(result.rows[0]), '查询成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ========== POST /drills — 创建演练记录 ==========
+router.post('/drills', requireRole('admin', 'safety_manager'), async (req, res) => {
+  try {
+    const b = req.body;
+    if (!isConnected()) {
+      initMemoryData();
+      const record = {
+        id: drillIdCounter++,
+        planId: b.planId || null,
+        planTitle: b.planTitle || '',
+        drillType: b.drillType || 'tabletop',
+        drillDate: b.drillDate || new Date().toISOString().slice(0, 10),
+        location: b.location || '',
+        participants: b.participants || 0,
+        duration: b.duration || 0,
+        result: b.result || 'pass',
+        summary: b.summary || '',
+        improvements: b.improvements || '',
+        evaluator: b.evaluator || '',
+        is_deleted: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      memoryDrills.push(record);
+      return res.json(success(record, '创建成功(内存模式)'));
+    }
+
+    const insertResult = await pool.query(`
+      INSERT INTO emergency_drills (no, drill_date, township, name, drill_level, drill_type, participants, duration, location, organizer, result, remark, status)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *
+    `, [
+      b.no || `DR${Date.now()}`,
+      b.drillDate || b.drill_date || null,
+      b.township || '',
+      b.name || '',
+      b.drillLevel || b.drill_level || '',
+      b.drillType || b.drill_type || 'tabletop',
+      b.participants || 0,
+      b.duration || 0,
+      b.location || '',
+      b.organizer || '',
+      b.result || 'pass',
+      b.remark || '',
+      b.status || '已完成',
+    ]);
+
+    await auditLog({ userId: req.user?.id, username: req.user?.username, action: 'create', module: 'emergency', description: `创建演练记录: ${b.name || b.no}`, ip: req.ip }).catch(() => {});
+    res.json(success(formatDrillRow(insertResult.rows[0]), '创建成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ========== PUT /drills/:id — 更新演练记录 ==========
+router.put('/drills/:id', requireRole('admin', 'safety_manager'), async (req, res) => {
+  try {
+    const b = req.body;
+    if (!isConnected()) {
+      initMemoryData();
+      const idx = memoryDrills.findIndex(r => r.id === parseInt(req.params.id) && !r.is_deleted);
+      if (idx === -1) return res.json(error(-2, '记录不存在'));
+      Object.assign(memoryDrills[idx], b, { updatedAt: new Date().toISOString() });
+      return res.json(success(memoryDrills[idx], '更新成功(内存模式)'));
+    }
+
+    const updateResult = await pool.query(`
+      UPDATE emergency_drills SET
+        no = COALESCE($1, no), drill_date = COALESCE($2, drill_date),
+        township = COALESCE($3, township), name = COALESCE($4, name),
+        drill_level = COALESCE($5, drill_level), drill_type = COALESCE($6, drill_type),
+        participants = COALESCE($7, participants), duration = COALESCE($8, duration),
+        location = COALESCE($9, location), organizer = COALESCE($10, organizer),
+        result = COALESCE($11, result), remark = COALESCE($12, remark),
+        status = COALESCE($13, status), updated_at = CURRENT_TIMESTAMP
+      WHERE id = $14 AND is_deleted = false RETURNING *`,
+      [b.no || null, b.drillDate || b.drill_date || null, b.township || null, b.name || null,
+       b.drillLevel || b.drill_level || null, b.drillType || b.drill_type || null, b.participants || null,
+       b.duration || null, b.location || null, b.organizer || null, b.result || null, b.remark || null,
+       b.status || null, req.params.id]);
+
+    if (updateResult.rows.length === 0) return res.json(error(-2, '记录不存在'));
+    await auditLog({ userId: req.user?.id, username: req.user?.username, action: 'update', module: 'emergency', description: `更新演练记录 ID=${req.params.id}`, ip: req.ip }).catch(() => {});
+    res.json(success(formatDrillRow(updateResult.rows[0]), '更新成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ========== DELETE /drills/:id — 删除演练记录 ==========
+router.delete('/drills/:id', requireRole('admin', 'safety_manager'), async (req, res) => {
+  try {
+    if (!isConnected()) {
+      initMemoryData();
+      const record = memoryDrills.find(r => r.id === parseInt(req.params.id) && !r.is_deleted);
+      if (!record) return res.json(error(-2, '记录不存在'));
+      record.is_deleted = true;
+      return res.json(success(null, '删除成功(内存模式)'));
+    }
+
+    const result = await pool.query(
+      'UPDATE emergency_drills SET is_deleted = true, updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND is_deleted = false RETURNING id',
+      [req.params.id]
+    );
+    if (result.rows.length === 0) return res.json(error(-2, '记录不存在'));
+
+    await auditLog({ userId: req.user?.id, username: req.user?.username, action: 'delete', module: 'emergency', description: `删除演练记录 ID=${req.params.id}`, ip: req.ip }).catch(() => {});
+    res.json(success(null, '删除成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ============================================================
+// 统计接口
+// ============================================================
+router.get('/stats/overview', async (req, res) => {
+  try {
+    const currentYear = new Date().getFullYear();
+    const yearStart = `${currentYear}-01-01`;
+    if (!isConnected()) {
+      initMemoryDataAll();
+      const plans = memoryPlans.filter(r => !r.is_deleted);
+      const drills = memoryDrills.filter(r => !r.is_deleted);
+      const materials = memoryMaterials.filter(r => !r.is_deleted);
+      const teams = memoryTeams.filter(r => !r.is_deleted);
+      const teamMembers = memoryTeamMembers.filter(r => !r.is_deleted);
+      const events = memoryEvents.filter(r => !r.is_deleted);
+      const yearDrills = drills.filter(d => new Date(d.drillDate || d.drill_date).getFullYear() === currentYear);
+      const yearEvents = events.filter(e => new Date(e.happenTime || e.happen_time).getFullYear() === currentYear);
+      const passDrills = yearDrills.filter(d => d.result === 'pass' || d.result === 'excellent').length;
+      return res.json(success({
+        plans: { total: plans.length, published: plans.filter(p => p.status === 'active' || p.status === 'published').length, pendingReview: plans.filter(p => p.status === 'pending' || p.status === 'review').length },
+        drills: { yearCount: yearDrills.length, passRate: yearDrills.length > 0 ? Math.round((passDrills / yearDrills.length) * 100) : 0 },
+        materials: { total: materials.length, expiring: materials.filter(m => calcMaterialStatus(m.expireDate) === 'expiring').length, expired: materials.filter(m => calcMaterialStatus(m.expireDate) === 'expired').length },
+        teams: { total: teams.length, memberCount: teamMembers.length },
+        events: { yearCount: yearEvents.length, handling: yearEvents.filter(e => e.status !== 'closed' && e.status !== 'resolved').length },
+      }, '统计成功(内存模式)'));
+    }
+    await ensureAllTables();
+    const [planTotalR, planPublishedR, planPendingR, drillYearR, drillPassR, materialTotalR, teamTotalR, teamMemberR, eventYearR, eventHandlingR] = await Promise.all([
+      pool.query('SELECT COUNT(*)::int AS total FROM emergency_plans WHERE is_deleted = false'),
+      pool.query("SELECT COUNT(*)::int AS count FROM emergency_plans WHERE is_deleted = false AND status IN ('active', 'published')"),
+      pool.query("SELECT COUNT(*)::int AS count FROM emergency_plans WHERE is_deleted = false AND status IN ('pending', 'review')"),
+      pool.query('SELECT COUNT(*)::int AS total FROM emergency_drills WHERE is_deleted = false AND drill_date >= $1', [yearStart]),
+      pool.query("SELECT COUNT(*)::int AS count FROM emergency_drills WHERE is_deleted = false AND drill_date >= $1 AND result IN ('pass', 'excellent')", [yearStart]),
+      pool.query('SELECT COUNT(*)::int AS total FROM emergency_materials WHERE is_deleted = false'),
+      pool.query('SELECT COUNT(*)::int AS total FROM emergency_teams WHERE is_deleted = false'),
+      pool.query('SELECT COUNT(*)::int AS total FROM emergency_team_members WHERE is_deleted = false'),
+      pool.query('SELECT COUNT(*)::int AS total FROM emergency_events WHERE is_deleted = false AND happen_time >= $1', [yearStart]),
+      pool.query("SELECT COUNT(*)::int AS count FROM emergency_events WHERE is_deleted = false AND happen_time >= $1 AND status NOT IN ('closed', 'resolved')", [yearStart]),
+    ]);
+    const matResult = await pool.query('SELECT expire_date FROM emergency_materials WHERE is_deleted = false');
+    const matList = matResult.rows.map(formatMaterialRow);
+    const ydc = parseInt(drillYearR.rows[0].total);
+    const pdc = parseInt(drillPassR.rows[0].count);
+    res.json(success({
+      plans: { total: parseInt(planTotalR.rows[0].total), published: parseInt(planPublishedR.rows[0].count), pendingReview: parseInt(planPendingR.rows[0].count) },
+      drills: { yearCount: ydc, passRate: ydc > 0 ? Math.round((pdc / ydc) * 100) : 0 },
+      materials: { total: parseInt(materialTotalR.rows[0].total), expiring: matList.filter(m => m.status === 'expiring').length, expired: matList.filter(m => m.status === 'expired').length },
+      teams: { total: parseInt(teamTotalR.rows[0].total), memberCount: parseInt(teamMemberR.rows[0].total) },
+      events: { yearCount: parseInt(eventYearR.rows[0].total), handling: parseInt(eventHandlingR.rows[0].count) },
+    }, '统计成功'));
+  } catch (err) { res.json(error(-1, err.message)); }
+});
+
+router.get('/stats', async (req, res) => {
+  try {
+    if (!isConnected()) {
+      initMemoryData();
+      const plans = memoryPlans.filter(r => !r.is_deleted);
+      const drills = memoryDrills.filter(r => !r.is_deleted);
+      const excellentCount = drills.filter(d => d.result === 'excellent').length;
+      const participantsTotal = drills.reduce((sum, d) => sum + (d.participants || 0), 0);
+      const byType = {};
+      plans.forEach(p => { byType[p.type] = (byType[p.type] || 0) + 1; });
+
+      return res.json(success({
+        totalPlans: plans.length,
+        activePlans: plans.filter(p => p.status === 'active').length,
+        totalDrills: drills.length,
+        excellentDrills: excellentCount,
+        participantsTotal,
+        byType,
+      }, '统计成功(内存模式)'));
+    }
+
+    const [planTotalR, planActiveR, drillTotalR, drillExcellentR, drillParticipantsR, planTypeR] = await Promise.all([
+      pool.query('SELECT COUNT(*)::int AS total FROM emergency_plans WHERE is_deleted = false'),
+      pool.query("SELECT COUNT(*)::int AS count FROM emergency_plans WHERE is_deleted = false AND status = 'active'"),
+      pool.query('SELECT COUNT(*)::int AS total FROM emergency_drills WHERE is_deleted = false'),
+      pool.query("SELECT COUNT(*)::int AS count FROM emergency_drills WHERE is_deleted = false AND result = 'excellent'"),
+      pool.query('SELECT COALESCE(SUM(participants), 0)::int AS total FROM emergency_drills WHERE is_deleted = false'),
+      pool.query("SELECT type, COUNT(*)::int AS count FROM emergency_plans WHERE is_deleted = false GROUP BY type"),
+    ]);
+
+    const byType = {};
+    planTypeR.rows.forEach(r => { byType[r.type || 'unknown'] = parseInt(r.count); });
+
+    res.json(success({
+      totalPlans: parseInt(planTotalR.rows[0].total),
+      activePlans: parseInt(planActiveR.rows[0].count),
+      totalDrills: parseInt(drillTotalR.rows[0].total),
+      excellentDrills: parseInt(drillExcellentR.rows[0].count),
+      participantsTotal: parseInt(drillParticipantsR.rows[0].total),
+      byType,
+    }, '统计成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ============================================================
+// 预案附件管理端点（复用 files.js 的 upload middleware）
+// ============================================================
+
+// ========== GET /plans/:id/attachments — 附件列表 ==========
+router.get('/plans/:id/attachments', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { version = '' } = req.query;
+
+    if (!isConnected()) {
+      initMemoryData();
+      let data = memoryPlanAttachments.filter(a => a.plan_id === parseInt(id) && !a.is_deleted);
+      if (version) data = data.filter(a => a.version === version);
+      return res.json(success(data.map(camelKeys), '查询成功(内存模式)'));
+    }
+
+    await ensureTables();
+
+    let sql = 'SELECT * FROM emergency_plan_attachments WHERE plan_id = $1 AND is_deleted = FALSE';
+    const params = [id];
+    let paramIdx = 1;
+    if (version) {
+      paramIdx++;
+      sql += ` AND version = $${paramIdx}`;
+      params.push(version);
+    }
+    sql += ' ORDER BY is_latest DESC, created_at DESC';
+
+    const result = await pool.query(sql, params);
+    res.json(success(result.rows.map(camelKeys), '查询成功'));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ========== POST /plans/:id/attachments — 上传附件 ==========
+router.post('/plans/:id/attachments', uploadDocument.single('file'), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!req.file) return res.json(error(-1, '请上传文件'));
+
+    const { version = '1.0', uploaded_by = 'admin' } = req.body;
+    const fileUrl = getFileUrl(req, req.file.filename, 'documents');
+    const originalName = fixFilenameEncoding(req.file.originalname);
+
+    if (!isConnected()) {
+      initMemoryData();
+      memoryPlanAttachments.forEach(a => {
+        if (a.plan_id === parseInt(id) && a.is_latest) a.is_latest = false;
+      });
+      const record = buildMemoryRecord(memoryPlanAttachmentIdCounter++, {
+        plan_id: parseInt(id),
+        filename: req.file.filename,
+        original_name: originalName,
+        file_type: 'document',
+        file_size: req.file.size,
+        file_url: fileUrl,
+        version,
+        uploaded_by,
+        is_latest: true,
+      });
+      memoryPlanAttachments.push(record);
+      return res.json(success(camelKeys(record), '上传成功(内存模式)'));
+    }
+
+    await ensureTables();
+
+    await pool.query(
+      'UPDATE emergency_plan_attachments SET is_latest = FALSE WHERE plan_id = $1 AND is_latest = TRUE',
+      [id]
+    );
+
+    const result = await pool.query(`
+      INSERT INTO emergency_plan_attachments (plan_id, filename, original_name, file_type, file_size, file_url, version, uploaded_by, is_latest)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, TRUE)
+      RETURNING *
+    `, [id, req.file.filename, originalName, 'document', req.file.size, fileUrl, version, uploaded_by]);
+
+    await auditLog({ userId: req.user?.id, username: req.user?.username, action: 'upload', module: 'emergency', description: `上传预案附件: ${originalName}`, ip: req.ip }).catch(() => {});
+    res.json(success(camelKeys(result.rows[0]), '上传成功'));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ========== DELETE /plans/:id/attachments/:aid — 删除附件 ==========
+router.delete('/plans/:id/attachments/:aid', async (req, res, next) => {
+  try {
+    const { id, aid } = req.params;
+
+    if (!isConnected()) {
+      initMemoryData();
+      const att = memoryPlanAttachments.find(a => a.id === parseInt(aid) && a.plan_id === parseInt(id) && !a.is_deleted);
+      if (!att) return sendNotFound(res, '附件不存在');
+      att.is_deleted = true;
+      return res.json(success(null, '删除成功(内存模式)'));
+    }
+
+    await ensureTables();
+
+    const result = await pool.query(
+      'UPDATE emergency_plan_attachments SET is_deleted = TRUE WHERE id = $1 AND plan_id = $2 RETURNING id',
+      [aid, id]
+    );
+    if (result.rows.length === 0) return sendNotFound(res, '附件不存在');
+    res.json(success(null, '删除成功'));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ============================================================
+// 预案版本管理端点
+// ============================================================
+
+// ========== GET /plans/:id/versions — 历史版本履历 ==========
+router.get('/plans/:id/versions', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    if (!isConnected()) {
+      initMemoryData();
+      const data = memoryPlanVersions.filter(v => v.plan_id === parseInt(id));
+      return res.json(success(data.map(camelKeys), '查询成功(内存模式)'));
+    }
+
+    await ensureTables();
+
+    const result = await pool.query(
+      'SELECT * FROM emergency_plan_versions WHERE plan_id = $1 ORDER BY created_at DESC',
+      [id]
+    );
+    res.json(success(result.rows.map(camelKeys), '查询成功'));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ========== 辅助：创建版本记录 ==========
+async function createPlanVersion(planId, version, changeType, changeSummary, changedBy) {
+  try {
+    if (!isConnected()) {
+      memoryPlanVersions.push(buildMemoryRecord(memoryPlanVersionIdCounter++, {
+        plan_id: planId,
+        version: version || '1.0',
+        change_type: changeType || 'update',
+        change_summary: changeSummary || '',
+        changed_by: changedBy || 'admin',
+      }));
+      return;
+    }
+    await pool.query(`
+      INSERT INTO emergency_plan_versions (plan_id, version, change_type, change_summary, changed_by)
+      VALUES ($1, $2, $3, $4, $5)
+    `, [planId, version || '1.0', changeType || 'update', changeSummary || '', changedBy || 'admin']);
+  } catch (e) {
+    console.warn('[Emergency] 创建版本记录失败:', e.message);
+  }
+}
+
+// ========== CSV 导出辅助函数 ==========
+function sendPlanCsvExport(res, data) {
+  const headers = ['预案名称', '类型', '级别', '责任部门', '责任人', '联系电话', '生效日期', '到期日期', '状态', '备注'];
+  const rows = data.map(r => [
+    (r.name || r.title || '').replace(/"/g, '""'),
+    r.type || '',
+    r.level || '',
+    r.responsible_dept || r.department || '',
+    r.responsible_person || r.responsiblePerson || '',
+    r.contact_phone || r.contactPhone || '',
+    r.effective_date ? new Date(r.effective_date).toISOString().slice(0, 10) : '',
+    r.expiry_date ? new Date(r.expiry_date).toISOString().slice(0, 10) : '',
+    r.status || '',
+    (r.remark || '').replace(/"/g, '""'),
+  ].map(v => `"${v}"`).join(','));
+  const csv = '\uFEFF' + headers.map(h => `"${h}"`).join(',') + '\n' + rows.join('\n');
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="emergency_plans_${new Date().toISOString().slice(0, 10)}.csv"`);
+  return res.send(csv);
+}
+
+function sendDrillCsvExport(res, data) {
+  const headers = ['编号', '演练日期', '乡镇', '名称', '演练级别', '演练类型', '参演人数', '时长(分钟)', '地点', '组织单位', '结果', '状态', '备注'];
+  const rows = data.map(r => [
+    r.no || '',
+    r.drill_date ? (new Date(r.drill_date).toISOString().slice(0, 10)) : '',
+    r.township || '',
+    (r.name || '').replace(/"/g, '""'),
+    r.drill_level || '',
+    r.drill_type || '',
+    r.participants || 0,
+    r.duration || 0,
+    r.location || '',
+    r.organizer || '',
+    r.result || '',
+    r.status || '',
+    (r.remark || '').replace(/"/g, '""'),
+  ].map(v => `"${v}"`).join(','));
+  const csv = '\uFEFF' + headers.map(h => `"${h}"`).join(',') + '\n' + rows.join('\n');
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="emergency_drills_${new Date().toISOString().slice(0, 10)}.csv"`);
+  return res.send(csv);
+}
+
+// ========== 内存降级存储（新增模块） ==========
+let memoryMaterials = [];
+let materialIdCounter = 1;
+let memoryTeams = [];
+let teamIdCounter = 1;
+let memoryTeamMembers = [];
+let teamMemberIdCounter = 1;
+let memoryEvents = [];
+let eventIdCounter = 1;
+let memoryAttachments = [];
+let memoryAttachmentIdCounter = 1;
+
+function initMemoryDataAll() {
+  initMemoryData();
+}
+
+// ========== 扩展数据库表初始化 ==========
+async function ensureAllTables() {
+  await ensureTables();
+  if (!isConnected()) return;
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS emergency_materials (
+        id                BIGSERIAL PRIMARY KEY,
+        name              VARCHAR(255) NOT NULL,
+        category          VARCHAR(64),
+        spec              VARCHAR(255),
+        quantity          INT NOT NULL DEFAULT 0,
+        location          VARCHAR(255),
+        responsible_person VARCHAR(64),
+        expire_date       DATE,
+        remark            TEXT,
+        is_deleted        BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_materials_category ON emergency_materials(category)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_materials_expire ON emergency_materials(expire_date)');
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS emergency_teams (
+        id            BIGSERIAL PRIMARY KEY,
+        name          VARCHAR(255) NOT NULL,
+        type          VARCHAR(64),
+        department    VARCHAR(255),
+        leader_id     BIGINT,
+        leader_name   VARCHAR(64),
+        contact_phone VARCHAR(32),
+        description   TEXT,
+        member_ids    BIGINT[] DEFAULT '{}',
+        is_deleted    BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS emergency_team_members (
+        id            BIGSERIAL PRIMARY KEY,
+        team_id       BIGINT NOT NULL,
+        employee_id   BIGINT,
+        employee_name VARCHAR(64) NOT NULL,
+        role          VARCHAR(64),
+        phone         VARCHAR(32),
+        is_deleted    BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_team_members_team ON emergency_team_members(team_id)');
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS emergency_events (
+        id                BIGSERIAL PRIMARY KEY,
+        title             VARCHAR(255) NOT NULL,
+        event_type        VARCHAR(64),
+        event_level       VARCHAR(32),
+        happen_time       TIMESTAMPTZ,
+        location          VARCHAR(255),
+        reporter          VARCHAR(64),
+        status            VARCHAR(32) DEFAULT 'reporting',
+        response_process  TEXT,
+        handling_measures TEXT,
+        result            TEXT,
+        related_plan_id   BIGINT,
+        related_drill_id  BIGINT,
+        remark            TEXT,
+        is_deleted        BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_events_type ON emergency_events(event_type)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_events_status ON emergency_events(status)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_events_happen ON emergency_events(happen_time)');
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS emergency_attachments (
+        id            BIGSERIAL PRIMARY KEY,
+        biz_type      VARCHAR(32) NOT NULL,
+        biz_id        BIGINT NOT NULL,
+        filename      VARCHAR(255) NOT NULL,
+        original_name VARCHAR(255) NOT NULL,
+        file_type     VARCHAR(64) NOT NULL DEFAULT 'document',
+        file_size     BIGINT NOT NULL DEFAULT 0,
+        file_url      VARCHAR(512) NOT NULL,
+        uploaded_by   VARCHAR(64),
+        is_deleted    BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_attachments_biz ON emergency_attachments(biz_type, biz_id)');
+
+    console.log('[Emergency] 扩展数据库表 materials/teams/events/attachments 已就绪');
+  } catch (err) {
+    console.warn('[Emergency] 扩展数据库表初始化失败:', err.message);
+  }
+}
+
+// ========== 物资有效期状态计算 ==========
+function readExpiringDays() {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const rulePath = path.join(__dirname, '..', 'config', 'emergency-rule.json');
+    if (fs.existsSync(rulePath)) {
+      const rule = JSON.parse(fs.readFileSync(rulePath, 'utf-8'));
+      if (rule.expiringDays) return parseInt(rule.expiringDays);
+    }
+  } catch (e) {}
+  return 30;
+}
+
+function calcMaterialStatus(expireDate) {
+  if (!expireDate) return 'normal';
+  const exp = new Date(expireDate);
+  if (isNaN(exp.getTime())) return 'normal';
+  const now = new Date();
+  const diffDays = Math.ceil((exp - now) / (1000 * 60 * 60 * 24));
+  if (diffDays < 0) return 'expired';
+  const expiringDays = readExpiringDays();
+  if (diffDays <= expiringDays) return 'expiring';
+  return 'normal';
+}
+
+// ========== formatMaterialRow ==========
+function formatMaterialRow(row) {
+  return {
+    id: Number(row.id),
+    name: row.name || '',
+    category: row.category || '',
+    spec: row.spec || '',
+    quantity: row.quantity || 0,
+    location: row.location || '',
+    responsiblePerson: row.responsible_person || '',
+    expireDate: row.expire_date ? (row.expire_date instanceof Date ? row.expire_date.toISOString().slice(0, 10) : String(row.expire_date).slice(0, 10)) : null,
+    remark: row.remark || '',
+    status: calcMaterialStatus(row.expire_date),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    responsible_person: row.responsible_person,
+    expire_date: row.expire_date,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+// ========== formatTeamRow ==========
+function formatTeamRow(row) {
+  return {
+    id: Number(row.id),
+    name: row.name || '',
+    type: row.type || '',
+    department: row.department || '',
+    leaderId: row.leader_id != null ? Number(row.leader_id) : null,
+    leaderName: row.leader_name || '',
+    contactPhone: row.contact_phone || '',
+    description: row.description || '',
+    memberIds: Array.isArray(row.member_ids) ? row.member_ids.map((x) => Number(x)) : [],
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    leader_id: row.leader_id,
+    leader_name: row.leader_name,
+    contact_phone: row.contact_phone,
+    member_ids: row.member_ids,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+// ========== formatTeamMemberRow ==========
+function formatTeamMemberRow(row) {
+  return {
+    id: Number(row.id),
+    teamId: Number(row.team_id),
+    employeeId: row.employee_id != null ? Number(row.employee_id) : null,
+    employeeName: row.employee_name || '',
+    role: row.role || '',
+    phone: row.phone || '',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    team_id: row.team_id,
+    employee_id: row.employee_id,
+    employee_name: row.employee_name,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+// ========== formatEventRow ==========
+function formatEventRow(row) {
+  return {
+    id: Number(row.id),
+    title: row.title || '',
+    eventType: row.event_type || '',
+    eventLevel: row.event_level || '',
+    happenTime: row.happen_time || null,
+    location: row.location || '',
+    reporter: row.reporter || '',
+    status: row.status || 'reporting',
+    responseProcess: row.response_process || '',
+    handlingMeasures: row.handling_measures || '',
+    result: row.result || '',
+    relatedPlanId: row.related_plan_id || null,
+    relatedDrillId: row.related_drill_id || null,
+    personnelId: row.personnel_id != null ? Number(row.personnel_id) : null,
+    personnel_id: row.personnel_id,
+    remark: row.remark || '',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    event_type: row.event_type,
+    event_level: row.event_level,
+    happen_time: row.happen_time,
+    response_process: row.response_process,
+    handling_measures: row.handling_measures,
+    related_plan_id: row.related_plan_id,
+    related_drill_id: row.related_drill_id,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+// ============================================================
+// 应急物资 CRUD
+// ============================================================
+
+// ========== GET /materials/list — 物资列表 ==========
+router.get('/materials/list', async (req, res) => {
+  try {
+    const { page = 1, pageSize = 20, keyword, category, status } = req.query;
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.min(Math.max(1, parseInt(pageSize) || 10), 200);
+    const offset = (pageNum - 1) * limitNum;
+
+    if (!isConnected()) {
+      initMemoryDataAll();
+      let data = memoryMaterials.filter(r => !r.is_deleted);
+      if (keyword) {
+        const kw = keyword.toLowerCase();
+        data = data.filter(r =>
+          (r.name && r.name.toLowerCase().includes(kw)) ||
+          (r.location && r.location.toLowerCase().includes(kw))
+        );
+      }
+      if (category) data = data.filter(r => r.category === category);
+      if (status) data = data.filter(r => calcMaterialStatus(r.expireDate) === status);
+      const { list, total } = paginateMemory(data, pageNum, limitNum);
+      const finalList = list.map(r => ({ ...r, status: calcMaterialStatus(r.expireDate) }));
+      return buildListResponse(res, finalList, total, pageNum, limitNum, '查询成功(内存模式)');
+    }
+
+    await ensureAllTables();
+
+    const conditions = [];
+    const params = [];
+    let paramIdx = 1;
+
+    if (keyword) {
+      conditions.push(`(name ILIKE $${paramIdx++} OR location ILIKE $${paramIdx++})`);
+      params.push(`%${keyword}%`, `%${keyword}%`);
+    }
+    if (category) { conditions.push(`category = $${paramIdx++}`); params.push(category); }
+
+    conditions.push('is_deleted = false');
+    const whereClause = `WHERE ${conditions.join(' AND ')}`;
+
+    const countResult = await pool.query(`SELECT COUNT(*)::int AS total FROM emergency_materials ${whereClause}`, params);
+    let total = countResult.rows[0].total;
+
+    let listSql = `SELECT * FROM emergency_materials ${whereClause} ORDER BY created_at DESC LIMIT $${paramIdx++} OFFSET $${paramIdx++}`;
+    params.push(limitNum, offset);
+
+    let result;
+    if (status) {
+      const allResult = await pool.query(`SELECT * FROM emergency_materials ${whereClause} ORDER BY created_at DESC`, params.slice(0, -2));
+      const filtered = allResult.rows.map(formatMaterialRow).filter(r => r.status === status);
+      total = filtered.length;
+      result = { rows: filtered.slice(offset, offset + limitNum).map(r => ({ ...r, expire_date: r.expireDate })) };
+    } else {
+      result = await pool.query(listSql, params);
+    }
+
+    res.json(success({ list: (result.rows || []).map(formatMaterialRow), total, page: pageNum, pageSize: limitNum }, '查询成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ========== GET /materials/stats — 物资统计 ==========
+router.get('/materials/stats', async (req, res) => {
+  try {
+    if (!isConnected()) {
+      initMemoryDataAll();
+      const data = memoryMaterials.filter(r => !r.is_deleted);
+      const byCategory = {};
+      data.forEach(m => { byCategory[m.category || 'other'] = (byCategory[m.category || 'other'] || 0) + 1; });
+      return res.json(success({
+        total: data.length,
+        expiring: data.filter(m => calcMaterialStatus(m.expireDate) === 'expiring').length,
+        expired: data.filter(m => calcMaterialStatus(m.expireDate) === 'expired').length,
+        byCategory,
+      }, '统计成功(内存模式)'));
+    }
+
+    await ensureAllTables();
+
+    const result = await pool.query('SELECT * FROM emergency_materials WHERE is_deleted = false');
+    const list = result.rows.map(formatMaterialRow);
+    const byCategory = {};
+    list.forEach(m => { byCategory[m.category || 'other'] = (byCategory[m.category || 'other'] || 0) + 1; });
+
+    res.json(success({
+      total: list.length,
+      expiring: list.filter(m => m.status === 'expiring').length,
+      expired: list.filter(m => m.status === 'expired').length,
+      byCategory,
+    }, '统计成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ========== GET /materials/export — 导出物资 ==========
+router.get('/materials/export', requireRole('admin', 'safety_manager'), async (req, res, next) => {
+  try {
+    if (!isConnected()) {
+      initMemoryDataAll();
+      const data = memoryMaterials.filter(r => !r.is_deleted);
+      return sendMaterialCsvExport(res, data);
+    }
+
+    await ensureAllTables();
+    const result = await pool.query('SELECT * FROM emergency_materials WHERE is_deleted = FALSE ORDER BY id DESC');
+    sendMaterialCsvExport(res, result.rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ========== GET /materials/:id — 单条物资 ==========
+router.get('/materials/:id', async (req, res) => {
+  try {
+    if (!isConnected()) {
+      initMemoryDataAll();
+      const record = memoryMaterials.find(r => r.id === parseInt(req.params.id) && !r.is_deleted);
+      if (!record) return sendNotFound(res);
+      return res.json(success({ ...record, status: calcMaterialStatus(record.expireDate) }, '查询成功(内存模式)'));
+    }
+    await ensureAllTables();
+    const result = await pool.query('SELECT * FROM emergency_materials WHERE id = $1 AND is_deleted = false', [req.params.id]);
+    if (result.rows.length === 0) return res.json(error(-2, '记录不存在'));
+    res.json(success(formatMaterialRow(result.rows[0]), '查询成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ========== POST /materials — 创建物资 ==========
+router.post('/materials', requireRole('admin', 'safety_manager'), async (req, res) => {
+  try {
+    const b = req.body;
+    if (!isConnected()) {
+      initMemoryDataAll();
+      const record = buildMemoryRecord(materialIdCounter++, {
+        name: b.name || b.title || '',
+        category: b.category || '',
+        spec: b.spec || '',
+        quantity: b.quantity || 0,
+        location: b.location || '',
+        responsiblePerson: b.responsiblePerson || b.responsible_person || '',
+        expireDate: b.expireDate || b.expire_date || null,
+        remark: b.remark || '',
+      });
+      memoryMaterials.push(record);
+      return res.json(success({ ...record, status: calcMaterialStatus(record.expireDate) }, '创建成功(内存模式)'));
+    }
+
+    await ensureAllTables();
+    const result = await pool.query(`
+      INSERT INTO emergency_materials (name, category, spec, quantity, location, responsible_person, expire_date, remark)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+      RETURNING *
+    `, [
+      b.name || b.title || '',
+      b.category || '',
+      b.spec || '',
+      b.quantity || 0,
+      b.location || '',
+      b.responsiblePerson || b.responsible_person || '',
+      b.expireDate || b.expire_date || null,
+      b.remark || '',
+    ]);
+
+    await auditLog({ userId: req.user?.id, username: req.user?.username, action: 'create', module: 'emergency', description: `创建应急物资: ${b.name}`, ip: req.ip }).catch(() => {});
+    res.json(success(formatMaterialRow(result.rows[0]), '创建成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ========== PUT /materials/:id — 更新物资 ==========
+router.put('/materials/:id', requireRole('admin', 'safety_manager'), async (req, res) => {
+  try {
+    const b = req.body;
+    if (!isConnected()) {
+      initMemoryDataAll();
+      const idx = memoryMaterials.findIndex(r => r.id === parseInt(req.params.id) && !r.is_deleted);
+      if (idx === -1) return res.json(error(-2, '记录不存在'));
+      Object.assign(memoryMaterials[idx], b, { updatedAt: new Date().toISOString() });
+      return res.json(success({ ...memoryMaterials[idx], status: calcMaterialStatus(memoryMaterials[idx].expireDate) }, '更新成功(内存模式)'));
+    }
+
+    await ensureAllTables();
+    const result = await pool.query(`
+      UPDATE emergency_materials SET
+        name = COALESCE($1, name),
+        category = COALESCE($2, category),
+        spec = COALESCE($3, spec),
+        quantity = COALESCE($4, quantity),
+        location = COALESCE($5, location),
+        responsible_person = COALESCE($6, responsible_person),
+        expire_date = COALESCE($7, expire_date),
+        remark = COALESCE($8, remark),
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $9 AND is_deleted = false RETURNING *
+    `, [
+      b.name || b.title || null,
+      b.category || null,
+      b.spec || null,
+      b.quantity != null ? b.quantity : null,
+      b.location || null,
+      b.responsiblePerson || b.responsible_person || null,
+      b.expireDate || b.expire_date || null,
+      b.remark || null,
+      req.params.id,
+    ]);
+
+    if (result.rows.length === 0) return res.json(error(-2, '记录不存在'));
+    await auditLog({ userId: req.user?.id, username: req.user?.username, action: 'update', module: 'emergency', description: `更新应急物资 ID=${req.params.id}`, ip: req.ip }).catch(() => {});
+    res.json(success(formatMaterialRow(result.rows[0]), '更新成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ========== DELETE /materials/:id — 删除物资 ==========
+router.delete('/materials/:id', requireRole('admin', 'safety_manager'), async (req, res) => {
+  try {
+    if (!isConnected()) {
+      initMemoryDataAll();
+      const record = memoryMaterials.find(r => r.id === parseInt(req.params.id) && !r.is_deleted);
+      if (!record) return res.json(error(-2, '记录不存在'));
+      record.is_deleted = true;
+      return res.json(success(null, '删除成功(内存模式)'));
+    }
+
+    await ensureAllTables();
+    const result = await pool.query(
+      'UPDATE emergency_materials SET is_deleted = true, updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND is_deleted = false RETURNING id',
+      [req.params.id]
+    );
+    if (result.rows.length === 0) return res.json(error(-2, '记录不存在'));
+
+    await auditLog({ userId: req.user?.id, username: req.user?.username, action: 'delete', module: 'emergency', description: `删除应急物资 ID=${req.params.id}`, ip: req.ip }).catch(() => {});
+    res.json(success(null, '删除成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ============================================================
+// 应急队伍 CRUD
+// ============================================================
+
+// ========== GET /teams/list — 队伍列表 ==========
+router.get('/teams/list', async (req, res) => {
+  try {
+    const { page = 1, pageSize = 20, keyword, type, department } = req.query;
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.min(Math.max(1, parseInt(pageSize) || 10), 200);
+    const offset = (pageNum - 1) * limitNum;
+
+    if (!isConnected()) {
+      initMemoryDataAll();
+      let data = memoryTeams.filter(r => !r.is_deleted);
+      if (keyword) {
+        const kw = keyword.toLowerCase();
+        data = data.filter(r =>
+          (r.name && r.name.toLowerCase().includes(kw)) ||
+          (r.department && r.department.toLowerCase().includes(kw)) ||
+          (r.leaderName && r.leaderName.toLowerCase().includes(kw))
+        );
+      }
+      if (type) data = data.filter(r => r.type === type);
+      if (department) data = data.filter(r => r.department === department);
+      const { list, total } = paginateMemory(data, pageNum, limitNum);
+      return buildListResponse(res, list, total, pageNum, limitNum, '查询成功(内存模式)');
+    }
+
+    await ensureAllTables();
+
+    const conditions = [];
+    const params = [];
+    let paramIdx = 1;
+
+    if (keyword) {
+      conditions.push(`(name ILIKE $${paramIdx++} OR department ILIKE $${paramIdx++} OR leader_name ILIKE $${paramIdx++})`);
+      params.push(`%${keyword}%`, `%${keyword}%`, `%${keyword}%`);
+    }
+    if (type) { conditions.push(`type = $${paramIdx++}`); params.push(type); }
+    if (department) { conditions.push(`department = $${paramIdx++}`); params.push(department); }
+
+    conditions.push('is_deleted = false');
+    const whereClause = `WHERE ${conditions.join(' AND ')}`;
+
+    const countResult = await pool.query(`SELECT COUNT(*)::int AS total FROM emergency_teams ${whereClause}`, params);
+    const total = countResult.rows[0].total;
+
+    params.push(limitNum, offset);
+    const result = await pool.query(
+      `SELECT * FROM emergency_teams ${whereClause} ORDER BY created_at DESC LIMIT $${paramIdx++} OFFSET $${paramIdx++}`,
+      params
+    );
+
+    res.json(success({ list: result.rows.map(formatTeamRow), total, page: pageNum, pageSize: limitNum }, '查询成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ========== GET /teams/stats — 队伍统计 ==========
+router.get('/teams/stats', async (req, res) => {
+  try {
+    if (!isConnected()) {
+      initMemoryDataAll();
+      const teams = memoryTeams.filter(r => !r.is_deleted);
+      const memberCount = memoryTeamMembers.filter(m => !m.is_deleted).length;
+      const byType = {};
+      teams.forEach(t => { byType[t.type || 'other'] = (byType[t.type || 'other'] || 0) + 1; });
+      const isFullKey = (k) => /full|专职|全职/i.test(k);
+      const isPartKey = (k) => /part|兼职|业余/i.test(k);
+      let fullTime = 0, partTime = 0;
+      Object.entries(byType).forEach(([k, v]) => { if (isFullKey(k)) fullTime += v; else if (isPartKey(k)) partTime += v; });
+      return res.json(success({ total: teams.length, memberCount, fullTime, partTime, byType }, '统计成功(内存模式)'));
+    }
+
+    await ensureAllTables();
+
+    const [teamR, memberR, typeR] = await Promise.all([
+      pool.query('SELECT COUNT(*)::int AS total FROM emergency_teams WHERE is_deleted = false'),
+      pool.query('SELECT COUNT(*)::int AS total FROM emergency_team_members WHERE is_deleted = false'),
+      pool.query("SELECT type, COUNT(*)::int AS count FROM emergency_teams WHERE is_deleted = false GROUP BY type"),
+    ]);
+
+    const byType = {};
+    typeR.rows.forEach(r => { byType[r.type || 'other'] = parseInt(r.count); });
+
+    const isFullKey = (k) => /full|专职|全职/i.test(k);
+    const isPartKey = (k) => /part|兼职|业余/i.test(k);
+    let fullTime = 0, partTime = 0;
+    Object.entries(byType).forEach(([k, v]) => { if (isFullKey(k)) fullTime += v; else if (isPartKey(k)) partTime += v; });
+
+    res.json(success({
+      total: parseInt(teamR.rows[0].total),
+      memberCount: parseInt(memberR.rows[0].total),
+      fullTime,
+      partTime,
+      byType,
+    }, '统计成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ========== GET /teams/export — 导出队伍清单（CSV，必须定义在 /:id 之前以免被参数路由遮蔽） ==========
+router.get('/teams/export', requireRole('admin', 'safety_manager'), async (req, res, next) => {
+  try {
+    await ensureAllTables();
+    const result = await pool.query('SELECT * FROM emergency_teams WHERE is_deleted = FALSE ORDER BY created_at DESC');
+    const headers = ['队伍名称', '队伍类型', '所属部门', '队长', '联系电话', '队员人数', '描述'];
+    const rows = result.rows.map(r => [
+      r.name || '',
+      r.type || '',
+      r.department || '',
+      r.leader_name || '',
+      r.contact_phone || '',
+      Array.isArray(r.member_ids) ? r.member_ids.length : 0,
+      r.description || '',
+    ]);
+    const csv = [headers, ...rows]
+      .map(row => row.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename=emergency_teams.csv');
+    res.send('\uFEFF' + csv);
+  } catch (err) { next(err); }
+});
+
+// ========== GET /teams/:id — 单条队伍（含成员） ==========
+router.get('/teams/:id', async (req, res) => {
+  try {
+    if (!isConnected()) {
+      initMemoryDataAll();
+      const record = memoryTeams.find(r => r.id === parseInt(req.params.id) && !r.is_deleted);
+      if (!record) return sendNotFound(res);
+      const members = memoryTeamMembers.filter(m => m.team_id === parseInt(req.params.id) && !m.is_deleted);
+      return res.json(success({ ...record, members }, '查询成功(内存模式)'));
+    }
+    await ensureAllTables();
+    const teamResult = await pool.query('SELECT * FROM emergency_teams WHERE id = $1 AND is_deleted = false', [req.params.id]);
+    if (teamResult.rows.length === 0) return res.json(error(-2, '记录不存在'));
+    const memberResult = await pool.query('SELECT * FROM emergency_team_members WHERE team_id = $1 AND is_deleted = false ORDER BY id', [req.params.id]);
+    res.json(success({ ...formatTeamRow(teamResult.rows[0]), members: memberResult.rows.map(formatTeamMemberRow) }, '查询成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ========== POST /teams — 创建队伍 ==========
+router.post('/teams', requireRole('admin', 'safety_manager'), async (req, res) => {
+  try {
+    const b = req.body;
+    const members = Array.isArray(b.members) ? b.members : [];
+
+    if (!isConnected()) {
+      initMemoryDataAll();
+      const teamId = teamIdCounter++;
+      const teamRecord = buildMemoryRecord(teamId, {
+        name: b.name || '',
+        type: b.type || '',
+        department: b.department || '',
+        leaderId: b.leaderId || b.leader_id || null,
+        leaderName: b.leaderName || b.leader_name || '',
+        contactPhone: b.contactPhone || b.contact_phone || '',
+        description: b.description || '',
+        memberIds: b.memberIds || b.member_ids || members.map(m => m.employeeId || m.employee_id),
+      });
+      memoryTeams.push(teamRecord);
+      members.forEach(m => {
+        const memberRecord = buildMemoryRecord(teamMemberIdCounter++, {
+          team_id: teamId,
+          employee_id: m.employeeId || m.employee_id || null,
+          employee_name: m.employeeName || m.employee_name || '',
+          role: m.role || '',
+          phone: m.phone || '',
+        });
+        memoryTeamMembers.push(memberRecord);
+      });
+      return res.json(success(teamRecord, '创建成功(内存模式)'));
+    }
+
+    await ensureAllTables();
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const teamResult = await client.query(`
+        INSERT INTO emergency_teams (name, type, department, leader_id, leader_name, contact_phone, description, member_ids)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+        RETURNING *
+      `, [
+        b.name || '',
+        b.type || '',
+        b.department || '',
+        b.leaderId || b.leader_id || null,
+        b.leaderName || b.leader_name || '',
+        b.contactPhone || b.contact_phone || '',
+        b.description || '',
+        b.memberIds || b.member_ids || (members.map(m => m.employeeId || m.employee_id).filter(Boolean)),
+      ]);
+      const teamId = teamResult.rows[0].id;
+
+      for (const m of members) {
+        await client.query(`
+          INSERT INTO emergency_team_members (team_id, employee_id, employee_name, role, phone)
+          VALUES ($1,$2,$3,$4,$5)
+        `, [
+          teamId,
+          m.employeeId || m.employee_id || null,
+          m.employeeName || m.employee_name || '',
+          m.role || '',
+          m.phone || '',
+        ]);
+      }
+      await client.query('COMMIT');
+
+      await auditLog({ userId: req.user?.id, username: req.user?.username, action: 'create', module: 'emergency', description: `创建应急队伍: ${b.name}`, ip: req.ip }).catch(() => {});
+      res.json(success(formatTeamRow(teamResult.rows[0]), '创建成功'));
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ========== PUT /teams/:id — 更新队伍 ==========
+router.put('/teams/:id', requireRole('admin', 'safety_manager'), async (req, res) => {
+  try {
+    const b = req.body;
+    const members = Array.isArray(b.members) ? b.members : null;
+
+    if (!isConnected()) {
+      initMemoryDataAll();
+      const idx = memoryTeams.findIndex(r => r.id === parseInt(req.params.id) && !r.is_deleted);
+      if (idx === -1) return res.json(error(-2, '记录不存在'));
+      Object.assign(memoryTeams[idx], b, { updatedAt: new Date().toISOString() });
+      if (members) {
+        memoryTeamMembers.forEach(m => {
+          if (m.team_id === parseInt(req.params.id)) m.is_deleted = true;
+        });
+        members.forEach(m => {
+          const memberRecord = buildMemoryRecord(teamMemberIdCounter++, {
+            team_id: parseInt(req.params.id),
+            employee_id: m.employeeId || m.employee_id || null,
+            employee_name: m.employeeName || m.employee_name || '',
+            role: m.role || '',
+            phone: m.phone || '',
+          });
+          memoryTeamMembers.push(memberRecord);
+        });
+      }
+      return res.json(success(memoryTeams[idx], '更新成功(内存模式)'));
+    }
+
+    await ensureAllTables();
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const teamResult = await client.query(`
+        UPDATE emergency_teams SET
+          name = COALESCE($1, name),
+          type = COALESCE($2, type),
+          department = COALESCE($3, department),
+          leader_id = COALESCE($4, leader_id),
+          leader_name = COALESCE($5, leader_name),
+          contact_phone = COALESCE($6, contact_phone),
+          description = COALESCE($7, description),
+          member_ids = COALESCE($8, member_ids),
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = $9 AND is_deleted = false RETURNING *
+      `, [
+        b.name || null,
+        b.type || null,
+        b.department || null,
+        b.leaderId || b.leader_id || null,
+        b.leaderName || b.leader_name || null,
+        b.contactPhone || b.contact_phone || null,
+        b.description || null,
+        b.memberIds || b.member_ids || null,
+        req.params.id,
+      ]);
+
+      if (teamResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.json(error(-2, '记录不存在'));
+      }
+
+      if (members) {
+        await client.query('UPDATE emergency_team_members SET is_deleted = true WHERE team_id = $1', [req.params.id]);
+        for (const m of members) {
+          await client.query(`
+            INSERT INTO emergency_team_members (team_id, employee_id, employee_name, role, phone)
+            VALUES ($1,$2,$3,$4,$5)
+          `, [
+            parseInt(req.params.id),
+            m.employeeId || m.employee_id || null,
+            m.employeeName || m.employee_name || '',
+            m.role || '',
+            m.phone || '',
+          ]);
+        }
+      }
+      await client.query('COMMIT');
+
+      await auditLog({ userId: req.user?.id, username: req.user?.username, action: 'update', module: 'emergency', description: `更新应急队伍 ID=${req.params.id}`, ip: req.ip }).catch(() => {});
+      res.json(success(formatTeamRow(teamResult.rows[0]), '更新成功'));
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ========== DELETE /teams/:id — 删除队伍 ==========
+router.delete('/teams/:id', requireRole('admin', 'safety_manager'), async (req, res) => {
+  try {
+    if (!isConnected()) {
+      initMemoryDataAll();
+      const record = memoryTeams.find(r => r.id === parseInt(req.params.id) && !r.is_deleted);
+      if (!record) return res.json(error(-2, '记录不存在'));
+      record.is_deleted = true;
+      memoryTeamMembers.forEach(m => {
+        if (m.team_id === parseInt(req.params.id)) m.is_deleted = true;
+      });
+      return res.json(success(null, '删除成功(内存模式)'));
+    }
+
+    await ensureAllTables();
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const teamResult = await client.query(
+        'UPDATE emergency_teams SET is_deleted = true, updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND is_deleted = false RETURNING id',
+        [req.params.id]
+      );
+      if (teamResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.json(error(-2, '记录不存在'));
+      }
+      await client.query('UPDATE emergency_team_members SET is_deleted = true WHERE team_id = $1', [req.params.id]);
+      await client.query('COMMIT');
+
+      await auditLog({ userId: req.user?.id, username: req.user?.username, action: 'delete', module: 'emergency', description: `删除应急队伍 ID=${req.params.id}`, ip: req.ip }).catch(() => {});
+      res.json(success(null, '删除成功'));
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ========== GET /teams/:id/members — 队伍成员列表 ==========
+router.get('/teams/:id/members', async (req, res) => {
+  try {
+    if (!isConnected()) {
+      initMemoryDataAll();
+      const data = memoryTeamMembers.filter(m => m.team_id === parseInt(req.params.id) && !m.is_deleted);
+      return res.json(success(data, '查询成功(内存模式)'));
+    }
+    await ensureAllTables();
+    const result = await pool.query('SELECT * FROM emergency_team_members WHERE team_id = $1 AND is_deleted = false ORDER BY id', [req.params.id]);
+    res.json(success(result.rows.map(formatTeamMemberRow), '查询成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ========== POST /teams/generate — 依据组织管理自动生成应急队伍 ==========
+// 规则：
+//   环卫作业中心 → 下属乡镇/街道作业中心：每单位一支"{乡镇}应急救援小队"，
+//     队长为该单位的「乡镇作业中心经理」，队员为本单位的「管理员」+「驾驶员」；
+//   市政绿化作业中心 → 下属公园：每公园一支"{公园}应急救援小队"，队长/队员待定留空（组织尚未成立）。
+// 该接口会软删除旧队伍后整体重生成（全量替换）。
+router.post('/teams/generate', requireRole('admin', 'safety_manager'), async (req, res) => {
+  try {
+    await ensureAllTables();
+    const client = await pool.connect();
+    try {
+      // 1. 读取组织树：环卫作业中心 / 市政绿化作业中心
+      const centerRes = await client.query(
+        `SELECT id, org_name FROM hse_org_unit WHERE org_type = 'center' AND is_deleted IS NOT TRUE ORDER BY id`
+      );
+      const centers = centerRes.rows;
+      const hwCenter = centers.find((c) => /环卫/.test(c.org_name)) || centers[0] || null;
+      const greenCenter = centers.find((c) => /市政绿化|绿化/.test(c.org_name)) || centers[1] || null;
+
+      // 2. 关键岗位（按名称 + org_type 匹配，避免硬编码 ID）
+      const posRes = await client.query(
+        `SELECT id, name, org_type FROM position WHERE is_deleted IS NOT TRUE`
+      );
+      const managerPos = posRes.rows.find(
+        (p) => p.name === '乡镇作业中心经理' && p.org_type === 'town_center'
+      );
+      const adminPosIds = posRes.rows
+        .filter((p) => p.name === '管理员' && p.org_type === 'town_center')
+        .map((p) => p.id);
+      const driverPosIds = posRes.rows
+        .filter((p) => /驾驶员/.test(p.name) && p.org_type === 'town_center')
+        .map((p) => p.id);
+
+      // 下属单位
+      const childrenOf = async (centerId) => {
+        const r = await client.query(
+          `SELECT id, org_name, org_type FROM hse_org_unit WHERE parent_id = $1 AND is_deleted IS NOT TRUE ORDER BY id`,
+          [centerId]
+        );
+        return r.rows;
+      };
+      // 队长：本单位「乡镇作业中心经理」
+      const leaderOf = async (orgId) => {
+        if (!managerPos) return null;
+        const r = await client.query(
+          `SELECT e.id, e.name, e.phone
+           FROM employee_assignment ea
+           JOIN employee e ON e.id = ea.employee_id
+           JOIN position p ON p.id = ea.position_id
+           WHERE ea.org_unit_id = $1 AND ea.is_current = true AND ea.is_deleted IS NOT TRUE
+             AND p.id = $2
+           LIMIT 1`,
+          [orgId, managerPos.id]
+        );
+        return r.rows[0] || null;
+      };
+      // 队员：本单位「管理员」+「驾驶员」
+      const membersOf = async (orgId, posIds) => {
+        if (!posIds.length) return [];
+        const r = await client.query(
+          `SELECT DISTINCT e.id, e.name, e.phone, p.name AS pos_name
+           FROM employee_assignment ea
+           JOIN employee e ON e.id = ea.employee_id
+           JOIN position p ON p.id = ea.position_id
+           WHERE ea.org_unit_id = $1 AND ea.is_current = true AND ea.is_deleted IS NOT TRUE
+             AND p.id = ANY($2)`,
+          [orgId, posIds]
+        );
+        return r.rows;
+      };
+
+      const plan = []; // { orgName, type, leader, members, center }
+
+      if (hwCenter) {
+        const towns = await childrenOf(hwCenter.id);
+        for (const t of towns) {
+          const leader = await leaderOf(t.id);
+          const members = await membersOf(t.id, [...adminPosIds, ...driverPosIds]);
+          plan.push({ orgName: t.org_name, type: '应急救援队', leader, members, center: 'hw' });
+        }
+      }
+      if (greenCenter) {
+        const parks = await childrenOf(greenCenter.id);
+        for (const p of parks) {
+          plan.push({ orgName: p.org_name, type: '应急救援队', leader: null, members: [], center: 'green' });
+        }
+      }
+
+      // 3. 软删除旧队伍 + 写入新队伍（事务，全量替换）
+      await client.query('BEGIN');
+      await client.query(
+        'UPDATE emergency_teams SET is_deleted = true, updated_at = CURRENT_TIMESTAMP WHERE is_deleted = false'
+      );
+      await client.query('UPDATE emergency_team_members SET is_deleted = true WHERE is_deleted = false');
+
+      let created = 0;
+      let hwCount = 0;
+      let greenCount = 0;
+      // 员工表手机号为加密存储（ENC:...），业务侧无解密能力，落库时过滤，留空待手动补充
+      const plainPhone = (v) => (v && !String(v).startsWith('ENC:') ? String(v) : '');
+
+      for (const t of plan) {
+        const baseName = t.orgName.replace('作业中心', '').replace('公园', '').trim();
+        const teamName = `${baseName}应急救援小队`;
+        const memberIds = t.members.map((m) => m.id);
+        const teamRes = await client.query(
+          `INSERT INTO emergency_teams (name, type, department, leader_id, leader_name, contact_phone, description, member_ids)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+          [
+            teamName,
+            t.type,
+            t.orgName,
+            t.leader ? t.leader.id : null,
+            t.leader ? t.leader.name : '',
+            t.leader ? plainPhone(t.leader.phone) : '',
+            t.leader ? null : '负责人待定（组织尚未成立）',
+            memberIds,
+          ]
+        );
+        const teamId = teamRes.rows[0].id;
+        for (const m of t.members) {
+          await client.query(
+            `INSERT INTO emergency_team_members (team_id, employee_id, employee_name, role, phone)
+             VALUES ($1,$2,$3,$4,$5)`,
+            [teamId, m.id, m.name, m.pos_name, plainPhone(m.phone)]
+          );
+        }
+        created += 1;
+        if (t.center === 'hw') hwCount += 1;
+        else if (t.center === 'green') greenCount += 1;
+      }
+      await client.query('COMMIT');
+
+      await auditLog({
+        userId: req.user?.id,
+        username: req.user?.username,
+        action: 'generate',
+        module: 'emergency',
+        description: `自动生成应急队伍 ${created} 支（环卫 ${hwCount} / 市政绿化 ${greenCount}）`,
+        ip: req.ip,
+      }).catch(() => {});
+
+      res.json(
+        success(
+          { created, hwCount, greenCount },
+          `生成成功，共 ${created} 支队伍（环卫 ${hwCount} 支 / 市政绿化 ${greenCount} 支）`
+        )
+      );
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw e;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ============================================================
+// 应急事件 CRUD
+// ============================================================
+
+// ========== GET /events/list — 事件列表 ==========
+router.get('/events/list', async (req, res) => {
+  try {
+    const { page = 1, pageSize = 20, keyword, eventType, eventLevel, status } = req.query;
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.min(Math.max(1, parseInt(pageSize) || 10), 200);
+    const offset = (pageNum - 1) * limitNum;
+
+    if (!isConnected()) {
+      initMemoryDataAll();
+      let data = memoryEvents.filter(r => !r.is_deleted);
+      if (keyword) {
+        const kw = keyword.toLowerCase();
+        data = data.filter(r =>
+          (r.title && r.title.toLowerCase().includes(kw)) ||
+          (r.location && r.location.toLowerCase().includes(kw))
+        );
+      }
+      if (eventType) data = data.filter(r => r.eventType === eventType);
+      if (eventLevel) data = data.filter(r => r.eventLevel === eventLevel);
+      if (status) data = data.filter(r => r.status === status);
+      const { list, total } = paginateMemory(data, pageNum, limitNum);
+      return buildListResponse(res, list, total, pageNum, limitNum, '查询成功(内存模式)');
+    }
+
+    await ensureAllTables();
+
+    const conditions = [];
+    const params = [];
+    let paramIdx = 1;
+
+    if (keyword) {
+      conditions.push(`(title ILIKE $${paramIdx++} OR location ILIKE $${paramIdx++})`);
+      params.push(`%${keyword}%`, `%${keyword}%`);
+    }
+    if (eventType) { conditions.push(`event_type = $${paramIdx++}`); params.push(eventType); }
+    if (eventLevel) { conditions.push(`event_level = $${paramIdx++}`); params.push(eventLevel); }
+    if (status) { conditions.push(`status = $${paramIdx++}`); params.push(status); }
+
+    conditions.push('is_deleted = false');
+    const whereClause = `WHERE ${conditions.join(' AND ')}`;
+
+    const countResult = await pool.query(`SELECT COUNT(*)::int AS total FROM emergency_events ${whereClause}`, params);
+    const total = countResult.rows[0].total;
+
+    params.push(limitNum, offset);
+    const result = await pool.query(
+      `SELECT * FROM emergency_events ${whereClause} ORDER BY happen_time DESC NULLS LAST, id DESC LIMIT $${paramIdx++} OFFSET $${paramIdx++}`,
+      params
+    );
+
+    res.json(success({ list: result.rows.map(formatEventRow), total, page: pageNum, pageSize: limitNum }, '查询成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ========== GET /events/stats — 事件统计 ==========
+router.get('/events/stats', async (req, res) => {
+  try {
+    if (!isConnected()) {
+      initMemoryDataAll();
+      const data = memoryEvents.filter(r => !r.is_deleted);
+      const byType = {};
+      const byStatus = {};
+      const byLevel = {};
+      data.forEach(e => {
+        byType[e.eventType || 'other'] = (byType[e.eventType || 'other'] || 0) + 1;
+        byStatus[e.status || 'unknown'] = (byStatus[e.status || 'unknown'] || 0) + 1;
+        byLevel[e.eventLevel || 'unknown'] = (byLevel[e.eventLevel || 'unknown'] || 0) + 1;
+      });
+      const isClosedKey = (k) => /closed|resolved|结案|完成|已结束|done/i.test(k);
+      let closed = 0;
+      Object.entries(byStatus).forEach(([k, v]) => { if (isClosedKey(k)) closed += v; });
+      const handling = data.length - closed;
+      const avgDuration = 0;
+      return res.json(success({ total: data.length, handling, closed, avgDuration, byType, byStatus, byLevel }, '统计成功(内存模式)'));
+    }
+
+    await ensureAllTables();
+
+    const [totalR, typeR, statusR, levelR] = await Promise.all([
+      pool.query('SELECT COUNT(*)::int AS total FROM emergency_events WHERE is_deleted = false'),
+      pool.query("SELECT event_type, COUNT(*)::int AS count FROM emergency_events WHERE is_deleted = false GROUP BY event_type"),
+      pool.query("SELECT status, COUNT(*)::int AS count FROM emergency_events WHERE is_deleted = false GROUP BY status"),
+      pool.query("SELECT event_level, COUNT(*)::int AS count FROM emergency_events WHERE is_deleted = false GROUP BY event_level"),
+    ]);
+
+    const byType = {};
+    typeR.rows.forEach(r => { byType[r.event_type || 'other'] = parseInt(r.count); });
+    const byStatus = {};
+    statusR.rows.forEach(r => { byStatus[r.status || 'unknown'] = parseInt(r.count); });
+    const byLevel = {};
+    levelR.rows.forEach(r => { byLevel[r.event_level || 'unknown'] = parseInt(r.count); });
+
+    const isClosedKey = (k) => /closed|resolved|结案|完成|已结束|done/i.test(k);
+    let closed = 0;
+    Object.entries(byStatus).forEach(([k, v]) => { if (isClosedKey(k)) closed += v; });
+    const total = parseInt(totalR.rows[0].total);
+    const handling = total - closed;
+    const avgDuration = 0;
+    res.json(success({
+      total,
+      handling,
+      closed,
+      avgDuration,
+      byType,
+      byStatus,
+      byLevel,
+    }, '统计成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ========== GET /events/export — 导出事件清单（CSV，必须定义在 /:id 之前以免被参数路由遮蔽） ==========
+router.get('/events/export', requireRole('admin', 'safety_manager'), async (req, res, next) => {
+  try {
+    await ensureAllTables();
+    const result = await pool.query('SELECT * FROM emergency_events WHERE is_deleted = FALSE ORDER BY created_at DESC');
+    const headers = ['事件标题', '事件类型', '事件级别', '发生地点', '发生时间', '报告人', '处置状态', '处置结果', '关联预案ID', '关联演练ID', '备注'];
+    const rows = result.rows.map(r => [
+      r.title || '',
+      r.event_type || '',
+      r.event_level || '',
+      r.location || '',
+      r.happen_time || '',
+      r.reporter || '',
+      r.status || '',
+      r.result || '',
+      r.related_plan_id || '',
+      r.related_drill_id || '',
+      r.remark || '',
+    ]);
+    const csv = [headers, ...rows]
+      .map(row => row.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename=emergency_events.csv');
+    res.send('\uFEFF' + csv);
+  } catch (err) { next(err); }
+});
+
+// ========== GET /events/:id — 单条事件 ==========
+router.get('/events/:id', async (req, res) => {
+  try {
+    if (!isConnected()) {
+      initMemoryDataAll();
+      const record = memoryEvents.find(r => r.id === parseInt(req.params.id) && !r.is_deleted);
+      if (!record) return sendNotFound(res);
+      return res.json(success(record, '查询成功(内存模式)'));
+    }
+    await ensureAllTables();
+    const result = await pool.query('SELECT * FROM emergency_events WHERE id = $1 AND is_deleted = false', [req.params.id]);
+    if (result.rows.length === 0) return res.json(error(-2, '记录不存在'));
+    res.json(success(formatEventRow(result.rows[0]), '查询成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ========== POST /events — 创建事件 ==========
+router.post('/events', requireRole('admin', 'safety_manager'), async (req, res) => {
+  try {
+    const b = req.body;
+    if (!isConnected()) {
+      initMemoryDataAll();
+      const record = buildMemoryRecord(eventIdCounter++, {
+        title: b.title || '',
+        eventType: b.eventType || b.event_type || '',
+        eventLevel: b.eventLevel || b.event_level || '',
+        happenTime: b.happenTime || b.happen_time || null,
+        location: b.location || '',
+        reporter: b.reporter || '',
+        status: b.status || 'reporting',
+        responseProcess: b.responseProcess || b.response_process || '',
+        handlingMeasures: b.handlingMeasures || b.handling_measures || '',
+        result: b.result || '',
+        relatedPlanId: b.relatedPlanId || b.related_plan_id || null,
+        relatedDrillId: b.relatedDrillId || b.related_drill_id || null,
+        personnelId: b.personnelId || b.personnel_id || null,
+        remark: b.remark || '',
+      });
+      memoryEvents.push(record);
+      return res.json(success(record, '创建成功(内存模式)'));
+    }
+
+    await ensureAllTables();
+    const result = await pool.query(`
+      INSERT INTO emergency_events (title, event_type, event_level, happen_time, location, reporter, status, response_process, handling_measures, result, related_plan_id, related_drill_id, remark, personnel_id)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+      RETURNING *
+    `, [
+      b.title || '',
+      b.eventType || b.event_type || '',
+      b.eventLevel || b.event_level || '',
+      b.happenTime || b.happen_time || null,
+      b.location || '',
+      b.reporter || '',
+      b.status || 'reporting',
+      b.responseProcess || b.response_process || '',
+      b.handlingMeasures || b.handling_measures || '',
+      b.result || '',
+      b.relatedPlanId || b.related_plan_id || null,
+      b.relatedDrillId || b.related_drill_id || null,
+      b.remark || '',
+      b.personnelId || b.personnel_id || null,
+    ]);
+
+    await auditLog({ userId: req.user?.id, username: req.user?.username, action: 'create', module: 'emergency', description: `创建应急事件: ${b.title}`, ip: req.ip }).catch(() => {});
+    res.json(success(formatEventRow(result.rows[0]), '创建成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ========== PUT /events/:id — 更新事件 ==========
+router.put('/events/:id', requireRole('admin', 'safety_manager'), async (req, res) => {
+  try {
+    const b = req.body;
+    if (!isConnected()) {
+      initMemoryDataAll();
+      const idx = memoryEvents.findIndex(r => r.id === parseInt(req.params.id) && !r.is_deleted);
+      if (idx === -1) return res.json(error(-2, '记录不存在'));
+      Object.assign(memoryEvents[idx], b, { updatedAt: new Date().toISOString() });
+      return res.json(success(memoryEvents[idx], '更新成功(内存模式)'));
+    }
+
+    await ensureAllTables();
+    const result = await pool.query(`
+      UPDATE emergency_events SET
+        title = COALESCE($1, title),
+        event_type = COALESCE($2, event_type),
+        event_level = COALESCE($3, event_level),
+        happen_time = COALESCE($4, happen_time),
+        location = COALESCE($5, location),
+        reporter = COALESCE($6, reporter),
+        status = COALESCE($7, status),
+        response_process = COALESCE($8, response_process),
+        handling_measures = COALESCE($9, handling_measures),
+        result = COALESCE($10, result),
+        related_plan_id = COALESCE($11, related_plan_id),
+        related_drill_id = COALESCE($12, related_drill_id),
+        personnel_id = COALESCE($13, personnel_id),
+        remark = COALESCE($14, remark),
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $15 AND is_deleted = false RETURNING *
+    `, [
+      b.title || null,
+      b.eventType || b.event_type || null,
+      b.eventLevel || b.event_level || null,
+      b.happenTime || b.happen_time || null,
+      b.location || null,
+      b.reporter || null,
+      b.status || null,
+      b.responseProcess || b.response_process || null,
+      b.handlingMeasures || b.handling_measures || null,
+      b.result || null,
+      b.relatedPlanId || b.related_plan_id || null,
+      b.relatedDrillId || b.related_drill_id || null,
+      b.personnelId || b.personnel_id || null,
+      b.remark || null,
+      req.params.id,
+    ]);
+
+    if (result.rows.length === 0) return res.json(error(-2, '记录不存在'));
+    await auditLog({ userId: req.user?.id, username: req.user?.username, action: 'update', module: 'emergency', description: `更新应急事件 ID=${req.params.id}`, ip: req.ip }).catch(() => {});
+    res.json(success(formatEventRow(result.rows[0]), '更新成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ========== DELETE /events/:id — 删除事件 ==========
+router.delete('/events/:id', requireRole('admin', 'safety_manager'), async (req, res) => {
+  try {
+    if (!isConnected()) {
+      initMemoryDataAll();
+      const record = memoryEvents.find(r => r.id === parseInt(req.params.id) && !r.is_deleted);
+      if (!record) return res.json(error(-2, '记录不存在'));
+      record.is_deleted = true;
+      return res.json(success(null, '删除成功(内存模式)'));
+    }
+
+    await ensureAllTables();
+    const result = await pool.query(
+      'UPDATE emergency_events SET is_deleted = true, updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND is_deleted = false RETURNING id',
+      [req.params.id]
+    );
+    if (result.rows.length === 0) return res.json(error(-2, '记录不存在'));
+
+    await auditLog({ userId: req.user?.id, username: req.user?.username, action: 'delete', module: 'emergency', description: `删除应急事件 ID=${req.params.id}`, ip: req.ip }).catch(() => {});
+    res.json(success(null, '删除成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ========== 物资CSV导出辅助函数 ==========
+function sendMaterialCsvExport(res, data) {
+  const headers = ['ID', '物资名称', '分类', '规格', '数量', '存放位置', '负责人', '有效期', '状态', '备注', '创建时间'];
+  const rows = data.map(r => [
+    r.id || '',
+    (r.name || '').replace(/"/g, '""'),
+    r.category || '',
+    r.spec || '',
+    r.quantity || 0,
+    r.location || '',
+    r.responsible_person || r.responsiblePerson || '',
+    r.expire_date ? new Date(r.expire_date).toISOString().slice(0, 10) : '',
+    calcMaterialStatus(r.expire_date),
+    (r.remark || '').replace(/"/g, '""'),
+    r.created_at ? new Date(r.created_at).toISOString().slice(0, 10) : '',
+  ].map(v => `"${v}"`).join(','));
+  const csv = '\uFEFF' + headers.map(h => `"${h}"`).join(',') + '\n' + rows.join('\n');
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="emergency_materials_${new Date().toISOString().slice(0, 10)}.csv"`);
+  return res.send(csv);
+}
+
+// ============================================================
+// 通用附件管理（plans/drills/materials/teams/events）
+// ============================================================
+const VALID_BIZ_TYPES = ['plans', 'drills', 'materials', 'teams', 'events'];
+
+function getBizTable(bizType) {
+  const map = {
+    plans: 'emergency_plans',
+    drills: 'emergency_drills',
+    materials: 'emergency_materials',
+    teams: 'emergency_teams',
+    events: 'emergency_events',
+  };
+  return map[bizType];
+}
+
+// ========== GET /:bizType/:id/attachments — 附件列表 ==========
+router.get('/:bizType/:id/attachments', async (req, res, next) => {
+  try {
+    const { bizType, id } = req.params;
+    if (!VALID_BIZ_TYPES.includes(bizType)) return res.json(error(-1, '无效的业务类型'));
+
+    if (bizType === 'plans') {
+      req.url = `/plans/${id}/attachments`;
+      req.params = { id };
+      return next('route');
+    }
+
+    if (!isConnected()) {
+      initMemoryDataAll();
+      const data = memoryAttachments.filter(a => a.biz_type === bizType && a.biz_id === parseInt(id) && !a.is_deleted);
+      return res.json(success(data.map(camelKeys), '查询成功(内存模式)'));
+    }
+
+    await ensureAllTables();
+    const result = await pool.query(
+      'SELECT * FROM emergency_attachments WHERE biz_type = $1 AND biz_id = $2 AND is_deleted = FALSE ORDER BY created_at DESC',
+      [bizType, id]
+    );
+    res.json(success(result.rows.map(camelKeys), '查询成功'));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ========== POST /:bizType/:id/attachments — 上传附件 ==========
+router.post('/:bizType/:id/attachments', requireRole('admin', 'safety_manager'), uploadDocument.single('file'), async (req, res, next) => {
+  try {
+    const { bizType, id } = req.params;
+    if (!VALID_BIZ_TYPES.includes(bizType)) return res.json(error(-1, '无效的业务类型'));
+    if (!req.file) return res.json(error(-1, '请上传文件'));
+
+    if (bizType === 'plans') {
+      req.url = `/plans/${id}/attachments`;
+      req.params = { id };
+      return next('route');
+    }
+
+    const { uploaded_by = 'admin' } = req.body;
+    const fileUrl = getFileUrl(req, req.file.filename, 'documents');
+    const originalName = fixFilenameEncoding(req.file.originalname);
+
+    if (!isConnected()) {
+      initMemoryDataAll();
+      const record = buildMemoryRecord(memoryAttachmentIdCounter++, {
+        biz_type: bizType,
+        biz_id: parseInt(id),
+        filename: req.file.filename,
+        original_name: originalName,
+        file_type: 'document',
+        file_size: req.file.size,
+        file_url: fileUrl,
+        uploaded_by,
+      });
+      memoryAttachments.push(record);
+      return res.json(success(camelKeys(record), '上传成功(内存模式)'));
+    }
+
+    await ensureAllTables();
+    const result = await pool.query(`
+      INSERT INTO emergency_attachments (biz_type, biz_id, filename, original_name, file_type, file_size, file_url, uploaded_by)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      RETURNING *
+    `, [bizType, id, req.file.filename, originalName, 'document', req.file.size, fileUrl, uploaded_by]);
+
+    await auditLog({ userId: req.user?.id, username: req.user?.username, action: 'upload', module: 'emergency', description: `上传附件: ${originalName}`, ip: req.ip }).catch(() => {});
+    res.json(success(camelKeys(result.rows[0]), '上传成功'));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ========== DELETE /:bizType/:id/attachments/:aid — 删除附件 ==========
+router.delete('/:bizType/:id/attachments/:aid', requireRole('admin', 'safety_manager'), async (req, res, next) => {
+  try {
+    const { bizType, id, aid } = req.params;
+    if (!VALID_BIZ_TYPES.includes(bizType)) return res.json(error(-1, '无效的业务类型'));
+
+    if (bizType === 'plans') {
+      req.url = `/plans/${id}/attachments/${aid}`;
+      req.params = { id, aid };
+      return next('route');
+    }
+
+    if (!isConnected()) {
+      initMemoryDataAll();
+      const att = memoryAttachments.find(a => a.id === parseInt(aid) && a.biz_type === bizType && a.biz_id === parseInt(id) && !a.is_deleted);
+      if (!att) return sendNotFound(res, '附件不存在');
+      att.is_deleted = true;
+      return res.json(success(null, '删除成功(内存模式)'));
+    }
+
+    await ensureAllTables();
+    const result = await pool.query(
+      'UPDATE emergency_attachments SET is_deleted = TRUE WHERE id = $1 AND biz_type = $2 AND biz_id = $3 RETURNING id',
+      [aid, bizType, id]
+    );
+    if (result.rows.length === 0) return sendNotFound(res, '附件不存在');
+    res.json(success(null, '删除成功'));
+  } catch (err) {
+    next(err);
+  }
+});
+
+module.exports = router;

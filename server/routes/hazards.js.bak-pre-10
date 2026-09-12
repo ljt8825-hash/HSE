@@ -1,0 +1,1387 @@
+/**
+ * 隐患排查治理路由 - PostgreSQL + 内存降级双模式
+ * 表: hazards
+ * 端点: GET / GET /:id POST / PUT /:id DELETE /:id GET /stats
+ * 字段映射（Excel表头 → DB字段 → 前端字段）:
+ *   序号        → no          → no
+ *   隐患描述    → description → description
+ *   整改措施    → measure     → measure
+ *   检查时间    → hazard_date → checkDate
+ *   检查人员    → checker     → checker
+ *   整改人员    → fixer       → fixer
+ *   整改时间    → fix_date    → fixDate
+ *   是否整改完成→ status      → isResolved (是→已完成, 否→未完成)
+ */
+
+const express = require('express');
+const router = express.Router();
+const { auditLog } = require('./audit');
+const { pool, isConnected } = require('../config/db');
+const { success, error } = require('../middleware/response');
+const { paginateMemory, buildListResponse, sendNotFound, buildMemoryRecord, camelKeys } = require('../utils/commonResponse');
+const { uploadDocument, getFileUrl, fixFilenameEncoding } = require('../middleware/upload');
+const { requirePermission } = require('../middleware/auth');
+const hseEventSync = require('../services/hseEventSyncService');
+const { createNotification } = require('../services/notificationService');
+const hseRules = require('../config/hseRules');
+
+// ========== 数据库表初始化（IF NOT EXISTS，可重复执行） ==========
+let tablesInitialized = false;
+
+async function ensureTables() {
+  if (tablesInitialized) return;
+  if (!isConnected()) return;
+  try {
+    // 1. 隐患附件表
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS hazard_attachments (
+        id            BIGSERIAL PRIMARY KEY,
+        hazard_id     BIGINT NOT NULL,
+        filename      VARCHAR(255) NOT NULL,
+        original_name VARCHAR(255) NOT NULL,
+        file_type     VARCHAR(64) NOT NULL DEFAULT 'document',
+        file_size     BIGINT NOT NULL DEFAULT 0,
+        file_url      VARCHAR(512) NOT NULL,
+        version       VARCHAR(32) NOT NULL DEFAULT '1.0',
+        uploaded_by   VARCHAR(64),
+        is_latest     BOOLEAN NOT NULL DEFAULT TRUE,
+        is_deleted    BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_hazard_attachments_hazard ON hazard_attachments(hazard_id)');
+
+    // 2. 隐患版本履历表
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS hazard_versions (
+        id             BIGSERIAL PRIMARY KEY,
+        hazard_id      BIGINT NOT NULL,
+        version        VARCHAR(32) NOT NULL,
+        change_type    VARCHAR(32) NOT NULL DEFAULT 'update',
+        change_summary TEXT,
+        changed_by     VARCHAR(64),
+        created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_hazard_versions_hazard ON hazard_versions(hazard_id)');
+
+    // 3. 隐患联动字段（Phase 14：与风险管控模块联动）
+    try {
+      await pool.query(`ALTER TABLE hazards ADD COLUMN IF NOT EXISTS related_risk_id BIGINT`);
+      await pool.query(`ALTER TABLE hazards ADD COLUMN IF NOT EXISTS risk_level VARCHAR(32)`);
+    } catch (_e) {
+      // 字段已存在或表不存在，忽略
+    }
+
+    // 4. Sprint5.9: 添加人员关联字段
+    await pool.query(`ALTER TABLE IF EXISTS hazards ADD COLUMN IF NOT EXISTS finder_id BIGINT`);
+    await pool.query(`ALTER TABLE IF EXISTS hazards ADD COLUMN IF NOT EXISTS responsible_id BIGINT`);
+    await pool.query(`ALTER TABLE IF EXISTS hazards ADD COLUMN IF NOT EXISTS corrector_id BIGINT`);
+
+    // 5. Sprint5.13: 完善隐患模型 - 新增字段
+    await pool.query(`ALTER TABLE IF EXISTS hazards ADD COLUMN IF NOT EXISTS hazard_type VARCHAR(64)`);
+    await pool.query(`ALTER TABLE IF EXISTS hazards ADD COLUMN IF NOT EXISTS location VARCHAR(255)`);
+    await pool.query(`ALTER TABLE IF EXISTS hazards ADD COLUMN IF NOT EXISTS grid_id BIGINT`);
+    await pool.query(`ALTER TABLE IF EXISTS hazards ADD COLUMN IF NOT EXISTS rectification TEXT`);
+    await pool.query(`ALTER TABLE IF EXISTS hazards ADD COLUMN IF NOT EXISTS reviewer_id BIGINT`);
+    await pool.query(`ALTER TABLE IF EXISTS hazards ADD COLUMN IF NOT EXISTS rectify_date DATE`);
+    await pool.query(`ALTER TABLE IF EXISTS hazards ADD COLUMN IF NOT EXISTS review_date DATE`);
+    await pool.query(`ALTER TABLE IF EXISTS hazards ADD COLUMN IF NOT EXISTS review_result VARCHAR(32)`);
+    await pool.query(`ALTER TABLE IF EXISTS hazards ADD COLUMN IF NOT EXISTS deadline_days INT DEFAULT 30`);
+
+    // 6. Sprint5.13: 添加索引
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_hazards_hazard_type ON hazards(hazard_type)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_hazards_responsible_id ON hazards(responsible_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_hazards_grid_id ON hazards(grid_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_hazards_status ON hazards(status)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_hazards_risk_level ON hazards(risk_level)`);
+
+    tablesInitialized = true;
+    console.log('[Hazards] 数据库表 attachments/versions/related_risk/finder/responsible/corrector/hazard_type/location/grid/rectification/reviewer 已就绪');
+  } catch (err) {
+    console.warn('[Hazards] 数据库表初始化失败:', err.message);
+  }
+}
+
+// ========== 时效状态计算（隐患整改期限，默认30天） ==========
+// 规则：基于 hazard_date + deadline_days(默认30天) 计算整改期限
+// - 过期：当前日期 > 整改期限 且 未整改完成
+// - 临期：距整改期限 ≤ 7 天 且 未整改完成
+// - 正常：距整改期限 > 7 天 且 未整改完成
+// - 已完成：已整改完成
+function calcExpiryStatus(hazardDate, isResolved, deadlineDays) {
+  if (isResolved === '是' || isResolved === '已完成' || isResolved === 'completed') return 'resolved';
+  const dd = deadlineDays || 30;
+  if (!hazardDate) return 'unknown';
+  const hd = new Date(hazardDate);
+  if (isNaN(hd.getTime())) return 'unknown';
+  const deadline = new Date(hd);
+  deadline.setDate(deadline.getDate() + parseInt(dd));
+  const now = new Date();
+  const diffDays = Math.ceil((deadline - now) / (1000 * 60 * 60 * 24));
+  if (diffDays < 0) return 'expired';
+  if (diffDays <= 7) return 'expiring';
+  return 'normal';
+}
+
+// ========== Sprint5.13: 隐患状态流转常量 ==========
+const HAZARD_STATUS = {
+  DISCOVERED: 'discovered',
+  PROCESSING: 'processing',
+  PENDING_REVIEW: 'pending_review',
+  CLOSED: 'closed',
+};
+
+const STATUS_MAP = {
+  '发现': HAZARD_STATUS.DISCOVERED,
+  '整改中': HAZARD_STATUS.PROCESSING,
+  '待复查': HAZARD_STATUS.PENDING_REVIEW,
+  '关闭': HAZARD_STATUS.CLOSED,
+  '未完成': HAZARD_STATUS.DISCOVERED,
+  '已完成': HAZARD_STATUS.CLOSED,
+};
+
+const STATUS_LABEL = {
+  [HAZARD_STATUS.DISCOVERED]: '发现',
+  [HAZARD_STATUS.PROCESSING]: '整改中',
+  [HAZARD_STATUS.PENDING_REVIEW]: '待复查',
+  [HAZARD_STATUS.CLOSED]: '关闭',
+};
+
+function getStatusLabel(status) {
+  return STATUS_LABEL[status] || status;
+}
+
+// ========== 内存降级存储 ==========
+let memoryRecords = [];
+let memoryHazardAttachments = [];
+let memoryHazardVersions = [];
+let memoryIdCounter = 1;
+let memoryInitialized = false;
+let memoryAttachmentIdCounter = 1;
+let memoryVersionIdCounter = 1;
+
+function initMemoryData() {
+  if (memoryInitialized) return;
+  memoryInitialized = true;
+  memoryRecords = [];
+  memoryIdCounter = 1;
+}
+
+// ========== 是否整改完成 转换 ==========
+// DB status 存储: '已完成' / '未完成'
+// 前端 isResolved: '是' / '否'
+function statusToIsResolved(status) {
+  if (!status) return '否';
+  if (status === '已完成' || status === 'completed') return '是';
+  return '否';
+}
+function isResolvedToStatus(isResolved) {
+  if (isResolved === '是') return '已完成';
+  return '未完成';
+}
+
+// ========== 格式化行 ==========
+function formatDate(date) {
+  if (!date) return null;
+  const d = date instanceof Date ? date : new Date(date);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function formatRow(row) {
+  const checkDate = row.hazard_date ? (row.hazard_date instanceof Date ? row.hazard_date : new Date(row.hazard_date)) : null;
+  const fixDate = row.fix_date ? (row.fix_date instanceof Date ? row.fix_date : new Date(row.fix_date)) : null;
+  const rectifyDate = row.rectify_date ? (row.rectify_date instanceof Date ? row.rectify_date : new Date(row.rectify_date)) : null;
+  const reviewDate = row.review_date ? (row.review_date instanceof Date ? row.review_date : new Date(row.review_date)) : null;
+  const isResolved = statusToIsResolved(row.status);
+  const checkDateStr = checkDate ? formatDate(checkDate) : null;
+  const expiryStatus = calcExpiryStatus(checkDateStr, isResolved, row.deadline_days);
+
+  return camelKeys({
+    id: row.id,
+    no: row.no || null,
+    description: row.description || '',
+    measure: row.measure || '',
+    checkDate: checkDateStr,
+    checker: row.checker || '',
+    fixer: row.fixer || '',
+    fixDate: fixDate ? formatDate(fixDate) : null,
+    isResolved,
+    expiryStatus,
+    remark: row.remark || '',
+    relatedRiskId: row.related_risk_id || null,
+    riskLevel: row.risk_level || null,
+    finderId: row.finder_id || null,
+    responsibleId: row.responsible_id || null,
+    correctorId: row.corrector_id || null,
+    // P0-3: 检查/整改人员关联员工ID（花名册为基石）
+    checkerId: row.checker_id || null,
+    fixerId: row.fixer_id || null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    hazardType: row.hazard_type || null,
+    location: row.location || '',
+    gridId: row.grid_id || null,
+    rectification: row.rectification || '',
+    reviewerId: row.reviewer_id || null,
+    rectifyDate: rectifyDate ? formatDate(rectifyDate) : null,
+    reviewDate: reviewDate ? formatDate(reviewDate) : null,
+    reviewResult: row.review_result || null,
+    deadlineDays: row.deadline_days || 30,
+  });
+}
+
+// ========== 隐患过期 → 通知中心推送（urgent 级别）==========
+async function notifyHazardExpiry(hazard, status) {
+  try {
+    if (!hazard) return;
+    const title = status === 'expired'
+      ? `隐患整改已过期：${hazard.description || '#'+hazard.id}`
+      : `隐患整改临期提醒：${hazard.description || '#'+hazard.id}`;
+    const content = status === 'expired'
+      ? `隐患「${hazard.description || ''}」（检查日期 ${hazard.hazard_date || hazard.checkDate || '-'}）已超过整改期限，请立即处置。`
+      : `隐患「${hazard.description || ''}」（检查日期 ${hazard.hazard_date || hazard.checkDate || '-'}）将在 7 天内到期整改，请尽快处置。`;
+    await createNotification({
+      userId: null, // 系统级广播
+      title,
+      content,
+      type: 'alert', // urgent → alert 级别
+      bizType: 'hazard_expired',
+      bizId: String(hazard.id),
+      pushWs: true,
+    });
+  } catch (err) {
+    console.warn('[Hazards] 通知推送失败:', err.message);
+  }
+}
+
+// ========== 反向联动：隐患整改完成 → 更新关联风险点 ==========
+// 更新 risk_sources.last_hazard_check_date = 隐患整改完成日期（fix_date 或今天）
+// 更新 risk_sources.hazard_count = 该风险点关联的未完成隐患数（递减逻辑通过重新统计实现）
+async function syncRiskOnHazardResolve(riskId, fixDate, client) {
+  if (!riskId) return;
+  try {
+    const today = fixDate || new Date().toISOString().slice(0, 10);
+    if (isConnected()) {
+      const sql = `
+        UPDATE risk_sources
+        SET last_hazard_check_date = $1,
+            hazard_count = (
+              SELECT COUNT(*)::int FROM hazards h
+              WHERE h.related_risk_id = $2
+                AND h.is_deleted = FALSE
+                AND h.status != '已完成'
+            ),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $2
+      `;
+      if (client) {
+        await client.query(sql, [today, riskId]);
+      } else {
+        await pool.query(sql, [today, riskId]);
+      }
+    }
+    // 内存降级模式无 risk_sources 数据，这里不做处理
+  } catch (err) {
+    console.warn('[Hazards] 反向联动更新风险点失败:', err.message);
+  }
+}
+
+// ========== GET / — 列表 ==========
+router.get('/', async (req, res) => {
+  try {
+    if (!isConnected()) {
+      initMemoryData();
+      let data = memoryRecords.filter(r => !r.is_deleted);
+      const { page = 1, pageSize = 20, keyword, isResolved, startDate, endDate, status, hazardType, riskLevel } = req.query;
+      if (keyword) {
+        const kw = keyword.toLowerCase();
+        data = data.filter(r =>
+          (r.description && r.description.toLowerCase().includes(kw)) ||
+          (r.checker && r.checker.toLowerCase().includes(kw)) ||
+          (r.fixer && r.fixer.toLowerCase().includes(kw))
+        );
+      }
+      if (isResolved) {
+        const targetStatus = isResolvedToStatus(isResolved);
+        data = data.filter(r => statusToIsResolved(r.status) === isResolved);
+      }
+      if (status) {
+        data = data.filter(r => r.status === status);
+      }
+      if (hazardType) {
+        data = data.filter(r => r.hazard_type === hazardType);
+      }
+      if (riskLevel) {
+        data = data.filter(r => r.risk_level === riskLevel);
+      }
+      if (startDate) {
+        data = data.filter(r => {
+          const d = r.hazard_date ? new Date(r.hazard_date) : null;
+          return d && d >= new Date(startDate);
+        });
+      }
+      if (endDate) {
+        data = data.filter(r => {
+          const d = r.hazard_date ? new Date(r.hazard_date) : null;
+          return d && d <= new Date(endDate);
+        });
+      }
+      const { list, total } = paginateMemory(data, page, pageSize);
+      return buildListResponse(res, list.map(formatRow), total, page, pageSize, '查询成功(内存模式)');
+    }
+
+    let whereSql = ' WHERE is_deleted = false';
+    const params = [];
+    let paramIdx = 0;
+
+    const { page = 1, pageSize = 20, keyword, isResolved, startDate, endDate, status, hazardType, riskLevel } = req.query;
+
+    if (keyword) {
+      paramIdx++;
+      whereSql += ` AND (description ILIKE $${paramIdx} OR checker ILIKE $${paramIdx} OR fixer ILIKE $${paramIdx})`;
+      params.push(`%${keyword}%`);
+    }
+    if (isResolved) {
+      const targetStatus = isResolvedToStatus(isResolved);
+      paramIdx++;
+      whereSql += ` AND status = $${paramIdx}`;
+      params.push(targetStatus);
+    }
+    if (status) {
+      paramIdx++;
+      whereSql += ` AND status = $${paramIdx}`;
+      params.push(status);
+    }
+    if (hazardType) {
+      paramIdx++;
+      whereSql += ` AND hazard_type = $${paramIdx}`;
+      params.push(hazardType);
+    }
+    if (riskLevel) {
+      paramIdx++;
+      whereSql += ` AND risk_level = $${paramIdx}`;
+      params.push(riskLevel);
+    }
+    if (startDate) {
+      paramIdx++;
+      whereSql += ` AND hazard_date >= $${paramIdx}`;
+      params.push(startDate);
+    }
+    if (endDate) {
+      paramIdx++;
+      whereSql += ` AND hazard_date <= $${paramIdx}`;
+      params.push(endDate);
+    }
+
+    const countResult = await pool.query(`SELECT COUNT(*)::int AS total FROM hazards${whereSql}`, params);
+    const total = countResult.rows[0].total;
+
+    const offset = (parseInt(page) - 1) * parseInt(pageSize);
+    paramIdx++;
+    const limitP = paramIdx;
+    params.push(parseInt(pageSize));
+    paramIdx++;
+    const offsetP = paramIdx;
+    params.push(offset);
+
+    const result = await pool.query(
+      `SELECT * FROM hazards${whereSql} ORDER BY hazard_date DESC, id DESC LIMIT $${limitP} OFFSET $${offsetP}`,
+      params
+    );
+
+    res.json(success({
+      list: result.rows.map(formatRow),
+      total,
+      page: parseInt(page),
+      pageSize: parseInt(pageSize)
+    }, '查询成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ========== GET /stats — 统计 ==========
+router.get('/stats', async (req, res) => {
+  try {
+    if (!isConnected()) {
+      const total = memoryRecords.filter(r => !r.is_deleted).length;
+      const resolved = memoryRecords.filter(r => !r.is_deleted && statusToIsResolved(r.status) === '是').length;
+      return res.json(success({
+        total,
+        resolved,
+        unresolved: total - resolved,
+        discovered: memoryRecords.filter(r => !r.is_deleted && r.status === HAZARD_STATUS.DISCOVERED).length,
+        processing: memoryRecords.filter(r => !r.is_deleted && r.status === HAZARD_STATUS.PROCESSING).length,
+        pendingReview: memoryRecords.filter(r => !r.is_deleted && r.status === HAZARD_STATUS.PENDING_REVIEW).length,
+        closed: memoryRecords.filter(r => !r.is_deleted && r.status === HAZARD_STATUS.CLOSED).length,
+        byDepartment: [],
+        byPosition: [],
+        byRegion: [],
+        repeatedHazards: [],
+      }, '统计成功(内存模式)'));
+    }
+
+    const [totalR, discoveredR, processingR, pendingReviewR, closedR] = await Promise.all([
+      pool.query('SELECT COUNT(*)::int AS total FROM hazards WHERE is_deleted = false'),
+      pool.query(`SELECT COUNT(*)::int AS total FROM hazards WHERE is_deleted = false AND status = '${HAZARD_STATUS.DISCOVERED}'`),
+      pool.query(`SELECT COUNT(*)::int AS total FROM hazards WHERE is_deleted = false AND status = '${HAZARD_STATUS.PROCESSING}'`),
+      pool.query(`SELECT COUNT(*)::int AS total FROM hazards WHERE is_deleted = false AND status = '${HAZARD_STATUS.PENDING_REVIEW}'`),
+      pool.query(`SELECT COUNT(*)::int AS total FROM hazards WHERE is_deleted = false AND status = '${HAZARD_STATUS.CLOSED}'`),
+    ]);
+
+    const total = totalR.rows[0].total;
+    const discovered = discoveredR.rows[0].total;
+    const processing = processingR.rows[0].total;
+    const pendingReview = pendingReviewR.rows[0].total;
+    const closed = closedR.rows[0].total;
+
+    const departmentStats = await pool.query(`
+      SELECT ou.name AS department_name, COUNT(*)::int AS total
+      FROM hazards h
+      LEFT JOIN hse_org_unit ou ON h.responsible_id = (
+        SELECT ear.org_unit_id FROM employee_assignment ear 
+        WHERE ear.employee_id = h.responsible_id AND ear.is_current = true LIMIT 1
+      )
+      WHERE h.is_deleted = false AND h.responsible_id IS NOT NULL
+      GROUP BY ou.name
+      ORDER BY total DESC
+      LIMIT 20
+    `);
+
+    const positionStats = await pool.query(`
+      SELECT pos.name AS position_name, COUNT(*)::int AS total
+      FROM hazards h
+      LEFT JOIN employee_assignment ear ON ear.employee_id = h.responsible_id AND ear.is_current = true
+      LEFT JOIN hse_position pos ON pos.id = ear.position_id
+      WHERE h.is_deleted = false AND h.responsible_id IS NOT NULL
+      GROUP BY pos.name
+      ORDER BY total DESC
+      LIMIT 20
+    `);
+
+    const regionStats = await pool.query(`
+      SELECT h.location AS region, COUNT(*)::int AS total
+      FROM hazards h
+      WHERE h.is_deleted = false AND h.location IS NOT NULL AND h.location != ''
+      GROUP BY h.location
+      ORDER BY total DESC
+      LIMIT 20
+    `);
+
+    const repeatedStats = await pool.query(`
+      SELECT h.description, COUNT(*)::int AS repeat_count, 
+             MIN(h.hazard_date)::text AS first_discovered,
+             MAX(h.hazard_date)::text AS last_discovered
+      FROM hazards h
+      WHERE h.is_deleted = false
+      GROUP BY h.description
+      HAVING COUNT(*) > 1
+      ORDER BY repeat_count DESC
+      LIMIT 20
+    `);
+
+    const highRiskStats = await pool.query(`
+      SELECT COUNT(*)::int AS total FROM hazards WHERE is_deleted = false AND risk_level IN ('重大', '一级', 'high')
+    `);
+
+    const overdueStats = await pool.query(`
+      SELECT COUNT(*)::int AS total FROM hazards h
+      WHERE h.is_deleted = false 
+        AND h.status != '${HAZARD_STATUS.CLOSED}'
+        AND h.hazard_date IS NOT NULL
+        AND h.hazard_date + (h.deadline_days || ' days')::interval < CURRENT_DATE
+    `);
+
+    res.json(success({
+      total,
+      discovered,
+      processing,
+      pendingReview,
+      closed,
+      highRiskCount: highRiskStats.rows[0].total,
+      overdueCount: overdueStats.rows[0].total,
+      byDepartment: departmentStats.rows.map(camelKeys),
+      byPosition: positionStats.rows.map(camelKeys),
+      byRegion: regionStats.rows.map(camelKeys),
+      repeatedHazards: repeatedStats.rows.map(camelKeys),
+    }, '统计成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ============================================================
+// 报表导出端点（必须定义在 /:id 之前，避免被参数路由遮蔽）
+// ============================================================
+
+// ========== GET /:id/related-risk — 获取隐患关联的风险点信息 ==========
+// 反向联动：隐患详情页展示关联风险点卡片
+router.get('/:id/related-risk', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    if (!isConnected()) {
+      initMemoryData();
+      const record = memoryRecords.find((r) => r.id === parseInt(id) && !r.is_deleted);
+      if (!record) return sendNotFound(res, '隐患不存在');
+      const rid = record.related_risk_id;
+      if (!rid) return res.json(success(null, '无关联风险点(内存模式)'));
+      // 内存降级模式无 risk_sources 数据，仅返回关联 id
+      return res.json(success({ id: rid, riskLevel: record.risk_level || null }, '查询成功(内存模式)'));
+    }
+
+    await ensureTables();
+
+    // 通过 hazards.related_risk_id 直接关联 risk_sources
+    const result = await pool.query(`
+      SELECT rs.id, rs.name, rs.level, rs.type, rs.location, rs.area, rs.status,
+             rs.measures, rs.assessment_date, rs.review_cycle,
+             rs.last_hazard_check_date, rs.hazard_count
+      FROM hazards h
+      JOIN risk_sources rs ON rs.id = h.related_risk_id AND rs.is_deleted = FALSE
+      WHERE h.id = $1 AND h.is_deleted = FALSE
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.json(success(null, '无关联风险点'));
+    }
+
+    res.json(success(camelKeys(result.rows[0]), '查询成功'));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ========== GET /export — 导出隐患清单（CSV） ==========
+router.get('/export', async (req, res, next) => {
+  try {
+    if (!isConnected()) {
+      initMemoryData();
+      const data = memoryRecords.filter(r => !r.is_deleted).map(r => ({
+        ...r,
+        expiry_status: calcExpiryStatus(r.hazard_date, statusToIsResolved(r.status)),
+      }));
+      return sendHazardCsvExport(res, data);
+    }
+
+    const result = await pool.query(`
+      SELECT id, no, hazard_date, description, measure, checker, fixer, fix_date, status, remark, created_at
+      FROM hazards WHERE is_deleted = FALSE ORDER BY hazard_date DESC NULLS LAST, id DESC
+    `);
+    const list = result.rows.map(r => ({
+      ...r,
+      expiry_status: calcExpiryStatus(r.hazard_date, statusToIsResolved(r.status)),
+    }));
+    sendHazardCsvExport(res, list);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ========== GET /:id — 单条 ==========
+router.get('/:id', async (req, res) => {
+  try {
+    if (!isConnected()) {
+      initMemoryData();
+      const record = memoryRecords.find(r => r.id === parseInt(req.params.id) && !r.is_deleted);
+      if (!record) return sendNotFound(res);
+      return res.json(success(formatRow(record), '查询成功'));
+    }
+
+    const result = await pool.query('SELECT * FROM hazards WHERE id = $1 AND is_deleted = false', [req.params.id]);
+    if (result.rows.length === 0) return res.json(error(-2, '记录不存在'));
+    res.json(success(formatRow(result.rows[0]), '查询成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ========== POST / — 创建 ==========
+router.post('/', requirePermission('hse:hazard:create'), async (req, res) => {
+  try {
+    const b = req.body;
+    const description = b.description || '';
+    const measure = b.measure || '';
+    const hazardDate = b.checkDate || b.hazard_date || null;
+    const checker = b.checker || '';
+    const fixer = b.fixer || '';
+    const fixDate = b.fixDate || b.fix_date || null;
+    const relatedRiskId = b.relatedRiskId || b.related_risk_id || null;
+    const riskLevel = b.riskLevel || b.risk_level || null;
+    const finderId = b.finderId || b.finder_id || null;
+    const responsibleId = b.responsibleId || b.responsible_id || null;
+    const correctorId = b.correctorId || b.corrector_id || null;
+    // P0-3: 检查/整改人员关联员工ID（花名册为基石）
+    const checkerId = b.checkerId || b.checker_id || null;
+    const fixerId = b.fixerId || b.fixer_id || null;
+    const hazardType = b.hazardType || b.hazard_type || null;
+    const location = b.location || '';
+    const gridId = b.gridId || b.grid_id || null;
+    const deadlineDays = b.deadlineDays || b.deadline_days || 30;
+
+    let status = HAZARD_STATUS.DISCOVERED;
+    if (b.status) {
+      status = STATUS_MAP[b.status] || b.status;
+    } else if (b.isResolved === '是') {
+      status = HAZARD_STATUS.CLOSED;
+    }
+
+    if (!isConnected()) {
+      initMemoryData();
+      const record = buildMemoryRecord(memoryIdCounter++, {
+        no: b.no || null,
+        hazard_date: hazardDate,
+        description,
+        measure,
+        checker,
+        fixer,
+        fix_date: fixDate,
+        status,
+        remark: b.remark || '',
+        related_risk_id: relatedRiskId,
+        risk_level: riskLevel,
+        finder_id: finderId,
+        responsible_id: responsibleId,
+        corrector_id: correctorId,
+        checker_id: checkerId,
+        fixer_id: fixerId,
+        hazard_type: hazardType,
+        location,
+        grid_id: gridId,
+        deadline_days: deadlineDays,
+      });
+      memoryRecords.push(record);
+      return res.json(success(formatRow(record), '创建成功(内存模式)'));
+    }
+
+    await ensureTables();
+
+    const result = await pool.query(`
+      INSERT INTO hazards (no, hazard_date, description, measure, checker, fixer, fix_date, status, remark, related_risk_id, risk_level, finder_id, responsible_id, corrector_id, checker_id, fixer_id, hazard_type, location, grid_id, deadline_days)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+      RETURNING *
+    `, [
+      b.no || null, hazardDate, description, measure,
+      checker, fixer, fixDate, status, b.remark || '',
+      relatedRiskId, riskLevel, finderId, responsibleId, correctorId,
+      checkerId, fixerId,
+      hazardType, location, gridId, deadlineDays
+    ]);
+
+    const newHazard = result.rows[0];
+
+    hseEventSync.syncHazard(newHazard.id, newHazard).catch(err => {
+      console.error('Failed to sync hazard to hse_events:', err.message);
+    });
+
+    if (riskLevel && ['重大', '一级', 'high', 'critical'].includes(riskLevel)) {
+      notifyHazardExpiry(newHazard, 'expiring').catch(() => {});
+    }
+
+    auditLog({ userId: req.user?.id, username: req.user?.username, action: 'create', module: 'hazards', description: `创建隐患记录`, ip: req.ip }).catch(() => {});
+    res.json(success(formatRow(newHazard), '创建成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ========== PUT /:id — 更新 ==========
+router.put('/:id', requirePermission('hse:hazard:update'), async (req, res) => {
+  try {
+    const b = req.body;
+    const setClauses = [];
+    const params = [];
+    let i = 1;
+
+    if (b.no !== undefined) { setClauses.push(`no = $${i++}`); params.push(b.no); }
+    if (b.description !== undefined) { setClauses.push(`description = $${i++}`); params.push(b.description); }
+    if (b.measure !== undefined) { setClauses.push(`measure = $${i++}`); params.push(b.measure); }
+    if (b.checkDate !== undefined) { setClauses.push(`hazard_date = $${i++}`); params.push(b.checkDate); }
+    if (b.checker !== undefined) { setClauses.push(`checker = $${i++}`); params.push(b.checker); }
+    if (b.fixer !== undefined) { setClauses.push(`fixer = $${i++}`); params.push(b.fixer); }
+    if (b.fixDate !== undefined) { setClauses.push(`fix_date = $${i++}`); params.push(b.fixDate); }
+    if (b.remark !== undefined) { setClauses.push(`remark = $${i++}`); params.push(b.remark); }
+    if (b.relatedRiskId !== undefined) { setClauses.push(`related_risk_id = $${i++}`); params.push(b.relatedRiskId || null); }
+    if (b.riskLevel !== undefined) { setClauses.push(`risk_level = $${i++}`); params.push(b.riskLevel || null); }
+    if (b.finderId !== undefined) { setClauses.push(`finder_id = $${i++}`); params.push(b.finderId || null); }
+    if (b.responsibleId !== undefined) { setClauses.push(`responsible_id = $${i++}`); params.push(b.responsibleId || null); }
+    if (b.correctorId !== undefined) { setClauses.push(`corrector_id = $${i++}`); params.push(b.correctorId || null); }
+    // P0-3: 检查/整改人员关联员工ID
+    if (b.checkerId !== undefined || b.checker_id !== undefined) { setClauses.push(`checker_id = $${i++}`); params.push(b.checkerId || b.checker_id || null); }
+    if (b.fixerId !== undefined || b.fixer_id !== undefined) { setClauses.push(`fixer_id = $${i++}`); params.push(b.fixerId || b.fixer_id || null); }
+
+    if (b.hazardType !== undefined) { setClauses.push(`hazard_type = $${i++}`); params.push(b.hazardType || null); }
+    if (b.location !== undefined) { setClauses.push(`location = $${i++}`); params.push(b.location); }
+    if (b.gridId !== undefined) { setClauses.push(`grid_id = $${i++}`); params.push(b.gridId || null); }
+    if (b.rectification !== undefined) { setClauses.push(`rectification = $${i++}`); params.push(b.rectification); }
+    if (b.reviewerId !== undefined) { setClauses.push(`reviewer_id = $${i++}`); params.push(b.reviewerId || null); }
+    if (b.rectifyDate !== undefined) { setClauses.push(`rectify_date = $${i++}`); params.push(b.rectifyDate || null); }
+    if (b.reviewDate !== undefined) { setClauses.push(`review_date = $${i++}`); params.push(b.reviewDate || null); }
+    if (b.reviewResult !== undefined) { setClauses.push(`review_result = $${i++}`); params.push(b.reviewResult || null); }
+    if (b.deadlineDays !== undefined) { setClauses.push(`deadline_days = $${i++}`); params.push(b.deadlineDays); }
+
+    if (b.status !== undefined) {
+      const newStatus = STATUS_MAP[b.status] || b.status;
+      setClauses.push(`status = $${i++}`);
+      params.push(newStatus);
+    } else if (b.isResolved !== undefined) {
+      setClauses.push(`status = $${i++}`);
+      params.push(b.isResolved === '是' ? HAZARD_STATUS.CLOSED : HAZARD_STATUS.DISCOVERED);
+    }
+
+    if (setClauses.length === 0) {
+      setClauses.push('updated_at = CURRENT_TIMESTAMP');
+    } else {
+      setClauses.push('updated_at = CURRENT_TIMESTAMP');
+    }
+    params.push(req.params.id);
+
+    if (!isConnected()) {
+      initMemoryData();
+      const idx = memoryRecords.findIndex(r => r.id === parseInt(req.params.id) && !r.is_deleted);
+      if (idx === -1) return res.json(error(-2, '记录不存在'));
+      const beforeSnapshot = { ...memoryRecords[idx] };
+      if (b.no !== undefined) memoryRecords[idx].no = b.no;
+      if (b.description !== undefined) memoryRecords[idx].description = b.description;
+      if (b.measure !== undefined) memoryRecords[idx].measure = b.measure;
+      if (b.checkDate !== undefined) memoryRecords[idx].hazard_date = b.checkDate;
+      if (b.checker !== undefined) memoryRecords[idx].checker = b.checker;
+      if (b.fixer !== undefined) memoryRecords[idx].fixer = b.fixer;
+      if (b.fixDate !== undefined) memoryRecords[idx].fix_date = b.fixDate;
+      if (b.remark !== undefined) memoryRecords[idx].remark = b.remark;
+      if (b.relatedRiskId !== undefined) memoryRecords[idx].related_risk_id = b.relatedRiskId || null;
+      if (b.riskLevel !== undefined) memoryRecords[idx].risk_level = b.riskLevel || null;
+      if (b.finderId !== undefined) memoryRecords[idx].finder_id = b.finderId || null;
+      if (b.responsibleId !== undefined) memoryRecords[idx].responsible_id = b.responsibleId || null;
+      if (b.correctorId !== undefined) memoryRecords[idx].corrector_id = b.correctorId || null;
+
+      if (b.hazardType !== undefined) memoryRecords[idx].hazard_type = b.hazardType || null;
+      if (b.location !== undefined) memoryRecords[idx].location = b.location;
+      if (b.gridId !== undefined) memoryRecords[idx].grid_id = b.gridId || null;
+      if (b.rectification !== undefined) memoryRecords[idx].rectification = b.rectification;
+      if (b.reviewerId !== undefined) memoryRecords[idx].reviewer_id = b.reviewerId || null;
+      if (b.rectifyDate !== undefined) memoryRecords[idx].rectify_date = b.rectifyDate || null;
+      if (b.reviewDate !== undefined) memoryRecords[idx].review_date = b.reviewDate || null;
+      if (b.reviewResult !== undefined) memoryRecords[idx].review_result = b.reviewResult || null;
+      if (b.deadlineDays !== undefined) memoryRecords[idx].deadline_days = b.deadlineDays;
+
+      if (b.status !== undefined) {
+        memoryRecords[idx].status = STATUS_MAP[b.status] || b.status;
+      } else if (b.isResolved !== undefined) {
+        memoryRecords[idx].status = b.isResolved === '是' ? HAZARD_STATUS.CLOSED : HAZARD_STATUS.DISCOVERED;
+      }
+
+      memoryRecords[idx].updated_at = new Date().toISOString();
+
+      if ((b.status === HAZARD_STATUS.CLOSED || b.isResolved === '是') && beforeSnapshot.status !== HAZARD_STATUS.CLOSED) {
+        const rid = memoryRecords[idx].related_risk_id || b.relatedRiskId;
+        if (rid) await syncRiskOnHazardResolve(rid, b.fixDate || memoryRecords[idx].fix_date);
+      }
+
+      return res.json(success(formatRow(memoryRecords[idx]), '更新成功(内存模式)'));
+    }
+
+    const result = await pool.query(
+      `UPDATE hazards SET ${setClauses.join(', ')} WHERE id = $${i} AND is_deleted = false RETURNING *`,
+      params
+    );
+
+    if (result.rows.length === 0) return res.json(error(-2, '记录不存在'));
+
+    const updated = result.rows[0];
+
+    if ((b.status === HAZARD_STATUS.CLOSED || b.isResolved === '是') && updated.related_risk_id) {
+      await syncRiskOnHazardResolve(updated.related_risk_id, updated.fix_date || b.fixDate);
+    }
+
+    try {
+      const isResolvedNow = statusToIsResolved(updated.status);
+      const newExpiry = calcExpiryStatus(updated.hazard_date, isResolvedNow, updated.deadline_days);
+      if (newExpiry === 'expired' && b.isResolved !== '是' && b.status !== HAZARD_STATUS.CLOSED) {
+        await notifyHazardExpiry(updated, 'expired');
+      } else if (newExpiry === 'expiring' && b.isResolved !== '是' && b.status !== HAZARD_STATUS.CLOSED) {
+        await notifyHazardExpiry(updated, 'expiring');
+      }
+    } catch (_e) {
+    }
+
+    auditLog({ userId: req.user?.id, username: req.user?.username, action: 'update', module: 'hazards', description: `更新隐患 ID=${req.params.id}`, ip: req.ip }).catch(() => {});
+    res.json(success(formatRow(updated), '更新成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ========== DELETE /:id — 软删除 ==========
+router.delete('/:id', requirePermission('hse:hazard:delete'), async (req, res) => {
+  try {
+    if (!isConnected()) {
+      initMemoryData();
+      const record = memoryRecords.find(r => r.id === parseInt(req.params.id) && !r.is_deleted);
+      if (!record) return res.json(error(-2, '记录不存在'));
+      record.is_deleted = true;
+      return res.json(success(null, '删除成功(内存模式)'));
+    }
+
+    const result = await pool.query(
+      'UPDATE hazards SET is_deleted = true, updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND is_deleted = false RETURNING id',
+      [req.params.id]
+    );
+    if (result.rows.length === 0) return res.json(error(-2, '记录不存在'));
+    auditLog({ userId: req.user?.id, username: req.user?.username, action: 'delete', module: 'hazards', description: `删除隐患 ID=${req.params.id}`, ip: req.ip }).catch(() => {});
+    res.json(success(null, '删除成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ============================================================
+// Sprint5.13: 隐患治理闭环流程 API
+// ============================================================
+
+// ========== PUT /:id/rectify — 整改提交 ==========
+// 状态: discovered → processing
+router.put('/:id/rectify', requirePermission('hse:hazard:update'), async (req, res) => {
+  try {
+    if (!isConnected()) {
+      initMemoryData();
+      const idx = memoryRecords.findIndex(r => r.id === parseInt(req.params.id) && !r.is_deleted);
+      if (idx === -1) return res.json(error(-2, '记录不存在'));
+      const b = req.body;
+      memoryRecords[idx].status = HAZARD_STATUS.PROCESSING;
+      memoryRecords[idx].corrector_id = b.correctorId || b.corrector_id || memoryRecords[idx].corrector_id;
+      memoryRecords[idx].rectification = b.rectification || memoryRecords[idx].rectification;
+      memoryRecords[idx].rectify_date = b.rectifyDate || b.rectify_date || new Date().toISOString().slice(0, 10);
+      memoryRecords[idx].updated_at = new Date().toISOString();
+      return res.json(success(formatRow(memoryRecords[idx]), '整改提交成功(内存模式)'));
+    }
+
+    const { correctorId, rectification, rectifyDate } = req.body;
+
+    const result = await pool.query(`
+      UPDATE hazards 
+      SET status = '${HAZARD_STATUS.PROCESSING}',
+          corrector_id = COALESCE($1, corrector_id),
+          rectification = COALESCE($2, rectification),
+          rectify_date = COALESCE($3, CURRENT_DATE),
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $4 AND is_deleted = false AND status = '${HAZARD_STATUS.DISCOVERED}'
+      RETURNING *
+    `, [correctorId || null, rectification || null, rectifyDate || null, req.params.id]);
+
+    if (result.rows.length === 0) {
+      return res.json(error(-2, '隐患不存在或状态不允许整改'));
+    }
+
+    auditLog({ userId: req.user?.id, username: req.user?.username, action: 'rectify', module: 'hazards', description: `隐患整改提交 ID=${req.params.id}`, ip: req.ip }).catch(() => {});
+    res.json(success(formatRow(result.rows[0]), '整改提交成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ========== PUT /:id/submit-review — 提交复查 ==========
+// 状态: processing → pending_review
+router.put('/:id/submit-review', requirePermission('hse:hazard:update'), async (req, res) => {
+  try {
+    if (!isConnected()) {
+      initMemoryData();
+      const idx = memoryRecords.findIndex(r => r.id === parseInt(req.params.id) && !r.is_deleted);
+      if (idx === -1) return res.json(error(-2, '记录不存在'));
+      memoryRecords[idx].status = HAZARD_STATUS.PENDING_REVIEW;
+      memoryRecords[idx].updated_at = new Date().toISOString();
+      return res.json(success(formatRow(memoryRecords[idx]), '提交复查成功(内存模式)'));
+    }
+
+    const result = await pool.query(`
+      UPDATE hazards 
+      SET status = '${HAZARD_STATUS.PENDING_REVIEW}',
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1 AND is_deleted = false AND status = '${HAZARD_STATUS.PROCESSING}'
+      RETURNING *
+    `, [req.params.id]);
+
+    if (result.rows.length === 0) {
+      return res.json(error(-2, '隐患不存在或状态不允许提交复查'));
+    }
+
+    auditLog({ userId: req.user?.id, username: req.user?.username, action: 'submit_review', module: 'hazards', description: `提交隐患复查 ID=${req.params.id}`, ip: req.ip }).catch(() => {});
+    res.json(success(formatRow(result.rows[0]), '提交复查成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ========== PUT /:id/review — 复查确认 ==========
+// 状态: pending_review → closed(合格) 或 processing(不合格)
+router.put('/:id/review', requirePermission('hse:hazard:update'), async (req, res) => {
+  try {
+    const { reviewerId, reviewResult, reviewNote, reviewDate } = req.body;
+    if (!reviewResult || !['pass', 'fail'].includes(reviewResult)) {
+      return res.json(error(-3, '复查结果必须是 pass(合格) 或 fail(不合格)'));
+    }
+
+    if (!isConnected()) {
+      initMemoryData();
+      const idx = memoryRecords.findIndex(r => r.id === parseInt(req.params.id) && !r.is_deleted);
+      if (idx === -1) return res.json(error(-2, '记录不存在'));
+      memoryRecords[idx].status = reviewResult === 'pass' ? HAZARD_STATUS.CLOSED : HAZARD_STATUS.PROCESSING;
+      memoryRecords[idx].reviewer_id = reviewerId || null;
+      memoryRecords[idx].review_result = reviewResult;
+      memoryRecords[idx].rectification = reviewNote || memoryRecords[idx].rectification;
+      memoryRecords[idx].review_date = reviewDate || new Date().toISOString().slice(0, 10);
+      memoryRecords[idx].updated_at = new Date().toISOString();
+      return res.json(success(formatRow(memoryRecords[idx]), `复查${reviewResult === 'pass' ? '合格' : '不合格'}(内存模式)`));
+    }
+
+    const newStatus = reviewResult === 'pass' ? HAZARD_STATUS.CLOSED : HAZARD_STATUS.PROCESSING;
+
+    const result = await pool.query(`
+      UPDATE hazards 
+      SET status = '${newStatus}',
+          reviewer_id = COALESCE($1, reviewer_id),
+          review_result = $2,
+          rectification = COALESCE($3, rectification),
+          review_date = COALESCE($4, CURRENT_DATE),
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $5 AND is_deleted = false AND status = '${HAZARD_STATUS.PENDING_REVIEW}'
+      RETURNING *
+    `, [reviewerId || null, reviewResult, reviewNote || null, reviewDate || null, req.params.id]);
+
+    if (result.rows.length === 0) {
+      return res.json(error(-2, '隐患不存在或状态不允许复查'));
+    }
+
+    const updated = result.rows[0];
+    if (reviewResult === 'pass') {
+      await syncRiskOnHazardResolve(updated.related_risk_id, updated.review_date);
+    }
+
+    auditLog({ userId: req.user?.id, username: req.user?.username, action: 'review', module: 'hazards', description: `隐患复查${reviewResult === 'pass' ? '合格' : '不合格'} ID=${req.params.id}`, ip: req.ip }).catch(() => {});
+    res.json(success(formatRow(updated), `复查${reviewResult === 'pass' ? '合格，已关闭' : '不合格，重新整改'}`));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ========== PUT /:id/close — 直接关闭 ==========
+router.put('/:id/close', requirePermission('hse:hazard:update'), async (req, res) => {
+  try {
+    if (!isConnected()) {
+      initMemoryData();
+      const idx = memoryRecords.findIndex(r => r.id === parseInt(req.params.id) && !r.is_deleted);
+      if (idx === -1) return res.json(error(-2, '记录不存在'));
+      memoryRecords[idx].status = HAZARD_STATUS.CLOSED;
+      memoryRecords[idx].updated_at = new Date().toISOString();
+      return res.json(success(formatRow(memoryRecords[idx]), '隐患关闭成功(内存模式)'));
+    }
+
+    const { closeNote } = req.body;
+
+    const result = await pool.query(`
+      UPDATE hazards 
+      SET status = '${HAZARD_STATUS.CLOSED}',
+          rectification = COALESCE($1, rectification),
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $2 AND is_deleted = false
+      RETURNING *
+    `, [closeNote || null, req.params.id]);
+
+    if (result.rows.length === 0) {
+      return res.json(error(-2, '隐患不存在'));
+    }
+
+    const updated = result.rows[0];
+    await syncRiskOnHazardResolve(updated.related_risk_id, updated.review_date);
+
+    auditLog({ userId: req.user?.id, username: req.user?.username, action: 'close', module: 'hazards', description: `关闭隐患 ID=${req.params.id}`, ip: req.ip }).catch(() => {});
+    res.json(success(formatRow(updated), '隐患关闭成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ============================================================
+// Sprint5.13: 联动功能 API
+// ============================================================
+
+// ========== GET /reminders/high-risk — 重大隐患提醒 ==========
+router.get('/reminders/high-risk', async (req, res) => {
+  try {
+    if (!isConnected()) {
+      return res.json(success({ list: [], total: 0 }, '数据库未连接'));
+    }
+
+    const result = await pool.query(`
+      SELECT h.*, e.name AS responsible_name
+      FROM hazards h
+      LEFT JOIN v_employee_current e ON h.responsible_id = e.id
+      WHERE h.is_deleted = false 
+        AND h.status != '${HAZARD_STATUS.CLOSED}'
+        AND h.risk_level IN ('重大', '一级', 'high', 'critical')
+      ORDER BY h.hazard_date DESC
+    `);
+
+    res.json(success({
+      list: result.rows.map(r => ({ ...camelKeys(r), statusLabel: getStatusLabel(r.status) })),
+      total: result.rows.length,
+    }, '查询成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ========== GET /reminders/overdue — 超期隐患统计 ==========
+router.get('/reminders/overdue', async (req, res) => {
+  try {
+    if (!isConnected()) {
+      return res.json(success({ list: [], total: 0 }, '数据库未连接'));
+    }
+
+    const result = await pool.query(`
+      SELECT h.*, e.name AS responsible_name,
+             ROUND(EXTRACT(DAY FROM AGE(CURRENT_DATE, h.hazard_date + (h.deadline_days || ' days')::interval)))::int AS overdue_days
+      FROM hazards h
+      LEFT JOIN v_employee_current e ON h.responsible_id = e.id
+      WHERE h.is_deleted = false 
+        AND h.status != '${HAZARD_STATUS.CLOSED}'
+        AND h.hazard_date IS NOT NULL
+        AND h.hazard_date + (h.deadline_days || ' days')::interval < CURRENT_DATE
+      ORDER BY overdue_days DESC
+    `);
+
+    res.json(success({
+      list: result.rows.map(r => ({ ...camelKeys(r), statusLabel: getStatusLabel(r.status) })),
+      total: result.rows.length,
+    }, '查询成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ========== GET /analysis/repeated — 重复隐患分析 ==========
+router.get('/analysis/repeated', async (req, res) => {
+  try {
+    if (!isConnected()) {
+      return res.json(success({ list: [], total: 0 }, '数据库未连接'));
+    }
+
+    const result = await pool.query(`
+      SELECT h.description, h.hazard_type, h.risk_level, h.location,
+             COUNT(*)::int AS repeat_count,
+             MIN(h.hazard_date)::text AS first_discovered,
+             MAX(h.hazard_date)::text AS last_discovered,
+             SUM(CASE WHEN h.status = '${HAZARD_STATUS.CLOSED}' THEN 1 ELSE 0 END)::int AS closed_count
+      FROM hazards h
+      WHERE h.is_deleted = false
+      GROUP BY h.description, h.hazard_type, h.risk_level, h.location
+      HAVING COUNT(*) > 1
+      ORDER BY repeat_count DESC
+      LIMIT 50
+    `);
+
+    res.json(success({
+      list: result.rows.map(camelKeys),
+      total: result.rows.length,
+    }, '查询成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ========== GET /analysis/responsible-overdue — 责任人超期统计 ==========
+router.get('/analysis/responsible-overdue', async (req, res) => {
+  try {
+    if (!isConnected()) {
+      return res.json(success({ list: [], total: 0 }, '数据库未连接'));
+    }
+
+    const result = await pool.query(`
+      SELECT e.id AS responsible_id, e.name AS responsible_name, e.department, e.position,
+             COUNT(*)::int AS total_hazards,
+             SUM(CASE WHEN h.status = '${HAZARD_STATUS.CLOSED}' THEN 1 ELSE 0 END)::int AS closed_hazards,
+             SUM(CASE WHEN h.status != '${HAZARD_STATUS.CLOSED}' AND h.hazard_date + (h.deadline_days || ' days')::interval < CURRENT_DATE THEN 1 ELSE 0 END)::int AS overdue_hazards
+      FROM hazards h
+      LEFT JOIN v_employee_current e ON h.responsible_id = e.id
+      WHERE h.is_deleted = false AND h.responsible_id IS NOT NULL
+      GROUP BY e.id, e.name, e.department, e.position
+      ORDER BY overdue_hazards DESC, total_hazards DESC
+      LIMIT 30
+    `);
+
+    res.json(success({
+      list: result.rows.map(camelKeys),
+      total: result.rows.length,
+    }, '查询成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+// ============================================================
+// 隐患附件管理端点
+// ============================================================
+
+// ========== GET /:id/attachments — 附件列表 ==========
+router.get('/:id/attachments', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { version = '' } = req.query;
+
+    if (!isConnected()) {
+      initMemoryData();
+      let data = memoryHazardAttachments.filter(a => a.hazard_id === parseInt(id) && !a.is_deleted);
+      if (version) data = data.filter(a => a.version === version);
+      return res.json(success(data.map(camelKeys), '查询成功(内存模式)'));
+    }
+
+    await ensureTables();
+
+    let sql = 'SELECT * FROM hazard_attachments WHERE hazard_id = $1 AND is_deleted = FALSE';
+    const params = [id];
+    let paramIdx = 1;
+    if (version) {
+      paramIdx++;
+      sql += ` AND version = $${paramIdx}`;
+      params.push(version);
+    }
+    sql += ' ORDER BY is_latest DESC, created_at DESC';
+
+    const result = await pool.query(sql, params);
+    res.json(success(result.rows.map(camelKeys), '查询成功'));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ========== POST /:id/attachments — 上传附件 ==========
+router.post('/:id/attachments', requirePermission('hse:hazard:create'), uploadDocument.single('file'), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!req.file) return res.json(error(-1, '请上传文件'));
+
+    const { version = '1.0', uploaded_by = 'admin' } = req.body;
+    const fileUrl = getFileUrl(req, req.file.filename, 'documents');
+    const originalName = fixFilenameEncoding(req.file.originalname);
+
+    if (!isConnected()) {
+      initMemoryData();
+      memoryHazardAttachments.forEach(a => {
+        if (a.hazard_id === parseInt(id) && a.is_latest) a.is_latest = false;
+      });
+      const record = buildMemoryRecord(memoryAttachmentIdCounter++, {
+        hazard_id: parseInt(id),
+        filename: req.file.filename,
+        original_name: originalName,
+        file_type: 'document',
+        file_size: req.file.size,
+        file_url: fileUrl,
+        version,
+        uploaded_by,
+        is_latest: true,
+      });
+      memoryHazardAttachments.push(record);
+      // 同步记录版本履历
+      memoryHazardVersions.push(buildMemoryRecord(memoryVersionIdCounter++, {
+        hazard_id: parseInt(id),
+        version,
+        change_type: 'create',
+        change_summary: `上传附件 ${originalName}`,
+        changed_by: uploaded_by,
+      }));
+      return res.json(success(camelKeys(record), '上传成功(内存模式)'));
+    }
+
+    await ensureTables();
+
+    await pool.query(
+      'UPDATE hazard_attachments SET is_latest = FALSE WHERE hazard_id = $1 AND is_latest = TRUE',
+      [id]
+    );
+
+    const result = await pool.query(`
+      INSERT INTO hazard_attachments (hazard_id, filename, original_name, file_type, file_size, file_url, version, uploaded_by, is_latest)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, TRUE)
+      RETURNING *
+    `, [id, req.file.filename, originalName, 'document', req.file.size, fileUrl, version, uploaded_by]);
+
+    // 同步记录版本履历
+    await pool.query(`
+      INSERT INTO hazard_versions (hazard_id, version, change_type, change_summary, changed_by)
+      VALUES ($1, $2, 'create', $3, $4)
+    `, [id, version, `上传附件 ${originalName}`, uploaded_by]);
+
+    res.json(success(camelKeys(result.rows[0]), '上传成功'));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ========== DELETE /:id/attachments/:aid — 删除附件 ==========
+router.delete('/:id/attachments/:aid', requirePermission('hse:hazard:delete'), async (req, res, next) => {
+  try {
+    const { id, aid } = req.params;
+
+    if (!isConnected()) {
+      initMemoryData();
+      const att = memoryHazardAttachments.find(a => a.id === parseInt(aid) && a.hazard_id === parseInt(id) && !a.is_deleted);
+      if (!att) return sendNotFound(res, '附件不存在');
+      att.is_deleted = true;
+      // 记录删除履历
+      memoryHazardVersions.push(buildMemoryRecord(memoryVersionIdCounter++, {
+        hazard_id: parseInt(id),
+        version: att.version,
+        change_type: 'delete',
+        change_summary: `删除附件 ${att.original_name}`,
+        changed_by: 'admin',
+      }));
+      return res.json(success(null, '删除成功(内存模式)'));
+    }
+
+    await ensureTables();
+
+    // 获取附件信息用于版本记录
+    const attResult = await pool.query(
+      'SELECT * FROM hazard_attachments WHERE id = $1 AND hazard_id = $2',
+      [aid, id]
+    );
+    if (attResult.rows.length === 0) return sendNotFound(res, '附件不存在');
+
+    const result = await pool.query(
+      'UPDATE hazard_attachments SET is_deleted = TRUE WHERE id = $1 AND hazard_id = $2 RETURNING id',
+      [aid, id]
+    );
+    if (result.rows.length === 0) return sendNotFound(res, '附件不存在');
+
+    // 同步记录版本履历
+    await pool.query(`
+      INSERT INTO hazard_versions (hazard_id, version, change_type, change_summary, changed_by)
+      VALUES ($1, $2, 'delete', $3, $4)
+    `, [id, attResult.rows[0].version, `删除附件 ${attResult.rows[0].original_name}`, 'admin']);
+
+    res.json(success(null, '删除成功'));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ============================================================
+// 隐患版本管理端点
+// ============================================================
+
+// ========== GET /:id/versions — 历史版本履历 ==========
+router.get('/:id/versions', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    if (!isConnected()) {
+      initMemoryData();
+      const data = memoryHazardVersions.filter(v => v.hazard_id === parseInt(id));
+      return res.json(success(data.map(camelKeys), '查询成功(内存模式)'));
+    }
+
+    await ensureTables();
+
+    const result = await pool.query(
+      'SELECT * FROM hazard_versions WHERE hazard_id = $1 ORDER BY created_at DESC',
+      [id]
+    );
+    res.json(success(result.rows.map(camelKeys), '查询成功'));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ============================================================
+// CSV 导出辅助函数
+// ============================================================
+function sendHazardCsvExport(res, data) {
+  const headers = ['ID', '序号', '隐患描述', '整改措施', '检查时间', '检查人员', '整改人员', '整改时间', '整改状态', '时效状态', '备注', '创建时间'];
+  const rows = data.map(r => [
+    r.id || '',
+    r.no !== null && r.no !== undefined ? r.no : '',
+    (r.description || '').replace(/"/g, '""'),
+    (r.measure || '').replace(/"/g, '""'),
+    r.hazard_date ? new Date(r.hazard_date).toISOString().slice(0, 10) : '',
+    r.checker || '',
+    r.fixer || '',
+    r.fix_date ? new Date(r.fix_date).toISOString().slice(0, 10) : '',
+    r.status || r.isResolved || '',
+    r.expiry_status || r.expiryStatus || '',
+    (r.remark || '').replace(/"/g, '""'),
+    r.created_at ? new Date(r.created_at).toISOString().slice(0, 10) : '',
+  ].map(v => `"${v}"`).join(','));
+  const csv = '\uFEFF' + headers.map(h => `"${h}"`).join(',') + '\n' + rows.join('\n');
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="hazards_${new Date().toISOString().slice(0, 10)}.csv"`);
+  return res.send(csv);
+}
+
+// ========== 规则API：隐患等级、状态机、来源、类别、时效规则 ==========
+router.get('/rules/levels', async (req, res) => {
+  try {
+    res.json(success(hseRules.getHazardLevels(), '获取隐患等级规则成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+router.get('/rules/status-flow', async (req, res) => {
+  try {
+    res.json(success(hseRules.getHazardStatusFlow(), '获取隐患状态流转规则成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+router.get('/rules/sources', async (req, res) => {
+  try {
+    res.json(success(hseRules.getHazardSources(), '获取隐患来源分类成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+router.get('/rules/categories', async (req, res) => {
+  try {
+    res.json(success(hseRules.getHazardCategories(), '获取隐患类别成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+router.get('/rules/expiry', async (req, res) => {
+  try {
+    res.json(success(hseRules.getHazardExpiryRules(), '获取隐患时效规则成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+router.get('/rules/responsibility-matrix', async (req, res) => {
+  try {
+    res.json(success(hseRules.getHazardResponsibilityMatrix(), '获取隐患责任矩阵成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+router.get('/rules/all', async (req, res) => {
+  try {
+    const all = {
+      hazardLevels: hseRules.getHazardLevels(),
+      statusFlow: hseRules.getHazardStatusFlow(),
+      hazardSources: hseRules.getHazardSources(),
+      hazardCategories: hseRules.getHazardCategories(),
+      expiryRules: hseRules.getHazardExpiryRules(),
+      responsibilityMatrix: hseRules.getHazardResponsibilityMatrix(),
+    };
+    res.json(success(all, '获取隐患治理全部规则成功'));
+  } catch (err) {
+    res.json(error(-1, err.message));
+  }
+});
+
+module.exports = router;

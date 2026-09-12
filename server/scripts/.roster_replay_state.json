@@ -1,0 +1,30 @@
+{
+  "stamp": "20260906083458",
+  "suffix": "_bak_replay_20260906083458",
+  "tables": {
+    "employee": {
+      "backupTable": "employee_bak_replay_20260906083458",
+      "rows": 1328
+    },
+    "employee_assignment": {
+      "backupTable": "employee_assignment_bak_replay_20260906083458",
+      "rows": 6569
+    },
+    "employee_import_batch": {
+      "backupTable": "employee_import_batch_bak_replay_20260906083458",
+      "rows": 3
+    },
+    "employee_import_pending": {
+      "backupTable": "employee_import_pending_bak_replay_20260906083458",
+      "rows": 2624
+    }
+  },
+  "apply": {
+    "ts": "2026-09-06T09:08:03.317Z",
+    "suffix": "_bak_replay_20260906083458",
+    "newEmployee": 1713,
+    "reuseEmployee": 1329,
+    "assignments": 3514,
+    "failed": 0
+  }
+}

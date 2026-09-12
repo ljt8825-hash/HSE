@@ -1,0 +1,324 @@
+# ============================================================
+# .github/workflows/ci-quality-gate.yml — 宁津环卫 HSE 系统 CI 质量门禁
+# 触发: push (main/develop) / pull_request (main)
+# 流程: Lint → Test → Lighthouse → Security Audit → Quality Report
+# 与 ci-cd.yml / deploy.yml 并行运行，作为 PR 合入前的质量卡点
+# ============================================================
+
+name: CI Quality Gate
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+# --- 取消同一分支上的重复运行 ---
+concurrency:
+  group: quality-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ============================================================
+  # Job 1: 前端代码质量检查（Lint + Type Check）
+  # ============================================================
+  frontend-lint:
+    name: 前端 Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: 安全看板vben/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: 安全看板vben
+
+      - name: Lint
+        run: pnpm run lint
+        working-directory: 安全看板vben
+
+      - name: Type Check & Circular & Dep Check
+        run: pnpm run check
+        working-directory: 安全看板vben
+
+  # ============================================================
+  # Job 2: 前端单元测试
+  # ============================================================
+  frontend-test:
+    name: 前端单元测试 (Vitest)
+    runs-on: ubuntu-latest
+    needs: frontend-lint
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: 安全看板vben
+
+      - name: Run unit tests
+        run: pnpm run test:unit
+        working-directory: 安全看板vben
+
+      - name: Upload frontend coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: 安全看板vben/coverage/
+          retention-days: 7
+
+  # ============================================================
+  # Job 3: 后端代码质量检查
+  # ============================================================
+  backend-lint:
+    name: 后端 Lint (ESLint)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install backend dependencies
+        run: cd server && npm ci
+
+      - name: ESLint
+        run: cd server && npx eslint .
+
+  # ============================================================
+  # Job 4: 后端测试（需要 PostgreSQL 服务）
+  # ============================================================
+  backend-test:
+    name: 后端测试 (Jest + Supertest)
+    runs-on: ubuntu-latest
+    needs: backend-lint
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: safety_dashboard_test
+          POSTGRES_USER: hse_app
+          POSTGRES_PASSWORD: test_password_123
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install backend dependencies
+        run: cd server && npm ci
+
+      - name: Run backend tests
+        working-directory: server
+        env:
+          NODE_ENV: test
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_DATABASE: safety_dashboard_test
+          DB_USER: hse_app
+          DB_PASSWORD: test_password_123
+          JWT_SECRET: test_secret_key_for_ci_only
+        run: npm test
+
+      - name: Upload backend coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: server/coverage/
+          retention-days: 7
+
+  # ============================================================
+  # Job 5: 安全审计（npm audit + Trivy + 密钥扫描）
+  # ============================================================
+  security-audit:
+    name: 安全审计 (Audit + Trivy + Secret)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # --- npm/pnpm 依赖漏洞审计 ---
+      - name: Backend npm audit (High+)
+        run: cd server && npm audit --audit-level=high --json > ../../security/scans/npm-audit/backend-audit.json || true
+
+      - name: Frontend pnpm audit (High+)
+        run: cd 安全看板vben && pnpm audit --audit-level=high --json > ../../security/scans/npm-audit/frontend-audit.json || true
+
+      # --- Trivy 文件系统扫描 ---
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL,HIGH
+          format: table
+          ignore-unfixed: true
+        continue-on-error: true
+
+      # --- 硬编码密钥扫描 ---
+      - name: Secret detection scan
+        run: |
+          echo "=== 硬编码密钥扫描 ==="
+          PATTERNS="api_key|apikey|api-key|secret|password|passwd|jwt_secret|private_key|BEGIN.*PRIVATE KEY|AKIA[0-9A-Z]{16}|ghp_[a-zA-Z0-9]{36}"
+          FINDINGS=$(find . -type f \
+            -not -path "*/node_modules/*" \
+            -not -path "*/.git/*" \
+            -not -path "*/dist/*" \
+            -not -path "*/coverage/*" \
+            -not -name "*.lock" \
+            -not -name "package-lock.json" \
+            -not -name "pnpm-lock.yaml" \
+            | xargs grep -ilE "$PATTERNS" 2>/dev/null \
+            | grep -v ".env.example" \
+            | grep -v ".env.template" \
+            | grep -v ".env.production.template" \
+            | grep -v "security/" || true)
+          if [ -n "$FINDINGS" ]; then
+            echo "WARNING: 检测到可能的硬编码密钥:"
+            echo "$FINDINGS"
+            echo "$FINDINGS" > security/scans/secret-scan-results.txt
+          else
+            echo "OK: 未检测到硬编码密钥"
+            echo "No findings" > security/scans/secret-scan-results.txt
+          fi
+
+      - name: Upload security scan results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-scan-results
+          path: security/scans/
+          retention-days: 7
+
+  # ============================================================
+  # Job 6: Lighthouse 性能基线检测
+  # ============================================================
+  lighthouse:
+    name: Lighthouse 性能基线
+    runs-on: ubuntu-latest
+    needs: [frontend-test]
+    if: always() && needs.frontend-test.result == 'success'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.4
+
+      - name: Install Lighthouse CI
+        run: npm install -g @lhci/cli
+
+      - name: Build frontend
+        working-directory: 安全看板vben
+        run: pnpm install --frozen-lockfile && pnpm build:naive
+
+      - name: Start preview server
+        working-directory: 安全看板vben/apps/web-naive
+        run: npx vite preview --port 5888 &
+        env:
+          CI: 'true'
+
+      - name: Wait for server ready
+        run: npx wait-on http://localhost:5888 --timeout 30000 || (sleep 5 && curl -s -o /dev/null -w '%{http_code}' http://localhost:5888)
+
+      - name: Run Lighthouse
+        run: lhci autorun --config=performance/lighthouse/lighthouse.config.js
+        env:
+          LHCI_AUTH_TOKEN: ${{ secrets.LHCI_AUTH_TOKEN }}
+        continue-on-error: true
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lighthouse-report
+          path: performance/reports/lighthouse/
+          retention-days: 7
+
+  # ============================================================
+  # Job 7: 质量门禁汇总报告
+  # ============================================================
+  quality-report:
+    name: 质量门禁汇总
+    runs-on: ubuntu-latest
+    needs: [frontend-test, backend-test, security-audit, lighthouse]
+    if: always()
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Generate quality gate summary
+        run: |
+          echo "### Quality Gate Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| 检查项 | 状态 |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 前端 Lint & Type Check | \${{ needs.frontend-test.result == 'success' && '✅ 通过' || needs.frontend-test.result == 'skipped' && '⏭️ 跳过' || '❌ 失败' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 前端单元测试 | \${{ needs.frontend-test.result == 'success' && '✅ 通过' || needs.frontend-test.result == 'skipped' && '⏭️ 跳过' || '❌ 失败' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 后端 Lint | \${{ needs.backend-test.result == 'success' && '✅ 通过' || needs.backend-test.result == 'skipped' && '⏭️ 跳过' || '❌ 失败' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 后端测试 | \${{ needs.backend-test.result == 'success' && '✅ 通过' || needs.backend-test.result == 'skipped' && '⏭️ 跳过' || '❌ 失败' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 安全审计 | \${{ needs.security-audit.result == 'success' && '✅ 通过' || needs.security-audit.result == 'skipped' && '⏭️ 跳过' || '❌ 失败' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Lighthouse 性能 | \${{ needs.lighthouse.result == 'success' && '✅ 通过' || needs.lighthouse.result == 'skipped' && '⏭️ 跳过' || needs.lighthouse.result == 'failure' && '⚠️ 有警告' || '❌ 失败' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "All CI checks completed. See artifacts for detailed reports." >> $GITHUB_STEP_SUMMARY
+
+      - name: Quality gate pass/fail
+        if: |
+          needs.frontend-test.result == 'failure' ||
+          needs.backend-test.result == 'failure'
+        run: |
+          echo "::error::Quality Gate FAILED — 前端或后端测试未通过，请检查报告"
+          exit 1

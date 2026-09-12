@@ -1,0 +1,13 @@
+{
+  "module": "objectives",
+  "dependsOn": {
+    "employeeFields": ["employeeId", "employeeName", "deptName", "positionName"],
+    "events": ["EMPLOYEE_TRANSFERRED", "EMPLOYEE_RESIGNED"],
+    "queries": ["getEmployeesByIds", "getEmployeeSelectorList"],
+    "components": ["EmployeeSelector", "EmployeeName"]
+  },
+  "provides": {
+    "employeeStats": ["objectiveCompletionRate"],
+    "events": []
+  }
+}

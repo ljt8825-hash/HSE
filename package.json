@@ -1,0 +1,27 @@
+{
+  "name": "hse-dashboard-tools",
+  "version": "1.0.0",
+  "description": "HSE system startup and backend tooling",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "powershell -NoProfile -ExecutionPolicy Bypass -File start-hse-v2.ps1",
+    "start": "powershell -NoProfile -ExecutionPolicy Bypass -File start-hse-v2.ps1",
+    "build": "pnpm --dir \"安全看板vben\\apps\\web-naive\" run build",
+    "build:analyze": "pnpm --dir \"安全看板vben\\apps\\web-naive\" run build:analyze",
+    "preview": "pnpm --dir \"安全看板vben\\apps\\web-naive\" run preview",
+    "lint": "pnpm --dir \"安全看板vben\" run lint",
+    "lint:check": "pnpm --dir \"安全看板vben\" run lint",
+    "typecheck": "pnpm --dir \"安全看板vben\\apps\\web-naive\" run typecheck",
+    "test:unit": "pnpm --dir \"安全看板vben\" run test:unit",
+    "test:server": "npm --prefix server test",
+    "test:server:coverage": "npm --prefix server run test:coverage",
+    "test:all": "pnpm run test:unit && npm run test:server",
+    "format": "pnpm --dir \"安全看板vben\" run format"
+  },
+  "engines": {
+    "node": ">=22.18.0",
+    "npm": ">=10.0.0"
+  },
+  "packageManager": "pnpm@10.33.4"
+}

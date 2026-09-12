@@ -1,0 +1,38 @@
+{
+  "version": "1.0.0",
+  "description": "HSE菜单编码规则 - 用于业务知识库关联菜单帮助内容",
+  "all": [
+    "overview", "overview_home", "overview_bi", "overview_ai", "overview_driver_risk",
+    "overview_accident", "overview_assessment", "overview_warning", "overview_iot",
+    "overview_supply_chain", "overview_alerts", "overview_notice",
+    "objectives", "objectives_responsibility", "objectives_committee", "objectives_assessment",
+    "objectives_budget", "objectives_monthly",
+    "regulations", "regulations_rules", "regulations_library", "regulations_review",
+    "regulations_standards", "regulations_relation", "regulations_matching",
+    "risk", "risk_list",
+    "hazards", "hazards_list",
+    "site", "site_violations", "site_fire", "site_grid",
+    "personnel", "personnel_list", "personnel_org", "personnel_position",
+    "personnel_profile", "personnel_roster", "personnel_batch", "personnel_overage",
+    "training", "training_yearly", "training_requirements", "training_plan",
+    "training_execution", "training_records", "training_induction", "training_driving",
+    "training_stats", "training_analysis", "training_reminder",
+    "emergency", "emergency_plans", "emergency_accidents",
+    "insurance", "insurance_vehicle", "insurance_personnel",
+    "system", "system_users", "system_roles", "system_audit"
+  ],
+  "pathMapping": {
+    "/overview/cockpit": "overview",
+    "/overview/home": "overview_home",
+    "/objectives": "objectives",
+    "/regulations": "regulations",
+    "/risk-control": "risk",
+    "/hazards": "hazards",
+    "/site-mgmt": "site",
+    "/personnel": "personnel",
+    "/training": "training",
+    "/emergency": "emergency",
+    "/insurance": "insurance",
+    "/system": "system"
+  }
+}

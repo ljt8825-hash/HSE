@@ -1,0 +1,1 @@
+import{t as e}from"./Space-BcBisEzC.js";export{e as NSpace};

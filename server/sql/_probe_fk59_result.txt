@@ -1,0 +1,97 @@
+=== A1. hse_deduction_adjustment.adjusted_by 孤儿记录（表无 is_deleted，全部视为活跃）===
+ adjustment_id | orphan_employee_id | orphan_employee_name |       adjustment_reason       |          adjusted_at          
+---------------+--------------------+----------------------+-------------------------------+-------------------------------
+             9 |                  1 | 管理员               | 场景4测试-调整扣分（5分→3分） | 2026-07-24 09:13:05.982106+08
+             4 |                  1 | 管理员               | 全流程测试-调整扣分           | 2026-07-24 08:44:51.927559+08
+             3 |                  1 | 管理员               | 全流程测试-调整扣分           | 2026-07-24 08:41:40.020149+08
+             1 |                  1 | 管理员               | 全流程测试-调整扣分           | 2026-07-24 08:33:17.698913+08
+(4 rows)
+
+--- A1 孤儿总数 ---
+ total_orphan 
+--------------
+            4
+(1 row)
+
+=== A2. hse_assessment_audit_log.operator_id 孤儿记录 ===
+ log_id | orphan_employee_id | orphan_employee_name |       module       | operation_type |        operation_time         
+--------+--------------------+----------------------+--------------------+----------------+-------------------------------
+     49 |                  1 | 管理员               | assessment_monthly | FREEZE         | 2026-07-24 09:13:06.016096+08
+     48 |                  1 | 管理员               | assessment_monthly | REVIEW_ADJUST  | 2026-07-24 09:13:05.984305+08
+     47 |                  1 | 管理员               | assessment_monthly | REVIEW_APPROVE | 2026-07-24 09:13:05.977445+08
+     46 |                  1 | 管理员               | assessment_monthly | GENERATE_CHAIN | 2026-07-24 09:13:05.923747+08
+     45 |                  1 | 管理员               | assessment_monthly | CALCULATE      | 2026-07-24 09:13:05.896157+08
+     44 |                  1 | 管理员               | assessment_monthly | START          | 2026-07-24 09:13:05.667073+08
+     43 |                  1 | 管理员               | assessment_monthly | CREATE         | 2026-07-24 09:13:05.596414+08
+     42 |                  1 | 管理员               | assessment_monthly | REVIEW_ADJUST  | 2026-07-24 09:10:51.617516+08
+     41 |                  1 | 管理员               | assessment_monthly | CREATE         | 2026-07-24 09:10:51.612712+08
+     40 |                  1 | 管理员               | assessment_monthly | REVIEW_ADJUST  | 2026-07-24 09:10:51.498513+08
+     39 |                  1 | 管理员               | assessment_monthly | REVIEW_APPROVE | 2026-07-24 09:10:51.493128+08
+     38 |                  1 | 管理员               | assessment_monthly | GENERATE_CHAIN | 2026-07-24 09:10:51.434972+08
+     37 |                  1 | 管理员               | assessment_monthly | CALCULATE      | 2026-07-24 09:10:51.413804+08
+     36 |                  1 | 管理员               | assessment_monthly | START          | 2026-07-24 09:10:51.242979+08
+     35 |                  1 | 管理员               | assessment_monthly | CREATE         | 2026-07-24 09:10:51.179907+08
+     34 |                  1 | 管理员               | assessment_monthly | REVIEW_ADJUST  | 2026-07-24 09:09:14.129311+08
+     33 |                  1 | 管理员               | assessment_monthly | CREATE         | 2026-07-24 09:09:14.098172+08
+     32 |                  1 | 管理员               | assessment_monthly | REVIEW_ADJUST  | 2026-07-24 09:09:14.088289+08
+     31 |                  1 | 管理员               | assessment_monthly | REVIEW_APPROVE | 2026-07-24 09:09:14.081881+08
+     30 |                  1 | 管理员               | assessment_monthly | GENERATE_CHAIN | 2026-07-24 09:09:13.923263+08
+     29 |                  1 | 管理员               | assessment_monthly | CALCULATE      | 2026-07-24 09:09:13.878194+08
+     28 |                  1 | 管理员               | assessment_monthly | START          | 2026-07-24 09:09:13.627966+08
+     27 |                  1 | 管理员               | assessment_monthly | CREATE         | 2026-07-24 09:09:13.545119+08
+     26 |                  1 | 管理员               | assessment_monthly | REVIEW_ADJUST  | 2026-07-24 08:44:51.930155+08
+     25 |                  1 | 管理员               | assessment_monthly | REVIEW_APPROVE | 2026-07-24 08:44:51.920684+08
+     24 |                  1 | 管理员               | assessment_monthly | GENERATE_CHAIN | 2026-07-24 08:44:51.912509+08
+     23 |                  1 | 管理员               | assessment_monthly | CREATE         | 2026-07-24 08:44:51.903777+08
+     22 |                  1 | 管理员               | assessment_monthly | CALCULATE      | 2026-07-24 08:44:51.875833+08
+     21 |                  1 | 管理员               | assessment_monthly | CALCULATE      | 2026-07-24 08:44:42.14411+08
+     20 |                  1 | 管理员               | assessment_monthly | REVIEW_ADJUST  | 2026-07-24 08:41:40.022875+08
+     19 |                  1 | 管理员               | assessment_monthly | REVIEW_APPROVE | 2026-07-24 08:41:40.015568+08
+     18 |                  1 | 管理员               | assessment_monthly | GENERATE_CHAIN | 2026-07-24 08:41:40.006201+08
+     17 |                  1 | 管理员               | assessment_monthly | CREATE         | 2026-07-24 08:41:39.99763+08
+     16 |                  1 | 管理员               | assessment_monthly | REVIEW_APPROVE | 2026-07-24 08:37:08.597705+08
+     15 |                  1 | 管理员               | assessment_monthly | GENERATE_CHAIN | 2026-07-24 08:37:08.586444+08
+     14 |                  1 | 管理员               | assessment_monthly | CREATE         | 2026-07-24 08:37:08.577681+08
+     13 |                  1 | 管理员               | assessment_monthly | REVIEW_ADJUST  | 2026-07-24 08:33:17.771416+08
+     12 |                  1 | 管理员               | assessment_monthly | REVIEW_APPROVE | 2026-07-24 08:33:17.694317+08
+     11 |                  1 | 管理员               | assessment_monthly | GENERATE_CHAIN | 2026-07-24 08:33:17.674046+08
+     10 |                  1 | 管理员               | assessment_monthly | CREATE         | 2026-07-24 08:33:17.632695+08
+      9 |                  1 | 管理员               | assessment_monthly | START          | 2026-07-24 08:30:30.516276+08
+      8 |                  1 | 管理员               | assessment_monthly | CREATE         | 2026-07-24 08:30:30.376098+08
+      7 |                  1 | 管理员               | assessment_monthly | START          | 2026-07-24 08:28:52.790837+08
+      6 |                  1 | 管理员               | assessment_monthly | CREATE         | 2026-07-24 08:25:28.201152+08
+      5 |                  1 | 管理员               | assessment         | FREEZE         | 2026-07-24 08:17:34.941902+08
+      4 |                  1 | 管理员               | assessment         | GENERATE_CHAIN | 2026-07-24 08:17:32.562396+08
+      3 |                  1 | 管理员               | assessment         | CREATE         | 2026-07-24 08:17:30.587677+08
+      2 |                  1 | admin                | assessment         | UPDATE         | 2026-07-23 22:39:43.046125+08
+      1 |                  1 | admin                | assessment         | CREATE         | 2026-07-23 22:39:42.998142+08
+(49 rows)
+
+--- A2 孤儿总数 ---
+ total_orphan 
+--------------
+           49
+(1 row)
+
+=== A3. hse_events 人员关联列确认（全量检索 person/user/staff/operator/handler/reporter/employee）===
+   column_name    | data_type | is_nullable 
+------------------+-----------+-------------
+ id               | bigint    | NO
+ impacted_persons | integer   | YES
+(2 rows)
+
+=== A4. hse_reviews 复核人关联列确认 ===
+  column_name  |        data_type         | is_nullable 
+---------------+--------------------------+-------------
+ review_code   | character varying        | NO
+ review_date   | timestamp with time zone | YES
+ reviewer_name | character varying        | YES
+(3 rows)
+
+=== A5. 孤儿引用的 employee_id 是否存在（任意 is_deleted 状态）===
+              src               | emp_id |         emp_state          
+--------------------------------+--------+----------------------------
+ adjusted_by 引用的 employee_id |      1 | employee 表完全不存在该 id
+ operator_id 引用的 employee_id |      1 | employee 表完全不存在该 id
+(2 rows)
+

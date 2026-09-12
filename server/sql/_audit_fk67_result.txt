@@ -1,0 +1,19 @@
+                   col                   | orphans 
+-----------------------------------------+---------
+ employee_induction_training.employee_id |      16
+ employee_induction_training.position_id |      16
+ employee_training_status.employee_id    |      16
+ employee_training_status.position_id    |      16
+ position_safety_profile.position_id     |      24
+(5 rows)
+
+             tbl             | total_rows 
+-----------------------------+------------
+ employee_induction_training |         16
+ employee_training_status    |         16
+ position_safety_profile     |         24
+(3 rows)
+
+psql:F:/hse-dashboard/server/sql/hse_fk67_audit.sql:71: 错误:  语法错误 在 "UNION" 或附近的
+LINE 6: UNION ALL
+        ^

@@ -1,0 +1,1 @@
+import{Ht as e,g as t}from"./runtime-core.esm-bundler-Blp3D1W4.js";function n(n,r){return e(n,e=>{e!==void 0&&(r.value=e)}),t(()=>n.value===void 0?r.value:n.value)}export{n as t};

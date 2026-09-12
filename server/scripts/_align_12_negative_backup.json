@@ -1,0 +1,122 @@
+[
+  {
+    "cid": 46,
+    "name": "李振恒",
+    "tid": "900",
+    "score_total": "81.00",
+    "add": 2,
+    "negative": -2,
+    "key": "neg:46:900",
+    "existing": null
+  },
+  {
+    "cid": 47,
+    "name": "杨清华",
+    "tid": "970",
+    "score_total": "63.00",
+    "add": 3,
+    "negative": -3,
+    "key": "neg:47:970",
+    "existing": null
+  },
+  {
+    "cid": 47,
+    "name": "孙建栋",
+    "tid": "966",
+    "score_total": "97.00",
+    "add": 2,
+    "negative": -2,
+    "key": "neg:47:966",
+    "existing": null
+  },
+  {
+    "cid": 47,
+    "name": "靳洪刚",
+    "tid": "950",
+    "score_total": "91.00",
+    "add": 3,
+    "negative": -3,
+    "key": "neg:47:950",
+    "existing": null
+  },
+  {
+    "cid": 48,
+    "name": "张卫新",
+    "tid": "998",
+    "score_total": "94.00",
+    "add": 1,
+    "negative": -1,
+    "key": "neg:48:998",
+    "existing": null
+  },
+  {
+    "cid": 48,
+    "name": "孙建栋",
+    "tid": "1028",
+    "score_total": "97.00",
+    "add": 2,
+    "negative": -2,
+    "key": "neg:48:1028",
+    "existing": null
+  },
+  {
+    "cid": 49,
+    "name": "靳洪刚",
+    "tid": "1074",
+    "score_total": "77.00",
+    "add": 4,
+    "negative": -4,
+    "key": "neg:49:1074",
+    "existing": null
+  },
+  {
+    "cid": 50,
+    "name": "靳洪刚",
+    "tid": "1136",
+    "score_total": "96.00",
+    "add": 1,
+    "negative": -1,
+    "key": "neg:50:1136",
+    "existing": null
+  },
+  {
+    "cid": 50,
+    "name": "杨清华",
+    "tid": "1156",
+    "score_total": "83.00",
+    "add": 3,
+    "negative": -3,
+    "key": "neg:50:1156",
+    "existing": null
+  },
+  {
+    "cid": 51,
+    "name": "孙建栋",
+    "tid": "1214",
+    "score_total": "94.00",
+    "add": 1,
+    "negative": -1,
+    "key": "neg:51:1214",
+    "existing": null
+  },
+  {
+    "cid": 53,
+    "name": "郭志强",
+    "tid": "1347",
+    "score_total": "94.00",
+    "add": 1,
+    "negative": -1,
+    "key": "neg:53:1347",
+    "existing": null
+  },
+  {
+    "cid": 53,
+    "name": "谢俊章",
+    "tid": "1326",
+    "score_total": "93.00",
+    "add": 0.5,
+    "negative": -0.5,
+    "key": "neg:53:1326",
+    "existing": null
+  }
+]

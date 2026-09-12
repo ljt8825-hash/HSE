@@ -1,0 +1,47 @@
+[
+  {
+    "targetId": "764",
+    "cycleId": 44,
+    "before": "乡镇作业中心经理"
+  },
+  {
+    "targetId": "826",
+    "cycleId": 45,
+    "before": "乡镇作业中心经理"
+  },
+  {
+    "targetId": "888",
+    "cycleId": 46,
+    "before": "乡镇作业中心经理"
+  },
+  {
+    "targetId": "950",
+    "cycleId": 47,
+    "before": "乡镇作业中心经理"
+  },
+  {
+    "targetId": "780",
+    "cycleId": 44,
+    "before": "乡镇作业中心经理"
+  },
+  {
+    "targetId": "842",
+    "cycleId": 45,
+    "before": "乡镇作业中心经理"
+  },
+  {
+    "targetId": "904",
+    "cycleId": 46,
+    "before": "乡镇作业中心经理"
+  },
+  {
+    "targetId": "966",
+    "cycleId": 47,
+    "before": "乡镇作业中心经理"
+  },
+  {
+    "targetId": "1028",
+    "cycleId": 48,
+    "before": "乡镇作业中心经理"
+  }
+]

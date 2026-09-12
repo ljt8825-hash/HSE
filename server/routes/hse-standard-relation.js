@@ -1,0 +1,238 @@
+/**
+ * 标准条款-资料关联管理路由 - HSE V2 Sprint4 Phase4
+ *
+ * 挂载路径: /api/hse/standard/relation
+ *
+ * 端点:
+ *   GET    /clause/:clauseId         查询条款关联的资料
+ *   GET    /file/:fileId             查询资料关联的条款
+ *   GET    /file/:fileId/valid       查询资料的有效关联（AI 评价专用）
+ *   POST   /                         创建人工关联
+ *   DELETE /:relationId              取消关联（软删除）
+ *   PUT    /:relationId/confirm      确认关联（pending → valid）
+ *   POST   /batch-confirm            批量确认关联
+ *   POST   /auto-match/clause/:clauseId  为单条款生成匹配建议（不写库）
+ *   POST   /auto-match/generate      为所有条款生成匹配建议（写库 pending）
+ *   GET    /suggestions              获取待确认的自动匹配建议
+ *   GET    /stats                    关联统计
+ *
+ * 复用（不修改）:
+ *   - middleware/auth.js     的 requireRole
+ *   - middleware/response.js 的 success / error
+ *   - services/standardRelationService
+ */
+
+const express = require('express');
+const router = express.Router();
+const { success, error } = require('../middleware/response');
+const { requireRole } = require('../middleware/auth');
+const relationService = require('../services/standardRelationService');
+
+// ============================================================
+// 1. 查询条款关联资料
+// ============================================================
+router.get('/clause/:clauseId', requireRole('admin'), async (req, res) => {
+  try {
+    const clauseId = parseInt(req.params.clauseId, 10);
+    if (isNaN(clauseId)) {
+      return res.json(error(-1, '无效的条款ID'));
+    }
+    const { status, includeDeleted } = req.query;
+    const relations = await relationService.getRelationsByClause(clauseId, {
+      status,
+      includeDeleted: includeDeleted === 'true',
+    });
+    res.json(success(relations, '查询成功'));
+  } catch (err) {
+    console.error('[HSE-Relation] 查询条款关联失败:', err);
+    res.json(error(-1, `查询失败: ${err.message}`));
+  }
+});
+
+// ============================================================
+// 2. 查询资料关联条款
+// ============================================================
+router.get('/file/:fileId', requireRole('admin'), async (req, res) => {
+  try {
+    const fileId = parseInt(req.params.fileId, 10);
+    if (isNaN(fileId)) {
+      return res.json(error(-1, '无效的文件ID'));
+    }
+    const { status } = req.query;
+    const relations = await relationService.getRelationsByFile(fileId, {
+      status,
+    });
+    res.json(success(relations, '查询成功'));
+  } catch (err) {
+    console.error('[HSE-Relation] 查询资料关联失败:', err);
+    res.json(error(-1, `查询失败: ${err.message}`));
+  }
+});
+
+// ============================================================
+// 3. 查询资料的有效关联（AI 评价专用）
+// ============================================================
+router.get('/file/:fileId/valid', requireRole('admin'), async (req, res) => {
+  try {
+    const fileId = parseInt(req.params.fileId, 10);
+    if (isNaN(fileId)) {
+      return res.json(error(-1, '无效的文件ID'));
+    }
+    const relations = await relationService.getValidRelationsByFile(fileId);
+    res.json(success(relations, '查询成功'));
+  } catch (err) {
+    console.error('[HSE-Relation] 查询有效关联失败:', err);
+    res.json(error(-1, `查询失败: ${err.message}`));
+  }
+});
+
+// ============================================================
+// 4. 创建人工关联
+// ============================================================
+router.post('/', requireRole('admin'), async (req, res) => {
+  try {
+    const { fileId, clauseId, remark } = req.body;
+    if (!fileId) {
+      return res.json(error(-1, '文件ID不能为空'));
+    }
+    if (!clauseId) {
+      return res.json(error(-1, '条款ID不能为空'));
+    }
+    const result = await relationService.createRelation(
+      { fileId, clauseId, remark },
+      req.user
+    );
+    res.json(success(result, '关联创建成功'));
+  } catch (err) {
+    console.error('[HSE-Relation] 创建关联失败:', err);
+    res.json(error(-1, `创建失败: ${err.message}`));
+  }
+});
+
+// ============================================================
+// 5. 取消关联
+// ============================================================
+router.delete('/:relationId', requireRole('admin'), async (req, res) => {
+  try {
+    const relationId = parseInt(req.params.relationId, 10);
+    if (isNaN(relationId)) {
+      return res.json(error(-1, '无效的关联ID'));
+    }
+    await relationService.deleteRelation(relationId, req.user);
+    res.json(success(null, '关联已取消'));
+  } catch (err) {
+    console.error('[HSE-Relation] 取消关联失败:', err);
+    res.json(error(-1, `操作失败: ${err.message}`));
+  }
+});
+
+// ============================================================
+// 6. 确认关联（pending → valid）
+// ============================================================
+router.put('/:relationId/confirm', requireRole('admin'), async (req, res) => {
+  try {
+    const relationId = parseInt(req.params.relationId, 10);
+    if (isNaN(relationId)) {
+      return res.json(error(-1, '无效的关联ID'));
+    }
+    const result = await relationService.confirmRelation(relationId, req.user);
+    res.json(success(result, '关联已确认'));
+  } catch (err) {
+    console.error('[HSE-Relation] 确认关联失败:', err);
+    res.json(error(-1, `操作失败: ${err.message}`));
+  }
+});
+
+// ============================================================
+// 7. 批量确认关联
+// ============================================================
+router.post('/batch-confirm', requireRole('admin'), async (req, res) => {
+  try {
+    const { relationIds } = req.body;
+    if (!Array.isArray(relationIds)) {
+      return res.json(error(-1, 'relationIds 必须是数组'));
+    }
+    const result = await relationService.batchConfirmRelations(
+      relationIds,
+      req.user
+    );
+    res.json(success(result, '批量确认完成'));
+  } catch (err) {
+    console.error('[HSE-Relation] 批量确认失败:', err);
+    res.json(error(-1, `操作失败: ${err.message}`));
+  }
+});
+
+// ============================================================
+// 8. 单条款匹配建议（不写库，仅返回建议）
+// ============================================================
+router.post('/auto-match/clause/:clauseId', requireRole('admin'), async (req, res) => {
+  try {
+    const clauseId = parseInt(req.params.clauseId, 10);
+    if (isNaN(clauseId)) {
+      return res.json(error(-1, '无效的条款ID'));
+    }
+    const { minConfidence, limit } = req.body;
+    const matches = await relationService.autoMatchForClause(clauseId, {
+      minConfidence: minConfidence || 30,
+      limit: limit || 20,
+    });
+    res.json(success(matches, '匹配建议生成成功'));
+  } catch (err) {
+    console.error('[HSE-Relation] 生成匹配建议失败:', err);
+    res.json(error(-1, `生成失败: ${err.message}`));
+  }
+});
+
+// ============================================================
+// 9. 为所有条款生成匹配建议（写库 pending）
+// ============================================================
+router.post('/auto-match/generate', requireRole('admin'), async (req, res) => {
+  try {
+    const { minConfidence, limitPerClause } = req.body;
+    const result = await relationService.generateAutoMatches(
+      {
+        minConfidence: minConfidence || 30,
+        limitPerClause: limitPerClause || 10,
+      },
+      req.user
+    );
+    res.json(success(result, '自动匹配建议已生成'));
+  } catch (err) {
+    console.error('[HSE-Relation] 批量生成匹配建议失败:', err);
+    res.json(error(-1, `生成失败: ${err.message}`));
+  }
+});
+
+// ============================================================
+// 10. 获取待确认的自动匹配建议
+// ============================================================
+router.get('/suggestions', requireRole('admin'), async (req, res) => {
+  try {
+    const { minConfidence, limit, clauseId } = req.query;
+    const suggestions = await relationService.getPendingSuggestions({
+      minConfidence: minConfidence ? parseInt(minConfidence, 10) : 0,
+      limit: limit ? parseInt(limit, 10) : 50,
+      clauseId: clauseId ? parseInt(clauseId, 10) : undefined,
+    });
+    res.json(success(suggestions, '查询成功'));
+  } catch (err) {
+    console.error('[HSE-Relation] 查询匹配建议失败:', err);
+    res.json(error(-1, `查询失败: ${err.message}`));
+  }
+});
+
+// ============================================================
+// 11. 关联统计
+// ============================================================
+router.get('/stats', requireRole('admin'), async (req, res) => {
+  try {
+    const stats = await relationService.getRelationStats();
+    res.json(success(stats, '查询成功'));
+  } catch (err) {
+    console.error('[HSE-Relation] 查询统计失败:', err);
+    res.json(error(-1, `查询失败: ${err.message}`));
+  }
+});
+
+module.exports = router;

@@ -1,0 +1,122 @@
+[
+  {
+    "month": "2025-08",
+    "both": 37,
+    "sys_count": 45,
+    "excel_count": 47,
+    "目标职责_mismatch": 3,
+    "HSE教育培训_mismatch": 32,
+    "否决项_mismatch": 0,
+    "总分_mismatch": 37
+  },
+  {
+    "month": "2025-09",
+    "both": 37,
+    "sys_count": 45,
+    "excel_count": 47,
+    "目标职责_mismatch": 0,
+    "HSE教育培训_mismatch": 2,
+    "否决项_mismatch": 1,
+    "总分_mismatch": 12
+  },
+  {
+    "month": "2025-10",
+    "both": 37,
+    "sys_count": 45,
+    "excel_count": 47,
+    "目标职责_mismatch": 0,
+    "HSE教育培训_mismatch": 9,
+    "否决项_mismatch": 0,
+    "总分_mismatch": 20
+  },
+  {
+    "month": "2025-11",
+    "both": 37,
+    "sys_count": 45,
+    "excel_count": 46,
+    "目标职责_mismatch": 0,
+    "HSE教育培训_mismatch": 9,
+    "否决项_mismatch": 0,
+    "总分_mismatch": 14
+  },
+  {
+    "month": "2025-12",
+    "both": 39,
+    "sys_count": 45,
+    "excel_count": 44,
+    "目标职责_mismatch": 0,
+    "HSE教育培训_mismatch": 9,
+    "否决项_mismatch": 0,
+    "总分_mismatch": 11
+  },
+  {
+    "month": "2026-01",
+    "both": 40,
+    "sys_count": 45,
+    "excel_count": 45,
+    "目标职责_mismatch": 0,
+    "HSE教育培训_mismatch": 11,
+    "否决项_mismatch": 0,
+    "总分_mismatch": 15
+  },
+  {
+    "month": "2026-02",
+    "both": 41,
+    "sys_count": 45,
+    "excel_count": 46,
+    "目标职责_mismatch": 0,
+    "HSE教育培训_mismatch": 11,
+    "否决项_mismatch": 0,
+    "总分_mismatch": 13
+  },
+  {
+    "month": "2026-03",
+    "both": 41,
+    "sys_count": 45,
+    "excel_count": 43,
+    "目标职责_mismatch": 0,
+    "HSE教育培训_mismatch": 3,
+    "否决项_mismatch": 0,
+    "总分_mismatch": 6
+  },
+  {
+    "month": "2026-04",
+    "both": 42,
+    "sys_count": 45,
+    "excel_count": 44,
+    "目标职责_mismatch": 0,
+    "HSE教育培训_mismatch": 5,
+    "否决项_mismatch": 0,
+    "总分_mismatch": 7
+  },
+  {
+    "month": "2026-05",
+    "both": 43,
+    "sys_count": 45,
+    "excel_count": 45,
+    "目标职责_mismatch": 0,
+    "HSE教育培训_mismatch": 8,
+    "否决项_mismatch": 0,
+    "总分_mismatch": 13
+  },
+  {
+    "month": "2026-06",
+    "both": 0,
+    "sys_count": 0,
+    "excel_count": 45,
+    "目标职责_mismatch": 0,
+    "HSE教育培训_mismatch": 0,
+    "否决项_mismatch": 0,
+    "总分_mismatch": 0
+  },
+  {
+    "month": "2026-07",
+    "both": 0,
+    "sys_count": 0,
+    "excel_count": 45,
+    "目标职责_mismatch": 0,
+    "HSE教育培训_mismatch": 0,
+    "否决项_mismatch": 0,
+    "总分_mismatch": 0
+  }
+]

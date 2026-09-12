@@ -1,0 +1,78 @@
+{
+  "steps": [
+    {
+      "step": "initial_probe",
+      "found": true,
+      "thColId": "24",
+      "codeCol": {
+        "field": "code",
+        "sortable": true,
+        "order": null,
+        "visible": true
+      },
+      "sortConfig": "(no getSortConfig)",
+      "sortColumns": []
+    },
+    {
+      "step": "before_click",
+      "ok": true,
+      "headerCount": 5,
+      "colId": "vxe-table--column vxe-header--column col_24 fixed--visible col--center col--fixed fixed--width is--padding is--sortable"
+    },
+    {
+      "step": "after_real_click",
+      "click_log": {
+        "ok": true,
+        "headerCount": 5,
+        "colId": "vxe-table--column vxe-header--column col_34 fixed--visible col--center col--fixed fixed--width is--padding is--sortable"
+      },
+      "found": true,
+      "thColId": "34",
+      "codeCol": {
+        "field": "code",
+        "sortable": true,
+        "order": null,
+        "visible": true
+      },
+      "sortConfig": "(no getSortConfig)",
+      "sortColumns": []
+    },
+    {
+      "step": "after_real_click_2",
+      "found": true,
+      "thColId": "44",
+      "codeCol": {
+        "field": "code",
+        "sortable": true,
+        "order": null,
+        "visible": true
+      },
+      "sortConfig": "(no getSortConfig)",
+      "sortColumns": []
+    },
+    {
+      "step": "after_real_click_3",
+      "found": true,
+      "thColId": "54",
+      "codeCol": {
+        "field": "code",
+        "sortable": true,
+        "order": null,
+        "visible": true
+      },
+      "sortConfig": "(no getSortConfig)",
+      "sortColumns": []
+    },
+    {
+      "step": "programmatic_sort_asc",
+      "ok": true,
+      "sortColumns": [
+        {
+          "field": "code",
+          "order": "asc"
+        }
+      ]
+    }
+  ],
+  "page_errors": []
+}

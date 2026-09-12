@@ -1,0 +1,94 @@
+/**
+ * HSE-MOBILE-GRID-01-B/C 打磨：移动端共享样式（令牌 + 骨架微光 + 触控原语）
+ * 仅随移动端壳层（src/layouts/mobile.vue）懒加载，类名以 m- 前缀隔离，不影响 PC。
+ * 令牌挂在 .mobile-shell 上，因此天然限定在移动端子树内。
+ */
+
+.mobile-shell {
+  --m-primary: #2f7dcd;
+  --m-primary-weak: #eaf3fc;
+  --m-danger: #d4380d;
+  --m-danger-weak: #fff1f0;
+  --m-text: #1f2329;
+  --m-sub: #646a73;
+  --m-muted: #8a8f99;
+  --m-bg: #f4f5f7;
+  --m-card: #ffffff;
+  --m-border: #ebedf0;
+  --m-line: #f2f3f5;
+  --m-radius: 12px;
+  --m-radius-sm: 8px;
+  --m-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --m-tap-min: 44px;
+}
+
+/* 卡片 */
+.m-card {
+  background: var(--m-card, #fff);
+  border-radius: var(--m-radius, 12px);
+  box-shadow: var(--m-shadow, 0 1px 2px rgba(0, 0, 0, 0.04));
+}
+
+/* 骨架微光：替代静态白块，明确表达「加载中」 */
+.m-skeleton {
+  background: linear-gradient(90deg, #eef0f3 25%, #f7f8fa 37%, #eef0f3 63%);
+  background-size: 400% 100%;
+  border-radius: var(--m-radius, 12px);
+  animation: m-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes m-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+/* 触控按钮基类：保证最小触摸目标 + 按下反馈 */
+.m-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--m-tap-min, 44px);
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    transform 0.06s ease,
+    opacity 0.06s ease,
+    background-color 0.12s ease;
+}
+
+.m-btn:active {
+  transform: scale(0.985);
+  opacity: 0.9;
+}
+
+.m-btn:disabled {
+  opacity: 0.6;
+  transform: none;
+}
+
+/* 单行省略 */
+.m-ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 尊重系统「减少动态效果」 */
+@media (prefers-reduced-motion: reduce) {
+  .m-skeleton {
+    animation: none;
+    background: #eef0f3;
+  }
+
+  .m-btn {
+    transition: none;
+  }
+
+  .m-btn:active {
+    transform: none;
+  }
+}

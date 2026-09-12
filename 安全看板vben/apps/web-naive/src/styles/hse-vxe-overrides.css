@@ -1,0 +1,55 @@
+/*
+ * HSE 主题覆盖：将 VXE Table 主色族由默认蓝(#409eff)替换为 HSE 安全绿，
+ * 使页面内 VXE 与 Naive 离散 UI 共用同一主色令牌，亮/暗模式一致。
+ * 仅覆盖语义主色相关变量，不改变 VXE 布局与交互。
+ */
+
+/*
+ * VXE tooltip 位置修正：vxe-pc-ui 内部使用 getBoundingClientRect() 计算 top/left，
+ * 该坐标是相对于视口的，因此 tooltip 必须采用 fixed 定位。原样式为 absolute，
+ * 当页面/滚动容器发生滚动或存在 transform 祖先时，tooltip 会向上/向下偏移。
+ */
+.vxe-tooltip--wrapper {
+  position: fixed !important;
+}
+
+[data-vxe-ui-theme='light'],
+[data-vxe-ui-theme='dark'] {
+  /* 主色 / 主色悬浮 / 主色按下 */
+  --vxe-ui-font-primary-color: hsl(144 57% 45%) !important;
+  --vxe-ui-font-primary-lighten-color: hsl(144 57% 55%) !important;
+  --vxe-ui-font-primary-darken-color: hsl(144 57% 38%) !important;
+
+  /* 选中行 / 勾选行高亮改为绿色调，与主色一致 */
+  --vxe-ui-table-row-checkbox-checked-background-color: rgba(
+    22,
+    163,
+    74,
+    0.12
+  ) !important;
+  --vxe-ui-table-row-hover-checkbox-checked-background-color: rgba(
+    22,
+    163,
+    74,
+    0.18
+  ) !important;
+  --vxe-ui-table-row-radio-checked-background-color: rgba(
+    22,
+    163,
+    74,
+    0.12
+  ) !important;
+  --vxe-ui-table-row-hover-radio-checked-background-color: rgba(
+    22,
+    163,
+    74,
+    0.18
+  ) !important;
+  --vxe-ui-table-column-current-background-color: rgba(
+    22,
+    163,
+    74,
+    0.1
+  ) !important;
+  --vxe-ui-table-row-current-background-color: rgba(22, 163, 74, 0.1) !important;
+}

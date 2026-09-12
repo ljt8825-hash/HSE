@@ -1,0 +1,67 @@
+{
+  "version": "1.0.0",
+  "description": "HSE员工年龄规则 - 超龄人员自动识别阈值",
+  "updatedAt": "2026-07-25",
+  "ruleCode": "employeeAgeRule",
+  "ruleName": "员工年龄规则",
+
+  "ageCalculation": {
+    "method": "postgres_age_function",
+    "sql": "EXTRACT(YEAR FROM age(birth_date))::INT",
+    "description": "使用PostgreSQL age()函数精确计算周岁，避免简单年份相减的误差"
+  },
+
+  "overAgeThresholds": {
+    "description": "超龄识别阈值：超过该年龄则自动识别为超龄人员",
+    "male": 60,
+    "female": 50,
+    "default": 60
+  },
+
+  "ageGroups": {
+    "description": "年龄段分组定义，用于统计分析",
+    "groups": [
+      { "key": "under50", "label": "50岁以下", "min": 0, "max": 50 },
+      { "key": "51-55", "label": "51-55岁", "min": 51, "max": 55 },
+      { "key": "56-60", "label": "56-60岁", "min": 56, "max": 60 },
+      { "key": "61-65", "label": "61-65岁", "min": 61, "max": 65 },
+      { "key": "66-70", "label": "66-70岁", "min": 66, "max": 70 },
+      { "key": "over70", "label": "70岁以上", "min": 71, "max": 999 }
+    ]
+  },
+
+  "autoIdentification": {
+    "enabled": true,
+    "description": "超龄人员自动识别开关。开启后系统根据出生日期和阈值自动判断。",
+    "dataSource": "employee.birth_date",
+    "syncMode": "realtime_query",
+    "note": "采用实时查询方式，无需手动同步数据，保证数据准确性"
+  },
+
+  "businessRules": [
+    {
+      "code": "over_age_warning",
+      "name": "超龄预警",
+      "description": "员工达到超龄阈值后自动标记，在风险画像中提升风险等级",
+      "enabled": true
+    },
+    {
+      "code": "over_age_training",
+      "name": "超龄培训重点",
+      "description": "超龄人员可作为专项培训的重点对象",
+      "enabled": true
+    },
+    {
+      "code": "over_age_position",
+      "name": "超龄岗位优化",
+      "description": "提示管理者考虑超龄人员的岗位优化调整",
+      "enabled": true
+    }
+  ],
+
+  "futureUpgrade": {
+    "stage1": "配置文件（当前版本）",
+    "stage2": "数据库规则表（assessment_rule）",
+    "stage3": "规则中心（可视化配置）"
+  }
+}

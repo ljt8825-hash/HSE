@@ -1,0 +1,38 @@
+# ============================================================
+# HSE 安全管理系统 — 数据库备份定时任务配置示例
+# 宁津环卫 HSE 安全管理系统 v4.1
+#
+# 使用说明:
+#   1. 将下面的任务添加到 crontab（crontab -e）
+#   2. 修改 /path/to/server 为实际的项目部署路径
+#   3. 确保 logs 目录存在且有写入权限
+#   4. 首次配置后建议手动执行一次脚本验证
+#
+# 查看定时任务日志:
+#   tail -f /path/to/server/logs/backup.log
+#   tail -f /path/to/server/logs/backup-verify.log
+#   tail -f /path/to/server/logs/cleanup.log
+#
+# 手动执行备份:
+#   cd /path/to/server && bash scripts/backup.sh --type=full
+# ============================================================
+
+# ---- 全量备份：每天凌晨 3 点执行 ----
+# 生成 SQL + 自定义格式双份备份，安静模式，日志输出到 backup.log
+0 3 * * * cd /path/to/server && bash scripts/backup.sh --type=full --quiet >> logs/backup.log 2>&1
+
+# ---- 增量备份：每 6 小时执行一次 ----
+# 仅导出数据变化（轻量快速），适合频繁执行
+0 */6 * * * cd /path/to/server && bash scripts/backup.sh --type=incr --quiet >> logs/backup.log 2>&1
+
+# ---- 备份验证：每天凌晨 4 点执行 ----
+# 验证所有备份文件完整性，检查备份策略合规性
+0 4 * * * cd /path/to/server && bash scripts/backup-verify.sh --quiet >> logs/backup-verify.log 2>&1
+
+# ---- 清理旧日志：每天凌晨 5 点执行 ----
+# 删除 30 天前的压缩日志文件
+0 5 * * * find /path/to/server/logs -name "*.gz" -mtime +30 -delete >> logs/cleanup.log 2>&1
+
+# ---- 清理恢复前备份：每天凌晨 5:30 执行 ----
+# 恢复前备份保留 3 天
+30 5 * * * find /path/to/server/backups/pre-restore -name "pre_restore_*.sql.gz" -mtime +3 -delete >> logs/cleanup.log 2>&1

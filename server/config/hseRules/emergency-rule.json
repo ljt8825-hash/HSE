@@ -1,0 +1,166 @@
+{
+  "version": "1.0.0",
+  "description": "HSE应急管理规则配置 - 预案/演练/物资/队伍/事件 全部规则集中管理",
+  "updatedAt": "2026-07-25",
+  "ruleCode": "emergencyRule",
+  "ruleName": "应急管理规则",
+
+  "expiryRules": {
+    "description": "临期/过期判定规则（物资有效期通用）",
+    "expiringDays": 30,
+    "note": "距到期日≤30天为临期（warning），已过期为danger，其余为正常（success）"
+  },
+
+  "planTypes": {
+    "description": "应急预案类型",
+    "types": [
+      { "code": "comprehensive", "name": "综合应急预案", "isDefault": true },
+      { "code": "special", "name": "专项应急预案", "isDefault": false },
+      { "code": "onsite", "name": "现场处置方案", "isDefault": false }
+    ]
+  },
+
+  "planStatusFlow": {
+    "description": "预案状态流转",
+    "statuses": [
+      { "code": "draft", "name": "草稿", "color": "info" },
+      { "code": "reviewing", "name": "审批中", "color": "warning" },
+      { "code": "published", "name": "已发布", "color": "success" },
+      { "code": "obsolete", "name": "已废止", "color": "danger" }
+    ],
+    "defaultStatus": "draft"
+  },
+
+  "planReviewCycle": {
+    "description": "预案复审周期（月）",
+    "comprehensive": 12,
+    "special": 12,
+    "onsite": 6,
+    "note": "综合/专项每年复审1次，现场处置每半年复审1次"
+  },
+
+  "drillTypes": {
+    "description": "应急演练类型",
+    "types": [
+      { "code": "tabletop", "name": "桌面演练", "isDefault": true },
+      { "code": "functional", "name": "功能演练", "isDefault": false },
+      { "code": "fulldrill", "name": "实战演练", "isDefault": false }
+    ]
+  },
+
+  "drillFrequencyRequirements": {
+    "description": "各预案类型最低演练频次（次/年）",
+    "comprehensive": 1,
+    "special": 2,
+    "onsite": 4,
+    "note": "综合预案1次/年，专项预案2次/年，现场处置4次/年"
+  },
+
+  "drillResultGrades": {
+    "description": "演练评估结果等级",
+    "grades": [
+      { "code": "excellent", "name": "优秀", "color": "success" },
+      { "code": "pass", "name": "合格", "color": "info" },
+      { "code": "fail", "name": "不合格", "color": "danger" }
+    ],
+    "passThreshold": "pass",
+    "note": "合格及以上视为通过"
+  },
+
+  "materialCategories": {
+    "description": "应急物资类别",
+    "categories": [
+      { "code": "rescue", "name": "救援装备" },
+      { "code": "protection", "name": "个人防护" },
+      { "code": "medical", "name": "医疗急救" },
+      { "code": "fire", "name": "消防器材" },
+      { "code": "communication", "name": "通讯设备" },
+      { "code": "lighting", "name": "应急照明" },
+      { "code": "other", "name": "其他物资" }
+    ]
+  },
+
+  "materialExpiryRules": {
+    "description": "物资有效期临期规则",
+    "expiringDays": 30,
+    "warningThreshold": "距到期≤30天标记为临期",
+    "note": "所有物资类别统一使用30天临期阈值"
+  },
+
+  "teamTypes": {
+    "description": "应急队伍类型",
+    "types": [
+      { "code": "fulltime", "name": "专职应急队" },
+      { "code": "parttime", "name": "兼职应急队" },
+      { "code": "volunteer", "name": "志愿消防队" },
+      { "code": "expert", "name": "专家顾问组" }
+    ]
+  },
+
+  "eventLevels": {
+    "description": "应急事件等级",
+    "levels": [
+      { "code": "level1", "name": "一级（特别重大）", "color": "danger" },
+      { "code": "level2", "name": "二级（重大）", "color": "danger" },
+      { "code": "level3", "name": "三级（较大）", "color": "warning" },
+      { "code": "level4", "name": "四级（一般）", "color": "info" }
+    ],
+    "defaultLevel": "level4"
+  },
+
+  "eventStatusFlow": {
+    "description": "事件状态流转",
+    "statuses": [
+      { "code": "reported", "name": "已接报", "color": "info" },
+      { "code": "responding", "name": "响应中", "color": "warning" },
+      { "code": "handling", "name": "处置中", "color": "warning" },
+      { "code": "closed", "name": "已结案", "color": "success" }
+    ],
+    "defaultStatus": "reported"
+  },
+
+  "eventResponseTimeLimits": {
+    "description": "各等级事件响应时限（分钟）",
+    "level1": 15,
+    "level2": 30,
+    "level3": 60,
+    "level4": 120,
+    "note": "一级事件15分钟内必须响应，逐级放宽"
+  },
+
+  "responsibilityMatrix": {
+    "description": "责任矩阵（对齐5层组织模型）",
+    "levels": {
+      "general_manager": "公司总经理：全公司应急管理审批与总指挥",
+      "department_head": "部门/中心：本部门应急预案审批、演练组织、物资管理",
+      "township_manager": "乡镇作业中心经理：本中心预案落地、演练执行、物资盘点",
+      "administrator": "管理员：数据维护、流程跟踪、台账管理",
+      "employee": "员工：参与演练、事件上报、配合处置"
+    },
+    "note": "严格对齐5层组织模型，禁止漂移命名"
+  },
+
+  "statCards": {
+    "description": "安全总览挂接卡片清单（dashboard_code: overview）",
+    "cards": [
+      { "code": "EMG-001", "name": "预案总数", "semanticColor": "info" },
+      { "code": "EMG-002", "name": "已发布预案", "semanticColor": "success" },
+      { "code": "EMG-003", "name": "待复审预案", "semanticColor": "warning" },
+      { "code": "EMG-004", "name": "本年演练次数", "semanticColor": "info" },
+      { "code": "EMG-005", "name": "演练完成率", "semanticColor": "success" },
+      { "code": "EMG-006", "name": "物资总数", "semanticColor": "info" },
+      { "code": "EMG-007", "name": "物资临期", "semanticColor": "warning" },
+      { "code": "EMG-008", "name": "物资过期", "semanticColor": "danger" },
+      { "code": "EMG-009", "name": "应急队伍数", "semanticColor": "info" },
+      { "code": "EMG-010", "name": "队伍人员数", "semanticColor": "info" },
+      { "code": "EMG-011", "name": "本年事件数", "semanticColor": "warning" },
+      { "code": "EMG-012", "name": "处置中事件", "semanticColor": "warning" }
+    ]
+  },
+
+  "forbidden": {
+    "assessmentRuleInCalculation": false,
+    "hardcodeAnyRule": false,
+    "note": "assessment_rule仅作影子数据，禁止参与计算；禁止硬编码任何演练频次、物资有效期、预案版本、响应时效逻辑"
+  }
+}

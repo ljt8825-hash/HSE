@@ -1,0 +1,133 @@
+{
+  "version": "1.0.0",
+  "description": "HSE三违管理规则 - 三违类型、等级划分、扣分标准",
+  "updatedAt": "2026-07-25",
+  "ruleCode": "violationRule",
+  "ruleName": "三违管理规则",
+
+  "violationTypes": [
+    {
+      "code": "command",
+      "label": "违章指挥",
+      "description": "管理人员违反安全生产方针、政策、法律、条例、规程、制度和有关规定指挥生产的行为",
+      "defaultLevel": "严重",
+      "defaultScoreDeduct": 5
+    },
+    {
+      "code": "operation",
+      "label": "违章作业",
+      "description": "作业人员违反操作规程、作业规程、安全措施等规定进行作业的行为",
+      "defaultLevel": "一般",
+      "defaultScoreDeduct": 3
+    },
+    {
+      "code": "discipline",
+      "label": "违反劳动纪律",
+      "description": "作业人员违反生产经营单位的劳动纪律的行为",
+      "defaultLevel": "轻微",
+      "defaultScoreDeduct": 1
+    }
+  ],
+
+  "violationLevels": [
+    {
+      "code": "serious",
+      "label": "严重",
+      "description": "可能导致重大事故或造成严重后果的三违行为",
+      "riskLevel": "高",
+      "scoreDeduct": 5,
+      "needRetraining": true,
+      "needRectification": true,
+      "rectificationDays": 3
+    },
+    {
+      "code": "general",
+      "label": "一般",
+      "description": "可能导致一般事故或造成一定后果的三违行为",
+      "riskLevel": "中",
+      "scoreDeduct": 3,
+      "needRetraining": false,
+      "needRectification": true,
+      "rectificationDays": 7
+    },
+    {
+      "code": "minor",
+      "label": "轻微",
+      "description": "情节轻微、未造成明显后果的三违行为",
+      "riskLevel": "低",
+      "scoreDeduct": 1,
+      "needRetraining": false,
+      "needRectification": false,
+      "rectificationDays": 15
+    }
+  ],
+
+  "scoreDeductRules": {
+    "description": "三违行为扣分标准（累计扣分影响考核）",
+    "byLevel": {
+      "严重": 5,
+      "一般": 3,
+      "轻微": 1
+    },
+    "byType": {
+      "违章指挥": 5,
+      "违章作业": 3,
+      "违反劳动纪律": 1
+    },
+    "repeatOffenseMultiplier": 1.5,
+    "description_repeat": "同一员工6个月内重复同类三违，扣分乘以1.5倍"
+  },
+
+  "statusFlow": {
+    "description": "三违记录处理状态流转",
+    "transitions": [
+      { "from": "待处理", "to": "整改中", "action": "指派整改", "roles": ["admin", "safety_manager", "dept_manager"] },
+      { "from": "整改中", "to": "待复查", "action": "提交整改", "roles": ["admin", "safety_manager", "handler"] },
+      { "from": "待复查", "to": "已关闭", "action": "复查合格", "roles": ["admin", "safety_manager", "dept_manager"] },
+      { "from": "待复查", "to": "整改中", "action": "复查不合格", "roles": ["admin", "safety_manager", "dept_manager"] },
+      { "from": "待处理", "to": "已关闭", "action": "直接关闭", "roles": ["admin", "safety_manager"] }
+    ],
+    "initialStatus": "待处理",
+    "terminalStatuses": ["已关闭"]
+  },
+
+  "autoIdentification": {
+    "highRiskThreshold": {
+      "employeeViolationCount": 2,
+      "periodDays": 90,
+      "description": "员工90天内累计2次及以上三违，自动标记为高风险人员"
+    },
+    "deptWarningThreshold": {
+      "violationCount": 5,
+      "periodDays": 30,
+      "description": "部门30天内累计5次及以上三违，自动触发部门预警"
+    }
+  },
+
+  "businessRules": [
+    {
+      "code": "violation_assessment_link",
+      "name": "三违考核联动",
+      "description": "三违记录的扣分自动计入月度考核",
+      "enabled": true
+    },
+    {
+      "code": "violation_training_link",
+      "name": "三违培训联动",
+      "description": "严重三违自动触发培训需求，需参加再培训",
+      "enabled": true
+    },
+    {
+      "code": "violation_risk_profile_link",
+      "name": "三违风险画像联动",
+      "description": "员工三违记录计入风险画像，影响风险等级评定",
+      "enabled": true
+    }
+  ],
+
+  "futureUpgrade": {
+    "stage1": "配置文件（当前版本）",
+    "stage2": "数据库规则表（assessment_rule）",
+    "stage3": "规则中心（可视化配置、动态生效）"
+  }
+}

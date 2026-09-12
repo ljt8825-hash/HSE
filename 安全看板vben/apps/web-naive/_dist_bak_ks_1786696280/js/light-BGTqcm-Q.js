@@ -1,0 +1,1 @@
+var e={gapSmall:`4px 8px`,gapMedium:`8px 12px`,gapLarge:`12px 16px`};function t(){return e}var n={name:`Space`,self:t};export{e as n,n as t};

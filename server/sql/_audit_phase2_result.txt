@@ -1,0 +1,82 @@
+             tbl_col             | orphan_count 
+---------------------------------+--------------
+ hse_assessment_cycle.created_by |            4
+(1 row)
+            tbl_col             | orphan_count 
+--------------------------------+--------------
+ hse_assessment_cycle.frozen_by |            1
+(1 row)
+              tbl_col              | orphan_count 
+-----------------------------------+--------------
+ hse_assessment_target.employee_id |            0
+(1 row)
+               tbl_col                | orphan_count 
+--------------------------------------+--------------
+ hse_assessment_deduction.violator_id |            0
+(1 row)
+               tbl_col                | orphan_count 
+--------------------------------------+--------------
+ hse_deduction_adjustment.adjusted_by |            4
+(1 row)
+               tbl_col                | orphan_count 
+--------------------------------------+--------------
+ hse_deduction_adjustment.reviewed_by |            0
+(1 row)
+                 tbl_col                 | orphan_count 
+-----------------------------------------+--------------
+ hse_responsibility_chain.subordinate_id |            0
+(1 row)
+               tbl_col               | orphan_count 
+-------------------------------------+--------------
+ hse_responsibility_chain.manager_id |            0
+(1 row)
+               tbl_col                | orphan_count 
+--------------------------------------+--------------
+ hse_assessment_audit_log.operator_id |           49
+(1 row)
+psql:F:/hse-dashboard/server/sql/hse_fk_audit_phase2.sql:81: 错误:  字段 ev.personnel_id 不存在
+LINE 4: LEFT JOIN employee e ON ev.personnel_id = e.id AND e.is_dele...
+                                ^
+         tbl_col          | orphan_count 
+--------------------------+--------------
+ hse_events.department_id |            0
+(1 row)
+           tbl_col           | orphan_count 
+-----------------------------+--------------
+ hse_event_timeline.actor_id |            0
+(1 row)
+                  tbl_col                   | orphan_count 
+--------------------------------------------+--------------
+ hse_control_measures.responsible_person_id |            0
+(1 row)
+              tbl_col               | orphan_count 
+------------------------------------+--------------
+ hse_control_measures.department_id |            0
+(1 row)
+                 tbl_col                  | orphan_count 
+------------------------------------------+--------------
+ hse_rectifications.responsible_person_id |            0
+(1 row)
+             tbl_col              | orphan_count 
+----------------------------------+--------------
+ hse_rectifications.department_id |            0
+(1 row)
+psql:F:/hse-dashboard/server/sql/hse_fk_audit_phase2.sql:127: 错误:  字段 r.reviewer_id 不存在
+LINE 4: LEFT JOIN employee e ON r.reviewer_id = e.id AND e.is_delete...
+                                ^
+             tbl_col             | orphan_count 
+---------------------------------+--------------
+ employee_assignment.employee_id |           14
+(1 row)
+              tbl_col              | orphan_count 
+-----------------------------------+--------------
+ employee_assignment.supervisor_id |            0
+(1 row)
+             tbl_col             | orphan_count 
+---------------------------------+--------------
+ employee_assignment.position_id |            0
+(1 row)
+             tbl_col             | orphan_count 
+---------------------------------+--------------
+ employee_assignment.org_unit_id |            0
+(1 row)

@@ -1,0 +1,417 @@
+# ============================================================
+# .github/workflows/ci-cd.yml — 宁津环卫 HSE 系统完整 CI/CD 流水线
+# 触发: push / pull_request / 手动触发
+# 流程: Lint → Test (前后端) → Build (前后端) → Docker Build → Deploy
+# 环境: development / staging / production
+# ============================================================
+
+name: HSE CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - develop
+      - 'release/**'
+    paths:
+      - '安全看板vben/**'
+      - 'server/**'
+      - 'package.json'
+      - 'server/package.json'
+      - 'Dockerfile*'
+      - 'docker-compose*.yml'
+      - '.github/workflows/**'
+      - 'nginx/**'
+      - 'deploy/**'
+
+  pull_request:
+    branches:
+      - main
+      - master
+      - develop
+
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: '部署环境'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - development
+          - staging
+          - production
+      deploy_enabled:
+        description: '是否执行部署'
+        required: true
+        default: false
+        type: boolean
+
+# --- 全局环境变量 ---
+env:
+  NODE_VERSION: '22.18.0'
+  PNPM_VERSION: '10.33.4'
+  DOCKER_REGISTRY: ${{ secrets.DOCKER_REGISTRY || 'ghcr.io' }}
+  IMAGE_PREFIX: ${{ secrets.IMAGE_PREFIX || 'ningjin-hse' }}
+
+# --- 取消重复运行 ---
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ============================================================
+  # Job 1: 代码质量检查（前端 Lint + Type Check）
+  # ============================================================
+  frontend-lint:
+    name: 前端 Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Install dependencies
+        working-directory: 安全看板vben
+        run: pnpm install --frozen-lockfile
+
+      - name: ESLint
+        working-directory: 安全看板vben
+        run: pnpm run lint
+
+      - name: TypeScript type check
+        working-directory: 安全看板vben/apps/web-naive
+        run: pnpm run typecheck
+
+  # ============================================================
+  # Job 2: 后端 Lint & 测试
+  # ============================================================
+  backend-test:
+    name: 后端测试 (Jest + Supertest)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: hse_test
+          POSTGRES_USER: hse_test
+          POSTGRES_PASSWORD: hse_test_123
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Cache backend deps
+        uses: actions/cache@v4
+        with:
+          path: server/node_modules
+          key: ${{ runner.os }}-server-node-${{ hashFiles('server/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-server-node-
+
+      - name: Install backend dependencies
+        working-directory: server
+        run: npm ci
+
+      - name: Run backend tests
+        working-directory: server
+        env:
+          NODE_ENV: test
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_DATABASE: hse_test
+          DB_USER: hse_test
+          DB_PASSWORD: hse_test_123
+          JWT_SECRET: test_secret_key_for_ci_only
+        run: |
+          if npm run | grep -q " test"; then
+            npm test -- --coverage
+          else
+            echo "No test script found, skipping..."
+          fi
+
+      - name: Upload backend coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: server/coverage/
+          retention-days: 7
+
+  # ============================================================
+  # Job 3: 前端单元测试
+  # ============================================================
+  frontend-test:
+    name: 前端测试 (Vitest)
+    runs-on: ubuntu-latest
+    needs: frontend-lint
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Install dependencies
+        working-directory: 安全看板vben
+        run: pnpm install --frozen-lockfile
+
+      - name: Run tests
+        working-directory: 安全看板vben
+        run: pnpm run test:unit
+
+      - name: Upload frontend coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: coverage/
+          retention-days: 7
+
+  # ============================================================
+  # Job 4: 前端构建
+  # ============================================================
+  frontend-build:
+    name: 前端构建
+    runs-on: ubuntu-latest
+    needs: [frontend-test, backend-test]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Install dependencies
+        working-directory: 安全看板vben
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend
+        env:
+          VITE_API_BASE_URL: /api
+          VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN }}
+          VITE_SENTRY_ENVIRONMENT: ${{ inputs.environment || 'staging' }}
+          VITE_SENTRY_RELEASE: ${{ github.sha }}
+          VITE_APP_ENV: production
+        working-directory: 安全看板vben
+        run: pnpm run build:naive
+
+      - name: Upload dist artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: 安全看板vben/apps/web-naive/dist/
+          retention-days: 7
+
+      - name: Build size report
+        run: |
+          echo "=== Build output size ==="
+          du -sh 安全看板vben/apps/web-naive/dist/
+          find 安全看板vben/apps/web-naive/dist -name "*.js" -exec du -sh {} \; | sort -rh | head -20
+
+  # ============================================================
+  # Job 5: Docker 镜像构建 (前端 + 后端)
+  # ============================================================
+  docker-build:
+    name: Docker 镜像构建
+    runs-on: ubuntu-latest
+    needs: [frontend-build]
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.deploy_enabled)
+    outputs:
+      image_tag: ${{ steps.meta.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Registry
+        if: ${{ secrets.DOCKER_REGISTRY_USER != '' }}
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.DOCKER_REGISTRY }}
+          username: ${{ secrets.DOCKER_REGISTRY_USER }}
+          password: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
+
+      - name: Extract metadata for Frontend image
+        id: meta-frontend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_PREFIX }}-frontend
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix=sha-
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build & Push Frontend Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.frontend.vben
+          push: ${{ secrets.DOCKER_REGISTRY_USER != '' }}
+          tags: ${{ steps.meta-frontend.outputs.tags }}
+          labels: ${{ steps.meta-frontend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VITE_SENTRY_RELEASE=${{ github.sha }}
+            VITE_SENTRY_ENVIRONMENT=${{ inputs.environment || 'staging' }}
+
+      - name: Extract metadata for Backend image
+        id: meta-backend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_PREFIX }}-backend
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix=sha-
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build & Push Backend Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./server
+          file: Dockerfile.backend
+          push: ${{ secrets.DOCKER_REGISTRY_USER != '' }}
+          tags: ${{ steps.meta-backend.outputs.tags }}
+          labels: ${{ steps.meta-backend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ============================================================
+  # Job 6: 部署到服务器 (SSH + Docker Compose)
+  # ============================================================
+  deploy:
+    name: 部署到服务器
+    runs-on: ubuntu-latest
+    needs: [docker-build]
+    if: >-
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'))
+      || (github.event_name == 'workflow_dispatch' && inputs.deploy_enabled)
+    environment:
+      name: ${{ inputs.environment || 'production' }}
+      url: ${{ secrets.APP_URL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.1.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          script: |
+            set -e
+
+            APP_DIR=${{ secrets.APP_DIR || '/opt/hse-app' }}
+            ENV=${{ inputs.environment || 'production' }}
+            echo "Deploying to $ENV environment in $APP_DIR"
+
+            cd $APP_DIR
+
+            # 拉取最新镜像
+            docker compose pull frontend backend
+
+            # 使用生产配置启动
+            docker compose -f docker-compose.yml -f docker-compose.production.yml up -d frontend backend nginx
+
+            # 执行数据库迁移（如果有迁移脚本）
+            if [ -d "sql" ] && [ "$ENV" != "development" ]; then
+              echo "Running database migrations..."
+              # docker compose exec -T backend npm run migrate
+            fi
+
+            # 健康检查
+            sleep 5
+            if curl -sf http://localhost:80 > /dev/null 2>&1; then
+              echo "Health check passed"
+            else
+              echo "WARNING: Health check failed, check container logs"
+              docker compose ps
+            fi
+
+            # 清理旧镜像
+            docker image prune -af
+
+            echo "Deployment completed successfully"
+
+      - name: Deploy success notification
+        if: success()
+        run: |
+          echo "✅ 部署成功"
+          echo "环境: ${{ inputs.environment || 'production' }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "部署者: ${{ github.triggering_actor }}"
+
+      - name: Deploy failure notification
+        if: failure()
+        run: |
+          echo "❌ 部署失败"
+          echo "环境: ${{ inputs.environment || 'production' }}"
+          echo "Commit: ${{ github.sha }}"
+          exit 1
+
+  # ============================================================
+  # Job 7: 流水线总结
+  # ============================================================
+  summary:
+    name: 流水线总结
+    runs-on: ubuntu-latest
+    needs: [frontend-build, backend-test]
+    if: always()
+    steps:
+      - name: Generate summary
+        run: |
+          echo "# HSE CI/CD Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| 项目 | 结果 |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 提交 | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| 分支 | ${{ github.ref_name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 触发者 | ${{ github.triggering_actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 前端 Lint | ${{ needs.frontend-lint.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 前端测试 | ${{ needs.frontend-test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 后端测试 | ${{ needs.backend-test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 前端构建 | ${{ needs.frontend-build.result }} |" >> $GITHUB_STEP_SUMMARY

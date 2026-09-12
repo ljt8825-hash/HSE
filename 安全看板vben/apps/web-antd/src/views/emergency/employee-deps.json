@@ -1,0 +1,13 @@
+{
+  "module": "emergency",
+  "dependsOn": {
+    "employeeFields": ["employeeId", "employeeName", "deptName", "positionName", "phone"],
+    "events": ["EMPLOYEE_TRANSFERRED", "EMPLOYEE_RESIGNED", "EMPLOYEE_INFO_UPDATED"],
+    "queries": ["getEmployeesByIds", "getEmployeeSelectorList"],
+    "components": ["EmployeeSelector", "EmployeeName"]
+  },
+  "provides": {
+    "employeeStats": ["emergencyTeamCount"],
+    "events": ["EMERGENCY_PLAN_ACTIVATED"]
+  }
+}
