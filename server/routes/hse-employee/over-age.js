@@ -29,16 +29,6 @@ function getOverAgeThresholdLocal(gender) {
   return OVER_AGE_THRESHOLDS[gender] || DEFAULT_THRESHOLD;
 }
 
-function buildOverAgeCondition(tableAlias = 'e') {
-  const maleTh = OVER_AGE_THRESHOLDS['男'];
-  const femaleTh = OVER_AGE_THRESHOLDS['女'];
-  return `(
-    (${tableAlias}.gender = '男' AND EXTRACT(YEAR FROM age(${tableAlias}.birth_date))::INT > ${maleTh})
-    OR
-    (${tableAlias}.gender = '女' AND EXTRACT(YEAR FROM age(${tableAlias}.birth_date))::INT > ${femaleTh})
-  )`;
-}
-
 function buildOverAgeYearsExpr(tableAlias = 'e') {
   const maleTh = OVER_AGE_THRESHOLDS['男'];
   const femaleTh = OVER_AGE_THRESHOLDS['女'];
