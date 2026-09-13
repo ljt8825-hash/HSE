@@ -306,6 +306,292 @@ async function findCurrentAssignmentByEmployeeId(client, employeeId) {
 }
 
 // ============================================================
+// 业务编排（自 hse-employee/assignment.js route 迁移，行为逐字节不变）
+// ============================================================
+
+/**
+ * 获取员工当前组织关系（详情视图，含状态中文映射）
+ * 对应 GET /org/employee/:employeeId
+ * @param {number} employeeId
+ * @returns {Promise<{row: Object|null}>} row 为 null 表示无当前组织关系
+ */
+async function getCurrentAssignmentDetail(employeeId) {
+  const result = await pool.query(
+    `SELECT ea.id, ea.employee_id, ea.position_id, ea.start_date, ea.end_date,
+            ea.supervisor_id, 
+            CASE 
+              WHEN ea.status = 'active' THEN '在职'
+              WHEN ea.status = 'pending' THEN '待岗'
+              WHEN ea.status = 'inactive' THEN '离职'
+              WHEN ea.status = 'retired' THEN '退休'
+              WHEN ea.status = 'reinstated' THEN '返聘'
+              ELSE ea.status
+            END AS status,
+            ea.is_current, ea.remark AS change_reason,
+            ou.id AS org_unit_id,
+            ou.org_path,
+            ou.org_name,
+            p.name AS position_name,
+            s.name AS supervisor_name
+     FROM employee_assignment ea
+     LEFT JOIN hse_org_unit ou ON ea.org_unit_id = ou.id AND ou.is_deleted = false
+     LEFT JOIN position p ON ea.position_id = p.id AND p.is_deleted = false
+     LEFT JOIN employee s ON ea.supervisor_id = s.id AND s.is_deleted = false
+     WHERE ea.employee_id = $1 AND ea.is_current = true AND ea.is_deleted = false`,
+    [employeeId]
+  );
+  return { row: result.rows[0] || null };
+}
+
+/**
+ * 获取员工组织关系历史（详情视图，含状态中文映射 + 人事变动关联）
+ * 对应 GET /org/employee/:employeeId/history
+ * @param {number} employeeId
+ * @returns {Promise<Array>}
+ */
+async function getAssignmentHistoryDetail(employeeId) {
+  const result = await pool.query(
+    `SELECT ea.id, ea.position_id, ea.start_date, ea.end_date,
+            CASE 
+              WHEN ea.status = 'active' THEN '在职'
+              WHEN ea.status = 'pending' THEN '待岗'
+              WHEN ea.status = 'inactive' THEN '离职'
+              WHEN ea.status = 'retired' THEN '退休'
+              WHEN ea.status = 'reinstated' THEN '返聘'
+              ELSE ea.status
+            END AS status,
+            ea.is_current, ea.remark AS change_reason, ea.created_at,
+            ou.org_path,
+            p.name AS position_name,
+            eh.event_type, eh.event_date, eh.before_status, eh.after_status,
+            eh.approval_no, eh.remark
+     FROM employee_assignment ea
+     LEFT JOIN hse_org_unit ou ON ea.org_unit_id = ou.id AND ou.is_deleted = false
+     LEFT JOIN position p ON ea.position_id = p.id AND p.is_deleted = false
+     LEFT JOIN employee_history eh ON eh.employee_id = ea.employee_id AND eh.event_date = ea.start_date AND eh.is_deleted = false
+     WHERE ea.employee_id = $1 AND ea.is_deleted = false
+     ORDER BY ea.start_date DESC, ea.id DESC`,
+    [employeeId]
+  );
+  return result.rows;
+}
+
+/**
+ * 调岗/分配组织关系（核心事务）
+ * 对应 POST /org/assign：结束当前关系 → 新增关系 → 记录 employee_history
+ * 事件发布在 COMMIT 之后执行（fire-and-forget，失败仅告警不影响主流程）
+ * @param {Object} params
+ * @returns {Promise<{error?: number, message?: string, responseData?: Object, eventType?: string, employeeName?: string}>}
+ */
+async function assignEmployee(params) {
+  const {
+    employee_id, group_id, region_id, enterprise_id, project_id, team_id,
+    position_id, start_date, supervisor_id, change_reason, remark, userId,
+  } = params;
+
+  if (!employee_id) return { error: -3, message: '员工ID不能为空' };
+  if (!start_date) return { error: -3, message: '开始日期不能为空' };
+
+  // 验证员工存在
+  const empResult = await pool.query(`SELECT id, name FROM employee WHERE id = $1 AND is_deleted = false`, [employee_id]);
+  if (empResult.rows.length === 0) return { error: -2, message: '员工不存在' };
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 查询当前组织关系（从 employee_assignment）
+    const currentOrgResult = await client.query(
+      `SELECT ea.id, ea.org_unit_id, ea.position_id, ea.start_date, ea.status,
+              ou.org_path
+       FROM employee_assignment ea
+       LEFT JOIN hse_org_unit ou ON ea.org_unit_id = ou.id
+       WHERE ea.employee_id = $1 AND ea.is_current = true AND ea.is_deleted = false`,
+      [employee_id]
+    );
+
+    let beforeOrgUnitId = null;
+    let beforePositionId = null;
+    let beforeStatus = null;
+
+    if (currentOrgResult.rows.length > 0) {
+      const currentOrg = currentOrgResult.rows[0];
+      beforeOrgUnitId = currentOrg.org_unit_id;
+      beforePositionId = currentOrg.position_id;
+      beforeStatus = currentOrg.status;
+
+      // 结束当前组织关系
+      const endDate = new Date(start_date);
+      endDate.setDate(endDate.getDate() - 1);
+      await client.query(
+        `UPDATE employee_assignment SET is_current = false, end_date = $2, updated_at = NOW()
+         WHERE id = $1`,
+        [currentOrg.id, endDate.toISOString().split('T')[0]]
+      );
+    }
+
+    // 解析 org_unit_id（从 5 列扁平组织映射到 hse_org_unit）
+    const { orgUnitId, orgPath } = await resolveOrgUnitId(client, {
+      group_id, region_id, enterprise_id, project_id, team_id,
+    });
+
+    // 新增组织关系
+    const newOrgResult = await client.query(
+      `INSERT INTO employee_assignment (
+          employee_id, org_unit_id, position_id, supervisor_id, 
+          status, is_current, is_primary, start_date, remark, created_by
+        ) VALUES ($1, $2, $3, $4, 'active', true, true, $5, $6, $7) RETURNING *`,
+      [employee_id, orgUnitId, position_id || null, supervisor_id || null,
+       start_date, change_reason || '调岗', userId || null]
+    );
+
+    // 记录人事变动
+    const eventType = currentOrgResult.rows.length === 0 ? '入职' : '调岗';
+    await client.query(
+      `INSERT INTO employee_history (employee_id, event_type, event_date, before_dept_id, after_dept_id, before_position_id, after_position_id, before_status, after_status, remark, approver_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, '在职', $9, $10)`,
+      [employee_id, eventType, start_date, beforeOrgUnitId, orgUnitId, beforePositionId, position_id || null, beforeStatus, remark || null, userId || null]
+    );
+
+    await client.query('COMMIT');
+
+    // P0-2: 发布员工事件（调岗/入职 → EMPLOYEE_TRANSFERRED）
+    try {
+      const employeeEventService = require('./employeeEventService');
+      employeeEventService.publishEmployeeEvent({
+        type: 'EMPLOYEE_TRANSFERRED',
+        employeeId: employee_id,
+        occurredAt: new Date().toISOString(),
+        payload: {
+          fromOrgUnitId: beforeOrgUnitId,
+          toOrgUnitId: orgUnitId,
+          fromPositionId: beforePositionId,
+          toPositionId: position_id || null,
+          changeReason: change_reason || eventType,
+        },
+      });
+    } catch (e) {
+      console.warn('[hse-employee] 发布 EMPLOYEE_TRANSFERRED 事件失败:', e.message);
+    }
+
+    // 构建响应（保持原有响应结构）
+    const responseData = {
+      id: newOrgResult.rows[0].id,
+      employee_id: employee_id,
+      org_unit_id: orgUnitId,
+      org_path: orgPath,
+      position_id: position_id || null,
+      start_date: start_date,
+      supervisor_id: supervisor_id || null,
+      status: '在职',
+      is_current: true,
+      change_reason: change_reason || '调岗',
+    };
+    return { responseData, eventType, employeeName: empResult.rows[0].name };
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * 人员状态变更（待岗/复岗/离职/退休/返聘）
+ * 对应 PUT /org/:id/status：更新状态 → 记录 employee_history
+ * 事件发布在 COMMIT 之后执行
+ * @param {Object} params { id, status, event_date, remark, userId }
+ * @returns {Promise<{error?: number, message?: string, audit?: Object}>}
+ */
+async function changeAssignmentStatus(params) {
+  const { id, status, event_date, remark, userId } = params;
+  const validStatuses = ['在职', '待岗', '离职', '退休', '返聘'];
+  if (!validStatuses.includes(status)) return { error: -3, message: `无效状态，可选: ${validStatuses.join('/')}` };
+  if (!event_date) return { error: -3, message: '事件日期不能为空' };
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 查询当前组织关系
+    const orgResult = await client.query(
+      `SELECT ea.id, ea.employee_id, ea.status, ea.position_id, ea.org_unit_id, ou.org_path
+       FROM employee_assignment ea
+       LEFT JOIN hse_org_unit ou ON ea.org_unit_id = ou.id AND ou.is_deleted = false
+       WHERE ea.id = $1 AND ea.is_current = true AND ea.is_deleted = false`,
+      [id]
+    );
+    if (orgResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return { error: -2, message: '组织关系不存在或非当前记录' };
+    }
+
+    const org = orgResult.rows[0];
+    const beforeStatus = STATUS_REVERSE_MAP[org.status] || org.status;
+
+    // 状态标准化（中文 → 英文）
+    const normalizedStatus = STATUS_MAP[status] || status;
+
+    // 更新状态
+    if (status === '离职' || status === '退休') {
+      // 终态：结束当前记录
+      await client.query(
+        `UPDATE employee_assignment SET status = $2, is_current = false, end_date = $3, updated_at = NOW() WHERE id = $1`,
+        [id, normalizedStatus, event_date]
+      );
+    } else {
+      // 非终态（待岗/复岗/返聘）：更新状态
+      await client.query(
+        `UPDATE employee_assignment SET status = $2, updated_at = NOW() WHERE id = $1`,
+        [id, normalizedStatus]
+      );
+    }
+
+    // 映射状态到事件类型
+    const eventMap = { '待岗': '待岗', '离职': '离职', '退休': '退休', '返聘': '返聘' };
+    let eventType;
+    if (status === '在职' && beforeStatus === '待岗') {
+      eventType = '复岗';
+    } else {
+      eventType = eventMap[status] || '状态变更';
+    }
+
+    // 记录人事变动（使用 org_unit_id）
+    await client.query(
+      `INSERT INTO employee_history (employee_id, event_type, event_date, before_dept_id, after_dept_id, before_position_id, after_position_id, before_status, after_status, remark, approver_id)
+       VALUES ($1, $2, $3, $4, $4, $5, $5, $6, $7, $8, $9)`,
+      [org.employee_id, eventType, event_date, org.org_unit_id, org.position_id, beforeStatus, status, remark || null, userId || null]
+    );
+
+    await client.query('COMMIT');
+
+    // P0-2: 发布员工事件（离职 → EMPLOYEE_RESIGNED，其他 → EMPLOYEE_STATUS_CHANGED）
+    try {
+      const employeeEventService = require('./employeeEventService');
+      const eventTypeForEvent = (status === '离职') ? 'EMPLOYEE_RESIGNED' : 'EMPLOYEE_STATUS_CHANGED';
+      employeeEventService.publishEmployeeEvent({
+        type: eventTypeForEvent,
+        employeeId: org.employee_id,
+        occurredAt: new Date().toISOString(),
+        payload: {
+          fromStatus: beforeStatus,
+          toStatus: status,
+        },
+      });
+    } catch (e) {
+      console.warn('[hse-employee] 发布 STATUS 事件失败:', e.message);
+    }
+
+    return { audit: { employeeId: org.employee_id, beforeStatus, status } };
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+// ============================================================
 // 统计查询
 // ============================================================
 
@@ -381,6 +667,12 @@ module.exports = {
   createAssignment,
   updateAssignmentStatus,
   findCurrentAssignmentByEmployeeId,
+  
+  // 业务编排（自 hse-employee/assignment.js route 迁移）
+  getCurrentAssignmentDetail,
+  getAssignmentHistoryDetail,
+  assignEmployee,
+  changeAssignmentStatus,
   
   // 统计
   getEmployeeCountByStatus,
