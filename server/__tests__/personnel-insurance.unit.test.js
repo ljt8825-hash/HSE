@@ -1523,7 +1523,8 @@ describe('业务日 SQL 安全契约（任务9）', () => {
   });
 
   test('overview 人员统计复用共享 pivot（buildPersonnelStatsPivotSql）且无旧记录数 SQL', () => {
-    const src = fs.readFileSync(path.join(__dirname, '..', 'routes', 'insurance.js'), 'utf-8');
+    // 重构后该逻辑收敛于 services/insuranceStatsService.js（路由层纯聚合）
+    const src = fs.readFileSync(path.join(__dirname, '..', 'services', 'insuranceStatsService.js'), 'utf-8');
     expect(src).toContain('buildPersonnelStatsPivotSql()');
     // 旧 overview 记录数统计（COUNT(*) FROM personnel_insurance WHERE is_deleted=false）已移除
     expect(src).not.toMatch(/result\.personnel\.total = r1\.rows\[0\]\.v/);
@@ -2130,13 +2131,15 @@ describe('任务10：统一 active 判定与全写路径语义（提示词10）'
     const fs = require('fs');
     const ins = fs.readFileSync(require('path').join(__dirname, '..', 'routes', 'insurance.js'), 'utf-8');
     const imp = fs.readFileSync(require('path').join(__dirname, '..', 'routes', 'import.js'), 'utf-8');
+    // （src guard 二）写入口统一 active 判定来自 services/insurancePersonnelService.js
+    const psvc = fs.readFileSync(require('path').join(__dirname, '..', 'services', 'insurancePersonnelService.js'), 'utf-8');
     // 不得再出现 wouldBeActive 变量（注释提及可接受，但代码不得使用）
-    expect(ins).not.toMatch(/wouldBeActive\s*=/);
+    expect(psvc).not.toMatch(/wouldBeActive\s*=/);
     expect(ins).not.toMatch(/if \(b\.isCurrent !== false\)\s*\{[\s\S]*?findActivePolicyConflict/);
     expect(ins).not.toMatch(/if \(merged\.is_current !== false\)\s*\{/);
     expect(imp).not.toMatch(/if \(r\.is_current !== false && r\.employee_id != null\)\s*\{/);
-    // 唯一 active 判定在保险与导入路由中都使用
-    expect(ins).toContain('isPolicyActiveOnBusinessDay');
+    // 唯一 active 判定在保险与导入路由中都使用（重构后收敛到 personnel 服务）
+    expect(psvc).toContain('isPolicyActiveOnBusinessDay');
     expect(imp).toContain('isPolicyActiveOnBusinessDay');
   });
 
@@ -2144,8 +2147,8 @@ describe('任务10：统一 active 判定与全写路径语义（提示词10）'
     const fs = require('fs');
     const appSrc = fs.readFileSync(require('path').join(__dirname, '..', 'app.js'), 'utf-8');
     const demo = fs.readFileSync(require('path').join(__dirname, '..', 'routes', 'demo-data.js'), 'utf-8');
-    const ins = fs.readFileSync(require('path').join(__dirname, '..', 'routes', 'insurance.js'), 'utf-8');
-    // 挂载关系：insurance.js 与 demo-data.js 都是运行时路由
+    const ins = fs.readFileSync(require('path').join(__dirname, '..', 'services', 'insurancePersonnelService.js'), 'utf-8');
+    // 挂载关系：routes/insurance（纯聚合）与 demo-data.js 都是运行时路由
     expect(appSrc).toMatch(/require\('\.\/routes\/insurance'\)/);
     expect(appSrc).toMatch(/require\('\.\/routes\/demo-data'\)/);
     expect(appSrc).toMatch(/app\.use\('\/api\/demo-data'/);
@@ -2155,7 +2158,7 @@ describe('任务10：统一 active 判定与全写路径语义（提示词10）'
     expect(demo).toContain("key: 'personnel_insurance'");
     expect(demo).toContain('disabled: true');
     expect(demo).not.toMatch(/INSERT INTO personnel_insurance \(\s*name, id_card/);
-    // 主路由写路径统一 active 判定
+    // 写路径统一 active 判定来自 services/insurancePersonnelService.js
     expect(ins).toContain('isPolicyActiveOnBusinessDay');
   });
 
