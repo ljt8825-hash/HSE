@@ -383,6 +383,9 @@ app.use('/api/emergency', emergencyRoutes);
 app.use('/api/insurance', insuranceRoutes);
 app.use('/api/standards', standardsRoutes);
 app.use('/api/site-mgmt', siteMgmtRoutes);
+// 阶段 P2-B1-D-IMPLEMENTATION-04-B：通道 B 待归属人工归属（独立 router，不动既有逻辑/中间件/scheduler）
+const gridAttributionRoutes = require('./routes/hse-grid-attribution');
+app.use('/api/grid-attribution', gridAttributionRoutes);
 app.use('/api/wps-grid-sync', require('./routes/wps-grid-sync'));
 // Sprint-WPS-02: 当前登录员工上下文（身份解析，见 routes/current-employee.js）
 app.use('/api/current-employee', require('./routes/current-employee'));
