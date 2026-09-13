@@ -277,6 +277,12 @@
 - 归档模板统一存放在 `docs91副templates`，索引在 `docs91副index.md`
 - 对话内产生关键结论/冻结规则/交付/风险时，立即写入归档并同步更新索引；不得等都结束后再集中补
 
+## Code Convention (代码规约)
+- 核心域路由三层结构（2026-09-13 试点冻结，position 域）：route=纯绑定（仅 path/method/middleware→controller）、controller=薄 handler（req 解析+调 service+res 包装）、service=业务+SQL（无 express 依赖、可独立单测）。
+- service 返回 `{ row, error, message }` 业务码约定；controller 负责映射 `error(code,msg)` / `success(...)`，保留业务码语义（如 -2 不存在/-3 参数/-4 重复/-5 占用）。
+- 新增/修改核心域代码默认按此三层结构；大域可在 service 层按子功能细分文件。
+- 目录归属：`server/services/<domain>Service.js`、`server/controllers/hse-<domain>.js`、`server/routes/hse-employee/<domain>.js`。
+
 ## Lessons Learned
 - koa-connect wrapper caused subtle ctx.state data loss; native Koa rewrite is required instead of wrapping Express middleware
 - WPS_GRID_DATA_SOURCE=true with incomplete WPS historical data (no August 2026 records) caused system to display incorrect cutoff date (August 30 instead of 31) for grid inspection ledger summaries
