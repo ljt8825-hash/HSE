@@ -297,3 +297,10 @@
 - Backend modifications may not take effect if old processes are not completely terminated before restarting
 - Ghost active driver records (e.g., Wang Chuntang id=9727) with NULL employment_relation in current row but resignation status in other records are not filtered by checking only current row employment_relation
 - Different data sources (real-time roster vs. historical archives) between violation records and safety files cause expected driver count discrepancies even after fixes
+
+## 架构重构进度
+- 巨无霸路由三层化（route纯聚合 + controllers薄handler + services业务+SQL）已完成两轮：
+  - 第一轮：hse-employee 拆分13子域（employee/org-tree/position/assignment/history/import + certificates/safety-profiles/trainings/inspection-center/profile-center/selector/over-age），父文件收敛为纯聚合入口，对外 API 契约逐字节不变。
+  - 第二轮：insurance/import/training/hse-assessment-monthly 四大巨无霸同样三层化，均通过 smoke 测试（services/insuranceShared.js 等共享模块抽取，importShared/trainingShared/assessmentMonthlyShared；修复原 insurance vehicle 写接口 7 处幽灵 auditLog 引用）。
+  - 兼容约定：父路由保留 module.exports 转发原模块级导出（如 routes/training.js 的 resolveTrainingPersonId/Name），供 routes/training-ocr.js 等外部引用。
+- 下一阶段（Phase B 领域边界收敛）：将分散的 Sprint 命名模块按领域合并命名。
