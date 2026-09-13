@@ -29,6 +29,8 @@
 - 月度考核周期已实现每月1日00:30自动创建当月考核周期并按花名册同步考核对象
 - 核心域路由三层结构：route=纯绑定（仅 path/method/middleware→controller）、controller=薄 handler（req 解析+调 service+res 包装）、service=业务+SQL（无 express 依赖、可独立单测）
 - service 返回 `{ row, error, message }` 业务码约定；controller 负责映射 `error(code,msg)` / `success(...)`
+- 员工风险画像域 hse-risk-profile（Phase B 第22单，2026-09-13 拆分完成）：原 fat router 已三层化（routes/hse-risk-profile.js 聚合入口 + main.js 绑定 + hseRiskProfileController + hseRiskProfileService）。**评分循环有两套且方法不同，严禁合并**：单员工 `/:employeeId/score` 循环用 `rule && rule.ranges`（无 ranges 走 `Math.max(0, max_score - rawValue*10)` 兜底）、`dimensionDetails` 含 `indicator` 字段；批量 `POST /calculate-all` 用 `rule?.ranges`（无 ranges score 恒 0，无兜底）、`dimensionDetails` 不含 `indicator`。详情 head 注释的 `GET /dimension/:type` 原代码不存在，禁止新增假端点。
+- 员工风险画像域既有路由遮蔽：`GET /:employeeId` 早于 `GET /score-config` 注册，后者被遮蔽不可达（命中详情→bigint 转换错误）；拆分保序保遮蔽，断言此故障照旧，不得提前注册修复。
 
 ## Lessons Learned
 - koa-connect wrapper caused subtle ctx.state data loss; native Koa rewrite is required instead of wrapping Express middleware
