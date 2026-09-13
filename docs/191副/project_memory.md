@@ -304,3 +304,4 @@
   - 第二轮：insurance/import/training/hse-assessment-monthly 四大巨无霸同样三层化，均通过 smoke 测试（services/insuranceShared.js 等共享模块抽取，importShared/trainingShared/assessmentMonthlyShared；修复原 insurance vehicle 写接口 7 处幽灵 auditLog 引用）。
   - 兼容约定：父路由保留 module.exports 转发原模块级导出（如 routes/training.js 的 resolveTrainingPersonId/Name），供 routes/training-ocr.js 等外部引用。
 - 下一阶段（Phase B 领域边界收敛）：将分散的 Sprint 命名模块按领域合并命名。
+- Phase B 已拆试点：事故域 accidents.js（2107 行）三层化完成，父路由收敛为 23 行纯聚合入口；service 返回描述符（__t: json/list/csv/not-found/validation-error）由 controller respond() 统一解释；内存降级+建表启动 IIFE 原位迁入 service；CSV 导出改为 buildCsvExport 返回 {writeHeaders, content}；auditLog 由 controller 装 req.user/req.ip 注入。待续：emergency/site-mgmt/objectives/hse-warning-center 等。
