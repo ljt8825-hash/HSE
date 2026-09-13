@@ -689,7 +689,7 @@ describe('内存模式稳定 ID 规则（任务8）', () => {
 describe('通用导入 personnel 模块配置（任务4.2）', () => {
   const fs = require('fs');
   const path = require('path');
-  const src = fs.readFileSync(path.join(__dirname, '..', 'routes', 'import.js'), 'utf-8');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'services', 'importShared.js'), 'utf-8');
   // 提取 personnel 配置段
   const m = src.match(/personnel: \{[\s\S]*?\n  \},/);
   const cfg = m ? m[0] : '';
@@ -1513,9 +1513,11 @@ describe('业务日 SQL 安全契约（任务9）', () => {
   });
 
   test('import.js 人员保险查重/冲突 SQL 无裸 CURRENT_DATE（服务端常量导入）', () => {
-    const src = fs.readFileSync(path.join(__dirname, '..', 'routes', 'import.js'), 'utf-8');
+    const src = fs.readFileSync(path.join(__dirname, '..', 'services', 'personnelInsurancePolicyService.js'), 'utf-8');
     // 提取 personnel 相关 SQL 段落：不得出现裸 CURRENT_DATE（应为 ${BUSINESS_DAY_SQL}）
-    expect(src).toContain("const { BUSINESS_DAY_SQL } = require('../services/businessDay')");
+    // 冲突 SQL 已随三层化收敛至 services/personnelInsurancePolicyService.js（路径改为 ./businessDay）
+    expect(src).toMatch(/require\(['"]\.\/?businessDay['"]\)/);
+    expect(src).toContain('BUSINESS_DAY_SQL');
     // 通过共享冲突服务（personnelInsurancePolicyService）检查——该服务内部必须用带括号常量
     const svc = fs.readFileSync(path.join(__dirname, '..', 'services', 'personnelInsurancePolicyService.js'), 'utf-8');
     expect(svc).toContain("(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Shanghai')::date");
@@ -2129,8 +2131,8 @@ describe('任务10：统一 active 判定与全写路径语义（提示词10）'
   // ---------- 2/8：源码 guard（六入口统一 + 写入口矩阵） ----------
   test('源码 guard：写入口统一 isPolicyActiveOnBusinessDay，不再手写 wouldBeActive / isCurrent!==false 查冲突', () => {
     const fs = require('fs');
-    const ins = fs.readFileSync(require('path').join(__dirname, '..', 'routes', 'insurance.js'), 'utf-8');
-    const imp = fs.readFileSync(require('path').join(__dirname, '..', 'routes', 'import.js'), 'utf-8');
+    const ins = fs.readFileSync(require('path').join(__dirname, '..', 'services', 'insurancePersonnelService.js'), 'utf-8');
+    const imp = fs.readFileSync(require('path').join(__dirname, '..', 'services', 'importExcelService.js'), 'utf-8');
     // （src guard 二）写入口统一 active 判定来自 services/insurancePersonnelService.js
     const psvc = fs.readFileSync(require('path').join(__dirname, '..', 'services', 'insurancePersonnelService.js'), 'utf-8');
     // 不得再出现 wouldBeActive 变量（注释提及可接受，但代码不得使用）
