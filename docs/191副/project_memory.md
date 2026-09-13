@@ -305,3 +305,4 @@
   - 兼容约定：父路由保留 module.exports 转发原模块级导出（如 routes/training.js 的 resolveTrainingPersonId/Name），供 routes/training-ocr.js 等外部引用。
 - 下一阶段（Phase B 领域边界收敛）：将分散的 Sprint 命名模块按领域合并命名。
 - Phase B 已拆试点：事故域 accidents.js（2107 行）三层化完成，父路由收敛为 23 行纯聚合入口；service 返回描述符（__t: json/list/csv/not-found/validation-error）由 controller respond() 统一解释；内存降级+建表启动 IIFE 原位迁入 service；CSV 导出改为 buildCsvExport 返回 {writeHeaders, content}；auditLog 由 controller 装 req.user/req.ip 注入。待续：emergency/site-mgmt/objectives/hse-warning-center 等。
+- Phase B 第 2 单：应急域 emergency.js（~2550 行）三层化完成（26 行聚合入口）。要点：通用附件 :bizType==='plans' 走 req.url 改写+next('route') 委派回固定路由（保留在 controller）；emergency 原无启动 IIFE，无须照搬 accidents；原未挂 requireRole 的固定预案附件端点保持不放；POST /teams/generate 无 POST :id 遮蔽。子代理拆分、主会话复核（修正 controller 本地影子 buildListResponse 为从 commonResponse 引入）。
