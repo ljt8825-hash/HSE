@@ -1,50 +1,15 @@
 /**
- * HSE 员工域 · 人事变动记录（employee_history 表，生命周期含 operator_id）
- * 从 hse-employee.js 拆分迁移 —— 保持对外路由契约逐字节不变
- * 由父路由 router.use('/', this) 挂载，最终契约 /api/hse/employee/history/employee/:employeeId
+ * HSE 员工域 · 人事变动记录（employee_history 表）—— 纯绑定路由
+ * 业务已下沉：controllers/hse-history.js（薄 handler）→ services/employeeHistoryService.js（业务+SQL）
+ * 对外路由契约逐字节不变，由父路由 router.use('/', this) 挂载，
+ * 最终契约 /api/hse/employee/history/employee/:employeeId
  */
 const express = require('express');
 const router = express.Router();
 
-const { pool, isConnected } = require('../../config/db');
-const { success } = require('../../middleware/response');
-const { camelKeys } = require('../../utils/commonResponse');
-
-// ============================================================
-// 五、人事变动记录 (employee_history 表)
-// ============================================================
+const { listEmployeeHistory } = require('../../controllers/hse-history');
 
 // GET /history/employee/:employeeId — 员工人事变动历史
-router.get('/history/employee/:employeeId', async (req, res) => {
-  try {
-    if (!isConnected()) return res.json(error(-1, '数据库未连接'));
+router.get('/history/employee/:employeeId', listEmployeeHistory);
 
-    const result = await pool.query(
-      `SELECT eh.id, eh.employee_id, eh.event_type, eh.event_date,
-              eh.before_dept_id, eh.after_dept_id,
-              eh.before_position_id, eh.after_position_id,
-              eh.before_status, eh.after_status,
-              eh.approver_id, eh.approve_date, eh.approval_no, eh.remark,
-              eh.operator_id,
-              eh.created_at,
-              dp.name AS before_dept_name, da.name AS after_dept_name,
-              pp.name AS before_position_name, pa.name AS after_position_name,
-              ap.name AS approver_name,
-              u.username AS operator_name, u.real_name AS operator_real_name
-       FROM employee_history eh
-       LEFT JOIN department dp ON eh.before_dept_id = dp.id AND dp.is_deleted = false
-       LEFT JOIN department da ON eh.after_dept_id = da.id AND da.is_deleted = false
-       LEFT JOIN position pp ON eh.before_position_id = pp.id AND pp.is_deleted = false
-       LEFT JOIN position pa ON eh.after_position_id = pa.id AND pa.is_deleted = false
-       LEFT JOIN employee ap ON eh.approver_id = ap.id AND ap.is_deleted = false
-       LEFT JOIN users u ON eh.operator_id = u.id
-       WHERE eh.employee_id = $1 AND eh.is_deleted = false
-       ORDER BY eh.event_date DESC, eh.id DESC`,
-      [req.params.employeeId]
-    );
-    res.json(success(result.rows.map(camelKeys), '查询成功'));
-  } catch (err) {
-    res.json(error(-1, err.message));
-  }
-});
 module.exports = router;
