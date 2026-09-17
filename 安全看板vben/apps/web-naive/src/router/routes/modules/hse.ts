@@ -6,6 +6,10 @@ import { $t } from '#/locales';
  * HSE 一级菜单「安全总览」
  *
  * 整流自 web-antd 基线 hse-01-overview.ts（A 批次前 5 个二级页）。
+ *
+ * 权限（AI-09）：父级 /overview 放行 safety_manager 以便其看到「AI 智能分析」子页
+ * （vben filterTree 按节点自身 authority 过滤，父级不匹配则整棵子树丢弃）；
+ * 其余子页各自保有 authority:['admin']，不随之扩大（与 hse-site.ts 先例一致）。
  */
 const routes: RouteRecordRaw[] = [
   {
@@ -13,7 +17,7 @@ const routes: RouteRecordRaw[] = [
       icon: 'lucide:layout-dashboard',
       order: 1,
       title: $t('page.hse.overview'),
-      authority: ['admin'],
+      authority: ['admin', 'safety_manager'],
       keepAlive: true,
     },
     name: 'HseOverview',
@@ -55,7 +59,8 @@ const routes: RouteRecordRaw[] = [
         meta: {
           title: $t('page.hse.aiAnalysis'),
           icon: 'lucide:brain-circuit',
-          authority: ['admin'],
+          // AI-09：与 AI-07 后端写权限（admin/safety_manager）对齐；其余子页仍为 admin
+          authority: ['admin', 'safety_manager'],
         },
         name: 'HseAiAnalysis',
         path: '/overview/ai-analysis',
