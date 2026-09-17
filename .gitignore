@@ -412,3 +412,5 @@ server/ai06_route_test.cjs
 # 真实账号一律不写进源码：脚本走 test/e2e-account.mjs（环境变量 → 本机此文件 → 报错）
 grid-mobile-cloudflare/**/test/_e2e-creds.local.json
 **/_e2e-creds.local.json
+# ===== 临时目录（任何会话的工作暂存，禁入库） =====
+/_tmp/

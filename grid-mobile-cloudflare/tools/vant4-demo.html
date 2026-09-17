@@ -1,0 +1,154 @@
+<!doctype html>
+<!--
+  Vant 4 (UMD) + Vue 3 (全局构建) —— 静态多页 HTML 可直接打开示例
+  ==================================================================
+  引入方式：无构建、无打包，浏览器直接跑。
+  三行 CDN（样式 1 + 脚本 2）即可让页面里出现全局 `vant` 对象。
+
+  生产/内网提示：免费 CDN 只适合原型，正式用请把这 3 个文件
+  下载到项目里自托管（如 frontend/lib/），再改成本地相对路径。
+
+  自托管示例（等价替换 CDN）：
+    <link rel="stylesheet" href="./lib/vant/index.css">
+    <script src="./lib/vue/vue.global.prod.js"></script>
+    <script src="./lib/vant/vant.min.js"></script>
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Vant4 + Vue3 静态示例</title>
+
+  <!-- ① Vant 样式 -->
+  <link rel="stylesheet" href="https://fastly.jsdelivr.net/npm/vant@4/lib/index.css" />
+
+  <style>
+    /* 手机壳：居中 + 限宽，方便在桌面浏览器里预览移动效果 */
+    html, body { margin: 0; padding: 0; background: #dde0e4; }
+    body {
+      font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+      display: flex; justify-content: center; padding: 16px 0;
+    }
+    #phone {
+      width: 100%; max-width: 480px; min-height: 90vh;
+      background: #f7f8fa; border-radius: 16px; overflow: hidden;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, .18);
+    }
+    .demo-form { padding: 16px; }
+    .demo-btns { display: flex; gap: 12px; padding: 0 16px 24px; }
+    .demo-btns van-button { flex: 1; }
+    /* Vant 兼容移动端青少年字号影响，这里显式归一 */
+    .demo-btns van-button, .demo-form van-field { font-size: 14px; }
+    .hint { padding: 6px 16px 0; color: #969799; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <!-- ② 应用挂载点 -->
+  <div id="phone">
+    <van-nav-bar title="现场巡查" left-text="返回" left-arrow fixed placeholder>
+      <template #right>
+        <van-icon name="user-o" />
+      </template>
+    </van-nav-bar>
+
+    <div class="hint">以下是 Vant4 组件（表单 / 日期 / 按钮 / Toast / 对话框）：</div>
+
+    <!-- Vue 模板由下方 template 字符串渲染到这 -->
+    <div id="app">
+      <van-form class="demo-form" @submit="onSubmit">
+        <van-cell-group inset>
+          <van-field
+            v-model="form.name"
+            name="name"
+            label="巡查人"
+            placeholder="请输入姓名"
+            :rules="[{ required: true, message: '请填写巡查人' }]"
+          />
+          <van-field
+            v-model="form.site"
+            label="巡查部位"
+            placeholder="请输入部位"
+            :rules="[{ required: true, message: '请填写巡查部位' }]"
+          />
+          <van-field
+            v-model="form.date"
+            is-link
+            readonly
+            label="巡查日期"
+            @click="showDate = true"
+            placeholder="请选择日期"
+          />
+        </van-cell-group>
+
+        <div class="demo-btns">
+          <van-button round block type="primary" native-type="submit">
+            提交 / Toast
+          </van-button>
+          <van-button round block plain type="danger" @click="onDialog">
+            对话框
+          </van-button>
+        </div>
+      </van-form>
+    </div>
+
+    <!-- ③ Vant 日期选择弹层 -->
+    <van-popup v-model:show="showDate" position="bottom">
+      <van-date-picker
+        v-model="pickerValue"
+        title="选择巡查日期"
+        @confirm="onConfirmDate"
+        @cancel="showDate = false"
+      />
+    </van-popup>
+  </div>
+
+  <!-- ④ Vue 3 运行时（含模板编译器，可渲染 template 字符串） -->
+  <script src="https://fastly.jsdelivr.net/npm/vue@3"></script>
+  <!-- ⑤ Vant 4 全量包：注册后全局出现 `vant` -->
+  <script src="https://fastly.jsdelivr.net/npm/vant@4/lib/vant.min.js"></script>
+
+  <script>
+    const { createApp } = Vue;
+
+    const app = createApp({
+      data() {
+        return {
+          form: { name: '', site: '', date: '' },
+          showDate: false,
+          pickerValue: [],
+        };
+      },
+      methods: {
+        onSubmit() {
+          // 工具函数：Toast 轻提示
+          vant.showToast({
+            message: '提交成功：' + (this.form.name || '未填写'),
+            position: 'top',
+          });
+        },
+        onConfirmDate({ selectedValues }) {
+          this.form.date = selectedValues.join('-');
+          this.showDate = false;
+          vant.showToast('已选 ' + this.form.date);
+        },
+        onDialog() {
+          // 工具函数：确认对话框
+          vant.showDialog({
+            title: '提示',
+            message: '这是一条来自 Vant 的对话框。',
+            showCancelButton: true,
+          }).then(() => {
+            vant.showToast('点了确认');
+          }).catch(() => {
+            vant.showToast('点了取消');
+          });
+        },
+      },
+    });
+
+    // 注册所有 Vant 组件（模板里直接写 <van-xxx>）
+    app.use(vant);
+    app.mount('#app');
+  </script>
+</body>
+</html>
