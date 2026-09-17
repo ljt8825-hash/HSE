@@ -106,13 +106,18 @@ class SigninAttribution {
 
   async load() {
     if (this.roster) return;
+    // ⚠️ v_employee_current 只保证「当前组织关系」，不保证「仍在职」——
+    // 实测其中混有 1800 名辞职、6 名死亡人员（is_current=true 的历史关系未随离职失效）。
+    // 花名册必须按「用工关系状态」收敛为在职，否则未培训名单会把已离职人员算进去。
     const r = await this.pool.query(`
       SELECT v.employee_id, v.name, v.position_name, v.operation_unit_id, v.unit_name,
              v.org_unit_id, v.org_name, v.supervisor_id, v.supervisor_name,
              ea.dept_name
       FROM v_employee_current v
+      JOIN employee e ON e.id = v.employee_id
       LEFT JOIN employee_assignment ea ON ea.id = v.assignment_id
       WHERE v.is_current = true AND (v.employee_deleted = false OR v.employee_deleted IS NULL)
+        AND e.is_deleted = false AND e.employment_relation = '正式员工'
     `);
     this.roster = r.rows;
     this.byName = new Map();

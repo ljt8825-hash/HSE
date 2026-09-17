@@ -283,13 +283,18 @@ function buildSigninColumns(rows) {
 }
 
 // ---------- 乡镇作业中心经理花名册（注入提示词的闭集名单） ----------
+// 在职口径以「花名册·用工关系状态」为权威，与 employeeService / 考核资格口径一致：
+//   在职 = employment_relation = '正式员工'；离职 = IN ('辞职','死亡')
+// 必须排除辞职/死亡人员，否则模型会从闭集名单里挑到已离职的经理。
+const ACTIVE_EMPLOYEE_SQL = `is_deleted = false AND employment_relation = '正式员工'`;
+
 async function loadTownManagers() {
   if (!isConnected()) return [];
   try {
     const r = await pool.query(`
       SELECT name, roster_department
         FROM employee
-       WHERE is_deleted = false
+       WHERE ${ACTIVE_EMPLOYEE_SQL}
          AND roster_position IN ('人工片区长', '乡镇作业中心经理')
          AND roster_department LIKE '%乡镇作业中心'
        ORDER BY roster_department, name`);
@@ -708,9 +713,14 @@ async function confirmSigninMetrics(req, rows) {
     }
 
     const names = [...agg.keys()];
+    // 同名时只认在职（正式员工）那一位，避免把台账挂到已辞职/已死亡的同名人员 ID 上
     const empRes = await pool.query(
-      `SELECT employee_id, name FROM v_employee_org_full
-        WHERE is_deleted = false AND is_current = true AND name = ANY($1)`,
+      `SELECT v.employee_id, v.name
+         FROM v_employee_org_full v
+         JOIN employee e ON e.id = v.employee_id
+        WHERE v.is_deleted = false AND v.is_current = true
+          AND e.is_deleted = false AND e.employment_relation = '正式员工'
+          AND v.name = ANY($1)`,
       [names],
     );
     const nameToId = new Map();
