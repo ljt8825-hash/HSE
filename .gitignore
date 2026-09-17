@@ -161,6 +161,18 @@ server/*_err.txt
 server/*.tmp.txt
 server/preflight_*.tmp.cjs
 server/typecheck_out.txt
+
+# ⛔ 例外：上面的 `_*.js` 会误伤**以下划线开头的正式源文件**——它们不是调试脚本，
+# 而是被已跟踪代码导入的运行时模块。2026-09-17 实测：这些文件被忽略后，
+# clone / 回滚 / 换人接手会直接拿不到它们：
+#   · pages/functions/_workerProxy.js  ← functions/api/[[route]].js、functions/wps/[[route]].js
+#                                        用 `import { proxyToWorker } from '../_workerProxy.js'` 导入。
+#                                        缺它 ⇒ Pages Functions 导不出 ⇒ /api/* 落静态兜底 ⇒ 登录 405。
+# ⛔ 注：同类「代码引用了版本库里没有的源文件」还有另一种成因 ——
+# **文件不以 `_` 开头、从未被 git add**，改规则修不了。
+# 2026-09-17 实例：server/services/ai/signinCodeMap.js（被 visionService.js require，纯漏 add）。
+# 两种成因都靠 tools/check-repo-source-integrity.mjs 兜底（做「被跟踪代码 → 是否在 git 索引」交叉引用），
+# 不要只依赖本文件的规则。
 安全看板vben/typecheck_out.txt
 # 拆分期间的原文备份残留（__orig_* 为三层化改造时的临时副本）
 **/__orig_*.js
@@ -172,6 +184,13 @@ server/typecheck_out.txt
 !start-hse-ai.ps1
 !start-hse-ai.bat
 !server/scripts/ai12_runtime_probe.cjs
+# Pages Functions 的共享反代实现：下划线开头 = 不作为路由暴露，但**是正式运行时模块**，
+# 被 functions/api/[[route]].js 与 functions/wps/[[route]].js 用
+# `import { proxyToWorker } from '../_workerProxy.js'` 导入。
+# 缺它 ⇒ Pages Functions 导不出来 ⇒ /api/* 落静态兜底 ⇒ **登录 POST 405**
+# （与 2026-09-17 那次真实生产中断同症状，只是成因不同：那次是发布命令带目录参数）。
+!grid-mobile-cloudflare/pages/functions/_workerProxy.js
+!grid-mobile-cloudflare/_pages_deploy/functions/_workerProxy.js
 
 # ===== 上传与导出 =====
 uploads/
