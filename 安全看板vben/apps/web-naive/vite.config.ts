@@ -9,6 +9,8 @@ export default defineConfig(async () => {
         // --host 0.0.0.0 后同事用 192.168.x.x 访问 dev server 会被 403「Blocked request，
         // this host is not allowed」拦截，故显式关闭宿主检查以支持局域网访问。
         allowedHosts: true,
+        // AI-12：代理目标支持环境变量覆盖（start-hse-ai.ps1 注入 VITE_PROXY_TARGET /
+        // VITE_UPLOADS_PROXY_TARGET 指向开发栈后端）。未设置时保持原硬编码默认值，行为不变。
         proxy: {
           // 阶段04：接入真实后端（与 web-antd 权威配置对齐）。
           // 请求路径保留 /api 前缀（requestClient baseURL=VITE_GLOB_API_URL=/api），
@@ -18,8 +20,10 @@ export default defineConfig(async () => {
           // （CORS 策略不允许此来源）。此处移除 Origin，后端按无来源放行（dev 同源代理语义）。
           '/api': {
             changeOrigin: true,
-            // 开发阶段代理到开发后端 5881；生产/正式联调请改回 5876
-            target: 'http://127.0.0.1:5881',
+            // E-09：本阶段 DEV 测试窗口代理 DEV 后端 5882（safety_dashboard_dev）——
+            // 禁止将三违新增测试写入生产。此前默认 5876（safety_dashboard 生产）。
+            // AI-12：默认值保持 5882，可由 VITE_PROXY_TARGET 环境变量覆盖（start-hse-ai.ps1）。
+            target: process.env.VITE_PROXY_TARGET || 'http://127.0.0.1:5882',
             ws: true,
             configure: (proxy) => {
               proxy.on('proxyReq', (proxyReq) => {
@@ -31,8 +35,9 @@ export default defineConfig(async () => {
           // 由后端统一 /uploads 目录输出，dev 环境需同源代理到后端，否则前端图片 404。
           '/uploads': {
             changeOrigin: true,
-            // 开发阶段随 /api 一起走开发后端 5881
-            target: 'http://127.0.0.1:5881',
+            // 05-B0：随 /api 一起走生产后端 5876
+            // AI-12：默认值保持 5876，可由 VITE_UPLOADS_PROXY_TARGET 环境变量覆盖（start-hse-ai.ps1）。
+            target: process.env.VITE_UPLOADS_PROXY_TARGET || 'http://127.0.0.1:5876',
             configure: (proxy) => {
               proxy.on('proxyReq', (proxyReq) => {
                 proxyReq.removeHeader('origin');

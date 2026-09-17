@@ -96,6 +96,8 @@ const demoDataRoutes = require('./routes/demo-data');
 const biRoutes = require('./routes/bi');
 const aiRoutes = require('./routes/ai');
 const aiEnhancedRoutes = require('./routes/ai-enhanced');
+const aiV2Routes = require('./routes/ai-v2'); // AI-03：统一 AI API（/api/hse/ai/v2）
+const aiKnowledgeRoutes = require('./routes/ai-knowledge'); // AI-05：知识库 API（/api/hse/ai/v2/knowledge）
 const iotRoutes = require('./routes/iot');
 const vbenCompatRoutes = require('./routes/vben-compat');
 // V2 Sprint 1: 安全资料中心
@@ -272,9 +274,36 @@ app.use('/uploads', express.static(path.join(__dirname, uploadDir)));
 // 公共模板目录（空模板，不含业务数据；与上传文件权限策略分离，保持公开）
 app.use('/templates', express.static(path.join(__dirname, '..', '安全看板vben', 'apps', 'web-antd', 'public', 'templates')));
 
-app.get('/', (req, res) => {
-  res.redirect(FRONTEND_URL);
-});
+// ========= 生产前端静态托管（同源 /api，零额外 Web 服务器） =========
+// 仅当 dist 构建物存在且 SERVE_DIST !== '0' 时启用；设 SERVE_DIST=0 可回退到原根路径重定向行为。
+const FRONTEND_DIST_DIR = process.env.FRONTEND_DIST_DIR
+  ? path.resolve(process.env.FRONTEND_DIST_DIR)
+  : path.join(__dirname, '..', '安全看板vben', 'apps', 'web-naive', 'dist');
+const SERVE_DIST = process.env.SERVE_DIST !== '0' && fs.existsSync(FRONTEND_DIST_DIR);
+
+if (SERVE_DIST) {
+  // 静态资源（js/css/图片/_app.config.js 等）
+  app.use(express.static(FRONTEND_DIST_DIR, { index: false, extensions: ['html'] }));
+  // SPA History 回退：仅 HTML GET 且非 API / 上传 / 模板前缀
+  app.get('*', (req, res, next) => {
+    if (
+      req.method === 'GET' &&
+      (req.headers.accept || '').includes('text/html') &&
+      !req.path.startsWith('/api') &&
+      !req.path.startsWith('/uploads') &&
+      !req.path.startsWith('/templates')
+    ) {
+      return res.sendFile(path.join(FRONTEND_DIST_DIR, 'index.html'));
+    }
+    next();
+  });
+  logger.info(`[frontend] 同源托管前端 dist: ${FRONTEND_DIST_DIR}`);
+} else {
+  app.get('/', (req, res) => {
+    res.redirect(FRONTEND_URL);
+  });
+  logger.info(`[frontend] 未托管 dist，根路径回退重定向至 ${FRONTEND_URL}`);
+}
 
 // ========= Prometheus 指标暴露端点（默认受保护：JWT 认证 + 系统管理员/管理员角色） =========
 app.get('/metrics', authMiddleware, requireRole('system_admin', 'admin'), (req, res) => {
@@ -386,9 +415,13 @@ app.use('/api/site-mgmt', siteMgmtRoutes);
 // 阶段 P2-B1-D-IMPLEMENTATION-04-B：通道 B 待归属人工归属（独立 router，不动既有逻辑/中间件/scheduler）
 const gridAttributionRoutes = require('./routes/hse-grid-attribution');
 app.use('/api/grid-attribution', gridAttributionRoutes);
+// 阶段 P2-B1-E-06-IMPLEMENT：三违候选识别与人工确认（独立 router；requireRole admin/hse_manager/safety_manager）
+app.use('/api/grid-violation-candidates', require('./routes/hse-grid-violation-candidates'));
 app.use('/api/wps-grid-sync', require('./routes/wps-grid-sync'));
 // Sprint-WPS-02: 当前登录员工上下文（身份解析，见 routes/current-employee.js）
 app.use('/api/current-employee', require('./routes/current-employee'));
+// H5-GRID-LOGIN-02: 移动端手机号+密码登录（独立入口；不改变 /api/auth/login PC 语义，见 routes/mobileAuth.js）
+app.use('/api/mobile/auth', require('./routes/mobileAuth'));
 // Sprint-WPS-01: WPS 多维表基础接入层 管理 Controller（admin 只读/受控自清理，见 routes/wps-dbsheet.js）
 app.use('/api/wps/dbsheet', authMiddleware, requireRole('system_admin', 'admin'), require('./routes/wps-dbsheet'));
 app.use('/api/objectives', objectivesRoutes);
@@ -435,6 +468,8 @@ app.use('/api/hse/violation-assessment', require('./routes/hse-violation-assessm
 app.use('/api/hse/bi', biRoutes);
 app.use('/api/hse/ai', aiRoutes);
 app.use('/api/hse/ai', aiEnhancedRoutes);
+app.use('/api/hse/ai/v2', aiV2Routes); // AI-03：挂载 v2 统一 API
+app.use('/api/hse/ai/v2/knowledge', aiKnowledgeRoutes); // AI-05：知识库 API（写操作限 admin/safety_manager）
 app.use('/api/hse/iot', iotRoutes);
 
 // V2 Sprint 1: 安全资料中心

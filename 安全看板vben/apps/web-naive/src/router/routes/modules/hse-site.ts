@@ -21,7 +21,10 @@ const routes: RouteRecordRaw[] = [
       icon: 'lucide:map-pin',
       order: 6,
       title: $t('page.hse.site'),
-      authority: ['admin', 'grid_inspector'],
+      // DEF-A（04-D-B）：放宽本祖先以放行子树中的 /site/grid/attribution（后端 requireRole:
+      // admin/hse_manager/safety_manager）。其余子页各自保有 authority:['admin']，不随之扩大
+      // （已用仓库真实 filterTree 全项目运行时证明：仅 +/site,/site/grid,/site/grid/attribution 三条）。
+      authority: ['admin', 'grid_inspector', 'hse_manager', 'safety_manager'],
       keepAlive: true,
     },
     name: 'HseSite',
@@ -32,13 +35,41 @@ const routes: RouteRecordRaw[] = [
         meta: {
           title: $t('page.hse.siteViolation'),
           icon: 'lucide:octagon-alert',
-          authority: ['admin'],
+          // E-06-IMPL：放宽本祖先以放行子树中的 /site/violation/candidates（后端
+          // requireRole: admin/hse_manager/safety_manager，与通道 B 归属闭环一致）。
+          // 其余子页各自保有 authority:['admin']，不随之扩大。
+          authority: ['admin', 'hse_manager', 'safety_manager'],
           keepAlive: true,
         },
         name: 'SiteViolation',
         path: '/site/violation',
         redirect: '/site/violation/ledger',
         children: [
+          {
+            meta: {
+              title: $t('page.hse.siteViolationCandidates'),
+              icon: 'lucide:list-filter',
+              // E-06-IMPL 三违候选管理：与后端 requireRole('admin','hse_manager','safety_manager')
+              // 逐字一致（仅可见性，安全边界仍在后端强校验）。
+              authority: ['admin', 'hse_manager', 'safety_manager'],
+            },
+            name: 'SiteViolationCandidates',
+            path: '/site/violation/candidates',
+            component: () => import('#/views/site/violation/candidates/index.vue'),
+          },
+          {
+            meta: {
+              title: '三违记录管理',
+              icon: 'lucide:file-warning',
+              // E-08-01 正式三违记录管理：挂载既有 views/site/violation/index.vue（06B-1 全功能页，
+              // 最小适配未重写）。authority 与后端读闸门 requireRole('admin','hse_manager','safety_manager')
+              // 逐字一致（安全边界仍在后端强校验，grid_inspector 后端 403）。
+              authority: ['admin', 'hse_manager', 'safety_manager'],
+            },
+            name: 'SiteViolationRecords',
+            path: '/site/violation/records',
+            component: () => import('#/views/site/violation/index.vue'),
+          },
           {
             meta: {
               title: $t('page.hse.siteViolationAnalysis'),
@@ -107,7 +138,9 @@ const routes: RouteRecordRaw[] = [
         meta: {
           title: $t('page.hse.siteGrid'),
           icon: 'lucide:grid-3x3',
-          authority: ['admin', 'grid_inspector'],
+          // DEF-A（04-D-B）：同上，仅放行 /site/grid/attribution 子树；/site/grid/mgmt 与
+          // /site/grid/ledger 仍各自 authority:['admin','grid_inspector']，不随之扩大。
+          authority: ['admin', 'grid_inspector', 'hse_manager', 'safety_manager'],
           keepAlive: true,
         },
         name: 'SiteGrid',
@@ -126,13 +159,36 @@ const routes: RouteRecordRaw[] = [
           },
           {
             meta: {
-            title: $t('page.hse.siteGridPatrolLedger'),
-            icon: 'lucide:clipboard-list',
-            authority: ['admin', 'grid_inspector'],
+              title: $t('page.hse.siteGridPatrolLedger'),
+              icon: 'lucide:clipboard-list',
+              authority: ['admin', 'grid_inspector'],
             },
             name: 'SiteGridPatrolLedger',
             path: '/site/grid/ledger',
             component: () => import('#/views/site/grid-ledger/index.vue'),
+          },
+          {
+            meta: {
+              title: $t('page.hse.siteGridAttribution'),
+              icon: 'lucide:user-check',
+              // 与后端 requireRole('admin','hse_manager','safety_manager') 逐字一致（仅可见性，安全边界仍在后端）
+              authority: ['admin', 'hse_manager', 'safety_manager'],
+            },
+            name: 'SiteGridAttribution',
+            path: '/site/grid/attribution',
+            component: () => import('#/views/site/grid/attribution/index.vue'),
+          },
+          {
+            meta: {
+              title: $t('page.hse.siteGridAttributed'),
+              icon: 'lucide:list-checks',
+              // 04-D-B 已归属记录查询：权限闭环与人工归属一致（后端 requireRole 强制，
+              // 前端 authority 仅控制可见性）；grid_inspector / township_manager 不可见。
+              authority: ['admin', 'hse_manager', 'safety_manager'],
+            },
+            name: 'SiteGridAttributed',
+            path: '/site/grid/attributed',
+            component: () => import('#/views/site/grid/attributed/index.vue'),
           },
         ],
       },

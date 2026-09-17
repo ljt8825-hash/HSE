@@ -114,8 +114,9 @@ async function resolveAuthenticatedEmployee(userId, { client, logger = console }
 
   let empRow;
   try {
+    // H5-GRID-LOGIN-02 增量：一并返回 employee_code（只读字段，既有消费方不受影响）
     const r = await db.query(
-      'SELECT id, name, is_deleted FROM public.employee WHERE id = $1',
+      'SELECT id, name, is_deleted, employee_code FROM public.employee WHERE id = $1',
       [empId]
     );
     empRow = r.rows[0];
@@ -133,6 +134,7 @@ async function resolveAuthenticatedEmployee(userId, { client, logger = console }
     userId: uid,
     employeeId: Number(empRow.id),
     employeeName: empRow.name || '',
+    employeeCode: empRow.employee_code || '',
   };
 }
 
