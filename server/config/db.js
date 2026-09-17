@@ -26,6 +26,17 @@ var dbConnected = false;
 pool.on('error', (err) => {
   console.warn('[DB] PostgreSQL 连接池异常:', err.message);
   dbConnected = false;
+  if (process.env.NODE_ENV !== 'production') {
+    console.warn(
+      '\n' +
+      '!'.repeat(72) + '\n' +
+      '[DB][严重] 连接池异常，已切换为「内存降级模式」。\n' +
+      '           此后所有读接口将静默返回空数据（HTTP 200 + 空数组），\n' +
+      '           前端会显示「暂无数据」而不是报错 —— 请勿误判为业务数据为空！\n' +
+      '           修复：确认 PostgreSQL 可用后重启后端。\n' +
+      '!'.repeat(72) + '\n'
+    );
+  }
 });
 
 const testConnection = async () => {
@@ -40,7 +51,19 @@ const testConnection = async () => {
     if (process.env.NODE_ENV === 'production') {
       console.error('[DB] 生产环境 PostgreSQL 连接失败！所有 API 将返回数据库错误。请检查数据库配置:', err.message);
     } else {
-      console.warn('[DB] PostgreSQL 连接失败，将使用内存数据模式运行:', err.message);
+      console.warn(
+        '\n' +
+        '!'.repeat(72) + '\n' +
+        '[DB][严重] PostgreSQL 连接失败，开发环境已进入「内存降级模式」。\n' +
+        '           原因: ' + err.message + '\n' +
+        '           影响: isConnected() 返回 false，全部读接口静默返回空数据\n' +
+        '                 （HTTP 200 + 空数组/零值），前端显示「暂无数据」而非报错。\n' +
+        '                 【请勿把「空数据」误判为业务上没有数据！】\n' +
+        '           范围: 仅开发环境。生产环境 isConnected() 恒为 true，\n' +
+        '                 DB 故障会正常抛出错误，不受此降级影响。\n' +
+        '           修复: 确认 PostgreSQL 可用后重启后端。\n' +
+        '!'.repeat(72) + '\n'
+      );
     }
   }
 };
