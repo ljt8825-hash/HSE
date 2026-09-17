@@ -704,7 +704,7 @@ function syncTabbar(view){
   $("#tabbar-wrap").classList.toggle("hidden", !on);
   $$("#tabbar .tab-item").forEach(x => x.classList.toggle("active", on && x.dataset.tab === view));
 }
-function showView(name){
+function renderView(name){   // 原 showView：只负责切换 DOM（CF-WPS-27 起导航职责移入下方 showView 包装）
   $$(".view").forEach(v => v.classList.remove("active"));
   const el = $("#view-" + name);
   el.classList.add("active");
@@ -713,6 +713,48 @@ function showView(name){
   window.scrollTo(0,0);
   syncTabbar(name);
 }
+
+/* ================= CF-WPS-27：系统返回键 = 页内返回 =================
+   诉求：浏览器「上一步」/安卓返回键/微信左上角返回，行为与页内左上角返回箭头
+   完全一致（回到上一视图）；在首页（本就没有返回箭头）按返回 = 退出 H5。
+   实现：每个视图切换写入历史栈（pushState），系统返回触发 popstate → 切回
+   上一视图；页内返回箭头与系统返回共用同一条栈（相邻返回走 history.back()），
+   保证两条入口行为永远一致。「回到首页」若不是相邻返回（如检查完成后），
+   整条页内历史收拢回首页起点，避免返回键重走已完成的检查流程。 */
+let viewStack = [];      // 与历史条目一一对应的页内视图栈
+let navSuppress = false; // popstate 驱动的切换不重复入栈
+function showView(name){
+  name = String(name || "").replace(/^view-/, "");   // 个别调用传了「view-」前缀（原实现会取错元素直接报错）
+  if(navSuppress){ navSuppress = false; }
+  else if(name !== viewStack[viewStack.length - 1]){
+    if(viewStack.length >= 2 && viewStack[viewStack.length - 2] === name){
+      history.back();          // 页内返回：与系统返回键共用历史栈，popstate 里统一切视图
+      return;
+    }
+    if(name === "home" && viewStack.length > 1 && viewStack[0] === "home"){
+      history.go(1 - viewStack.length);  // 回首页（检查/整改完成后）：收拢整条页内历史
+      return;
+    }
+    try{
+      if(viewStack.length === 0){
+        viewStack = [name];    // 首个落地视图：占用当前历史条目，不新增
+        history.replaceState({ h5view: name }, "", location.href);
+      } else {
+        viewStack.push(name);
+        history.pushState({ h5view: name }, "", location.href);
+      }
+    }catch(e){ viewStack = [name]; } // 个别老 WebView 禁用 history API：退化为无返回栈
+  }
+  renderView(name);
+}
+window.addEventListener("popstate", (ev) => {
+  const v = ev.state && ev.state.h5view;
+  if(!v) return;               // 已退到页内历史边界：交还浏览器/微信处理（= 退出 H5）
+  while(viewStack.length && viewStack[viewStack.length - 1] !== v) viewStack.pop();
+  if(!viewStack.length) viewStack = [v];
+  navSuppress = true;
+  if(v === "home") enterHome(); else showView(v);
+});
 
 /* ================= 启动：复用网格长巡查登录会话 ================= */
 async function boot(){
@@ -730,7 +772,7 @@ async function boot(){
     const b = $("#btn-boot-login");
     b.textContent = "重试"; b.classList.remove("hidden");
     b.onclick = () => { b.classList.add("hidden"); boot(); };
-    showView("boot");
+    renderView("boot");   // 启动页是瞬态视图，不入历史栈（CF-WPS-27）
     return;
   }
   session = buildSession(r.body.employee || {});
@@ -739,7 +781,7 @@ async function boot(){
     $("#btn-boot-login").textContent = "退出登录";
     $("#btn-boot-login").classList.remove("hidden");
     $("#btn-boot-login").onclick = () => { clearSession(); clearLoginCreds(); redirectToLogin(); };
-    showView("boot");
+    renderView("boot");   // 启动页是瞬态视图，不入历史栈（CF-WPS-27）
     return;
   }
   STORE_KEY = "hse_check_v1_" + session.id; // 记录按登录账号隔离
