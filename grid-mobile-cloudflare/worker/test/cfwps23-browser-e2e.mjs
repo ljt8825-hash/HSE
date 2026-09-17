@@ -137,15 +137,17 @@ try {
   assert(await visible('#btn-photo-next'), '④ 拍完后直接显示「下一步」');
   const hasImg = await page.locator('#scene-photo-box img').count();
   assert(hasImg === 1, '④ 照片预览已显示');
-  assert((await page.locator('#photo-tip').innerText()).includes('点击上方照片可重新拍摄'), '④ 预览下方提示改为「点击可重拍」');
+  assert((await page.locator('#photo-tip').innerText()).includes('点击上方照片可重拍'), '④ 预览下方提示改为「点击可重拍/改从相册上传」');
   await shot('04-photo-done');
 
-  // 点击照片预览 → 重新调起相机
-  const fcPromise = page.waitForEvent('filechooser', { timeout: 5000 }).catch(() => null);
+  // 点击照片预览 → 重新展开「拍现场照片 / 从相册上传」按钮组（CF-WPS-26 起的新契约：
+  // 不再强制开相机 —— 相册通道必须始终可达，用户自定来源）
   await page.click('#scene-photo-box');
-  const fc = await fcPromise;
-  assert(!!fc, '④ 点击照片预览可重新拍摄（触发相机文件选择）');
-  if (fc) { try { await fc.setFiles([]); } catch { /* ignore */ } }
+  const actionsBack = await page.evaluate(() => {
+    const el = document.querySelector('#photo-actions');
+    return !!el && !el.classList.contains('hidden') && getComputedStyle(el).display !== 'none';
+  });
+  assert(actionsBack, '④ 点击照片预览可重新展开拍照/相册按钮组（CF-WPS-26 新契约）');
 
   /* ---------- ⑤ 下一步 → 分类页无照片预览 ---------- */
   await page.click('#btn-photo-next');

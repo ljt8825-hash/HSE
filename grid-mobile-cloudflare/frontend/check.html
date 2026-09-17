@@ -139,6 +139,10 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
 .seg .seg-item.active{background:var(--primary);color:#fff;font-weight:600}
 .ro-tag{background:#F3F4F6;color:var(--t3);font-size:12px;font-weight:400;padding:5px 10px;border-radius:999px}
 .hidden{display:none!important}
+/* file input 专用：视觉隐藏但保持渲染。不能用 display:none —— 老版 X5/部分安卓 WebView
+   会拒绝调起 display:none 的 file input（点了「从相册上传」没反应）；
+   程序化 .click() 与 Playwright setInputFiles 均不受 pointer-events:none 影响 */
+.file-ghost{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
 /* 矮屏（小屏手机 / 键盘弹出）压缩纵向尺寸，保证「每屏一屏可读完」 */
 @media (max-height:700px){
   .big-cta{height:156px} .big-cta .cta-title{font-size:26px}
@@ -226,8 +230,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
     </div>
     <button class="btn-primary hidden" id="btn-photo-next">下一步</button>
     <div class="muted" style="text-align:center" id="photo-tip">照片将自动保存到本条检查记录</div>
-    <input type="file" accept="image/*" capture="environment" class="hidden" id="file-camera">
-    <input type="file" accept="image/*" class="hidden" id="file-album">
+    <input type="file" accept="image/*" capture="environment" class="file-ghost" id="file-camera">
+    <input type="file" accept="image/*" class="file-ghost" id="file-album">
   </div>
 </section>
 
@@ -414,8 +418,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
       从相册上传
     </button>
     <button class="btn-primary" id="btn-submit-rectify" disabled>提交</button>
-    <input type="file" accept="image/*" capture="environment" class="hidden" id="file-camera-2">
-    <input type="file" accept="image/*" class="hidden" id="file-album-2">
+    <input type="file" accept="image/*" capture="environment" class="file-ghost" id="file-camera-2">
+    <input type="file" accept="image/*" class="file-ghost" id="file-album-2">
   </div>
 </section>
 
@@ -916,9 +920,9 @@ function setScenePhoto(dataUrl){
   draft.scenePhoto = dataUrl;
   $("#scene-photo-box").innerHTML = '<img alt="现场照片" src="' + dataUrl + '">';
   $("#scene-photo-box").classList.add("clickable");
-  $("#photo-actions").classList.add("hidden");   // 拍完即收起「拍现场照片 / 从相册上传」
+  $("#photo-actions").classList.add("hidden");   // 出片后收起按钮；点照片区可重新展开（拍现场照片 / 从相册上传）
   $("#btn-photo-next").classList.remove("hidden");
-  $("#photo-tip").textContent = "点击上方照片可重新拍摄";
+  $("#photo-tip").textContent = "点击上方照片可重拍，或改从相册上传";
 }
 
 /* ---- 三违宫格 ---- */
@@ -1308,8 +1312,9 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#btn-album").onclick = () => $("#file-album").click();
   $("#file-camera").onchange = e => { if(e.target.files[0]) compressImage(e.target.files[0], setScenePhoto); e.target.value = ""; };
   $("#file-album").onchange = e => { if(e.target.files[0]) compressImage(e.target.files[0], setScenePhoto); e.target.value = ""; };
-  // 点击照片预览 = 重新拍（仅已拍摄时生效，未拍摄时点击无反应）
-  $("#scene-photo-box").onclick = () => { if(draft.scenePhoto) $("#file-camera").click(); };
+  // 拍完/选完照片后按钮收起省空间；点照片区重新展开「拍现场照片 / 从相册上传」——
+  // 相册通道必须始终可达（此前点照片区只会再开相机，想换用相册照片无入口）
+  $("#scene-photo-box").onclick = () => { if(draft.scenePhoto) $("#photo-actions").classList.remove("hidden"); };
   $("#btn-photo-next").onclick = () => showView("classify");
 
   // 分类
