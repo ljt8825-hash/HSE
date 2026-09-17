@@ -15,6 +15,22 @@ import type { RouteRecordRaw } from 'vue-router';
  * 6. 本阶段仅壳层 + 路由 + 登录复用，不实现新增巡查 / 图片上传 / 整改等业务逻辑。
  */
 const routes: RouteRecordRaw[] = [
+  /**
+   * H5-GRID-UI-01 · 01 登录页（手机号 + 密码）
+   * 顶层独立路由（不在移动端布局内，无底部导航）；meta.ignoreAccess 允许未登录直达。
+   * 完全复用现有 JWT 登录体系（authStore.authLogin → POST /api/auth/login），不新增接口。
+   */
+  {
+    path: '/mobile/login',
+    name: 'MobileLogin',
+    component: () => import('#/views/mobile/login.vue'),
+    meta: {
+      title: '登录',
+      noBasicLayout: true,
+      hideInMenu: true,
+      ignoreAccess: true,
+    },
+  },
   {
     path: '/mobile',
     name: 'MobileRoot',
@@ -80,6 +96,68 @@ const routes: RouteRecordRaw[] = [
         component: () => import('#/views/mobile/grid/detail.vue'),
         meta: {
           title: '巡查详情',
+          hideInMenu: true,
+        },
+      },
+      {
+        // MOBILE-05：手机端三违现场录入（复用现有正式 API POST /api/violations，
+        // 不新增 /api/mobile/*；责任解析与扣分 100% 服务端，前端仅展示实际结果）。
+        path: 'violation/new',
+        name: 'MobileViolationNew',
+        component: () => import('#/views/mobile/violation/new.vue'),
+        meta: {
+          title: '新增三违',
+          hideInMenu: true,
+        },
+      },
+      /* ===== H5-GRID-UI-01：网格长巡查统一流程（开始巡查 → 取证 → 判断 → 提交） ===== */
+      {
+        // 03 开始巡查（身份/网格自动带出，GET /api/current-employee）
+        path: 'inspection/start',
+        name: 'MobileInspectionStart',
+        component: () => import('#/views/mobile/inspection/start.vue'),
+        meta: {
+          title: '开始巡查',
+          hideInMenu: true,
+        },
+      },
+      {
+        // 04 现场取证（拍照优先，复用 photo-group 上传链）
+        path: 'inspection/capture',
+        name: 'MobileInspectionCapture',
+        component: () => import('#/views/mobile/inspection/capture.vue'),
+        meta: {
+          title: '现场取证',
+          hideInMenu: true,
+        },
+      },
+      {
+        // 05 正常巡查提交（POST /api/site-mgmt/grid-records）
+        path: 'inspection/normal',
+        name: 'MobileInspectionNormal',
+        component: () => import('#/views/mobile/inspection/normal.vue'),
+        meta: {
+          title: '提交巡查记录',
+          hideInMenu: true,
+        },
+      },
+      {
+        // 06 发现问题（三违为唯一业务入口）
+        path: 'inspection/issue',
+        name: 'MobileInspectionIssue',
+        component: () => import('#/views/mobile/inspection/issue.vue'),
+        meta: {
+          title: '发现问题',
+          hideInMenu: true,
+        },
+      },
+      {
+        // 07 三违记录（选人/行为/3照片位/提交，POST /api/violations，不展示扣分）
+        path: 'inspection/violation',
+        name: 'MobileInspectionViolation',
+        component: () => import('#/views/mobile/inspection/violation.vue'),
+        meta: {
+          title: '三违记录',
           hideInMenu: true,
         },
       },

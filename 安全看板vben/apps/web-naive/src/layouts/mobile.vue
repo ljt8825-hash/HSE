@@ -55,21 +55,37 @@ const navItems = [
 ];
 
 // 详情页 (/mobile/grid/detail/:id)、新增巡查 (/mobile/grid/new) 与
-// 补传整改照片 (/mobile/grid/rectify/:id) 均归属「巡查台账」高亮
-const activeName = computed(() =>
-  route.name === 'MobileDetail' ||
-  route.name === 'MobileGridNew' ||
-  route.name === 'MobileGridRectify'
-    ? 'MobileLedger'
-    : route.name,
-);
+// 补传整改照片 (/mobile/grid/rectify/:id) 均归属「巡查台账」高亮；
+// H5-GRID-UI-01：统一取证流程 (/mobile/inspection/*) 归属「首页」高亮
+const INSPECTION_ROUTE_NAMES = new Set([
+  'MobileInspectionStart',
+  'MobileInspectionCapture',
+  'MobileInspectionNormal',
+  'MobileInspectionIssue',
+  'MobileInspectionViolation',
+]);
+const activeName = computed(() => {
+  if (
+    route.name === 'MobileDetail' ||
+    route.name === 'MobileGridNew' ||
+    route.name === 'MobileGridRectify'
+  ) {
+    return 'MobileLedger';
+  }
+  if (INSPECTION_ROUTE_NAMES.has(String(route.name))) {
+    return 'MobileHome';
+  }
+  return route.name;
+});
 
 function go(path: string) {
   void router.push(path);
 }
 
 async function handleLogout() {
+  // H5-GRID-LOGIN-02：移动端退出后落点回移动端登录页（authStore.logout 语义不变）
   await authStore.logout(true);
+  await router.replace('/mobile/login');
 }
 </script>
 

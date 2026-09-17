@@ -5,6 +5,7 @@
  *   GET  /api/grid-attribution/pending    —— 待归属列表（严格 pending + 双 NULL）
  *   POST /api/grid-attribution/attribute   —— 人工归属
  *   DELETE /api/grid-attribution/revoke    —— 撤销归属
+ *   GET  /api/grid-attribution/attributed  —— 已归属记录查询（04-D-B，只读，真分页）
  *
  * 权限（§四/§六）：authMiddleware（全局已挂）+ requireRole('admin','hse_manager','safety_manager')
  *   - 严禁 requirePermission('hse:site:grid:update')（grid_inspector 也持有，会误放行）
@@ -26,6 +27,22 @@ function clientIp(req) {
   return null;
 }
 
+/**
+ * 统一异常兜底：Express 4 不会捕获 async handler 的 reject，若不在处理器内 catch，
+ * 请求会**永不响应**（挂起）。服务层在少数路径（如入参校验）会 throw ApiError 而非返回错误对象，
+ * 故此处将「抛出的异常」与「返回的错误对象」统一映射为响应。
+ */
+function sendUnhandled(res, err, fallbackCode) {
+  const httpStatus = Number.isInteger(err && err.httpStatus) ? err.httpStatus : 500;
+  const code = (err && err.code) || fallbackCode;
+  console.error('[grid-attribution] 未捕获异常:', err && err.message);
+  return res.status(httpStatus).json({
+    success: false,
+    code,
+    message: (err && err.message) || '操作失败',
+  });
+}
+
 // ========= GET pending =========
 router.get('/pending', requireRole(...ATTR_ROLES), async (req, res) => {
   try {
@@ -45,14 +62,21 @@ router.post('/attribute', requireRole(...ATTR_ROLES), async (req, res) => {
   const record_id = body.record_id;
   const candidate_employee_id = body.candidate_employee_id;
   const operator = { userId: req.user.id, username: req.user.username };
-  const r = await svc.attributeRecord({ record_id, candidate_employee_id, operator, ip: clientIp(req) });
-  const status = r.ok ? 200 : (r.httpStatus || 500);
-  return res.status(status).json({
-    success: status < 400,
-    code: status,
-    message: r.message,
-    data: r.ok ? { record_id: r.record_id, inspector_employee_id: r.inspector_employee_id, grid_id: r.grid_id } : undefined,
-  });
+  try {
+    const r = await svc.attributeRecord({ record_id, candidate_employee_id, operator, ip: clientIp(req) });
+    const status = r.ok ? 200 : (r.httpStatus || 500);
+    return res.status(status).json({
+      success: !!r.ok,
+      // 成功：code=0（与 @vben/request 拦截器 successCode 对齐，避免被误判为错误并误弹提示）
+      // 失败：code=具体业务码（GRID_NONE / GRID_MULTIPLE / RECORD_NOT_PENDING / EMPLOYEE_INVALID ...），便于前端精准提示
+      code: r.ok ? 0 : (r.code || status),
+      message: r.message,
+      data: r.ok ? { record_id: r.record_id, inspector_employee_id: r.inspector_employee_id, grid_id: r.grid_id } : undefined,
+    });
+  } catch (err) {
+    // 例：record_id / candidate_employee_id 无效（服务层抛 ApiError(400,'INVALID_RECORD_ID'|'INVALID_EMPLOYEE_ID')）
+    return sendUnhandled(res, err, 'ATTRIBUTE_FAILED');
+  }
 });
 
 // ========= DELETE revoke =========
@@ -62,13 +86,35 @@ router.delete('/revoke', requireRole(...ATTR_ROLES), async (req, res) => {
   const record_id = body.record_id;
   const reason = typeof body.reason === 'string' ? body.reason : undefined;
   const operator = { userId: req.user.id, username: req.user.username };
-  const r = await svc.revokeRecord({ record_id, operator, ip: clientIp(req), reason });
-  const status = r.ok ? 200 : (r.httpStatus || 500);
-  return res.status(status).json({
-    success: status < 400,
-    code: status,
-    message: r.message,
-  });
+  try {
+    const r = await svc.revokeRecord({ record_id, operator, ip: clientIp(req), reason });
+    const status = r.ok ? 200 : (r.httpStatus || 500);
+    return res.status(status).json({
+      success: !!r.ok,
+      code: r.ok ? 0 : (r.code || status),
+      message: r.message,
+    });
+  } catch (err) {
+    return sendUnhandled(res, err, 'REVOKE_FAILED');
+  }
+});
+
+// ========= GET attributed（04-D-B，只读） =========
+// 已归属记录查询：服务端固定 attribution_status IN ('attributed','manual_confirmed')；
+// 仅接受 page/pageSize/keyword；grid_id/inspector_employee_id/attribution_status 等
+// 客户端参数一律忽略（不读取），杜绝越权过滤面。权限与归属闭环一致（ATTR_ROLES）。
+router.get('/attributed', requireRole(...ATTR_ROLES), async (req, res) => {
+  try {
+    const q = req.query || {};
+    const result = await svc.listAttributed({
+      page: q.page,
+      pageSize: q.pageSize,
+      keyword: typeof q.keyword === 'string' ? q.keyword : undefined,
+    });
+    return res.json({ success: true, code: 0, data: result });
+  } catch (err) {
+    return sendUnhandled(res, err, 'ATTRIBUTED_QUERY_FAILED');
+  }
 });
 
 module.exports = router;

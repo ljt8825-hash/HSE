@@ -5,12 +5,14 @@
  * 复用现有 authStore.logout，不新增任何身份/账号体系。
  */
 import { computed } from 'vue';
+import { useRouter } from 'vue-router';
 
 import { useUserStore } from '@vben/stores';
 import { useAuthStore } from '#/store';
 
 defineOptions({ name: 'MobileMe' });
 
+const router = useRouter();
 const userStore = useUserStore();
 const authStore = useAuthStore();
 
@@ -18,7 +20,9 @@ const info = computed(() => userStore.userInfo);
 const roles = computed(() => info.value?.roles?.join('、') || '—');
 
 async function handleLogout() {
+  // H5-GRID-LOGIN-02：移动端退出后落点回移动端登录页（authStore.logout 语义不变）
   await authStore.logout(true);
+  await router.replace('/mobile/login');
 }
 </script>
 

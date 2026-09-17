@@ -34,8 +34,11 @@ function normalizeInt(v) {
 // ===================== GET pending =====================
 // 严格 ONLY pending + 双 NULL；不得用 OR；NULL 绝不自动显示为 pending（§五/§十三）
 async function getPendingRecords({ limit = 500, offset = 0 } = {}) {
+  // 05-E-B：仅扩展 SELECT 展示列（serial_no/violator_name/grid_level/position/upload_time），
+  // 供 admin 人工判断历史归属；WHERE 严格条件与状态机零改动。
   const r = await pool.query(
-    `SELECT id, inspection_date, area_team, personnel_name, violation_behavior,
+    `SELECT id, serial_no, inspection_date, area_team, personnel_name, grid_level, position,
+            violator_name, violation_behavior, upload_time,
             attribution_status, created_at, updated_at
      FROM grid_inspection_records
      WHERE attribution_status = 'pending'
@@ -216,10 +219,77 @@ async function revokeRecord({ record_id, operator, ip, reason }) {
   }
 }
 
+// ===================== GET attributed（04-D-B） =====================
+// 已归属记录只读查询。
+// 状态口径（§五 / 冻结状态机）：仅 attribution_status IN ('attributed','manual_confirmed')；
+//   禁止用 id>7192 / wps_record_id IS NOT NULL / inspector_employee_id IS NOT NULL 等方式推断。
+// 服务端固定查询范围（§六/§十三）：不接受客户端 grid_id / inspector_employee_id /
+//   operator_employee_id / attribution_status 参数（忽略，不读取）；仅接受 page/pageSize/keyword。
+// 真分页（§十二）：LIMIT/OFFSET + 独立 count；pageSize 服务端裁剪上限 200（与 /hse/audit-records 一致）。
+// 排序（04-D-A §陷阱）：id DESC（gir.updated_at 每 15 分钟被 Pull 重写，禁止作归属时间/排序依据）。
+function escapeLike(s) {
+  return s.replace(/[\\%_]/g, (m) => `\\${m}`);
+}
+
+async function listAttributed({ page = 1, pageSize = 20, keyword } = {}) {
+  const p = normalizeInt(page) || 1;
+  let ps = normalizeInt(pageSize) || 20;
+  if (ps > 200) ps = 200;
+
+  const params = [];
+  let where = `g.attribution_status IN ('attributed', 'manual_confirmed')`;
+  const kwRaw = keyword == null ? '' : String(keyword).trim();
+  if (kwRaw !== '') {
+    const like = `%${escapeLike(kwRaw)}%`;
+    params.push(like);
+    const textCond =
+      `(g.serial_no ILIKE $${params.length} ESCAPE '\\'` +
+      ` OR g.personnel_name ILIKE $${params.length} ESCAPE '\\'` +
+      ` OR g.violator_name ILIKE $${params.length} ESCAPE '\\')`;
+    const asId = normalizeInt(kwRaw);
+    if (asId != null) {
+      params.push(asId);
+      where += ` AND (${textCond} OR g.id = $${params.length})`;
+    } else {
+      where += ` AND ${textCond}`;
+    }
+  }
+
+  const baseSql = `
+    FROM grid_inspection_records g
+    LEFT JOIN employee e        ON e.id  = g.inspector_employee_id
+    LEFT JOIN grid_areas ga     ON ga.id = g.grid_id`;
+
+  const totalR = await pool.query(
+    `SELECT count(*)::int AS c ${baseSql} WHERE ${where}`,
+    params,
+  );
+
+  params.push(ps, (p - 1) * ps);
+  const lim = `$${params.length - 1}`;
+  const off = `$${params.length}`;
+  const rows = await pool.query(
+    `SELECT g.id, g.serial_no, g.inspection_date, g.area_team, g.personnel_name,
+            g.violator_name, g.violation_behavior,
+            g.grid_id, g.inspector_employee_id, g.attribution_status, g.created_at,
+            e.name  AS inspector_name,
+            ga.name AS grid_name,
+            ga.township AS grid_township
+     ${baseSql}
+     WHERE ${where}
+     ORDER BY g.id DESC
+     LIMIT ${lim} OFFSET ${off}`,
+    params,
+  );
+
+  return { total: totalR.rows[0].c, page: p, pageSize: ps, list: rows.rows };
+}
+
 module.exports = {
   ApiError,
   getPendingRecords,
   getPendingCount,
   attributeRecord,
   revokeRecord,
+  listAttributed,
 };

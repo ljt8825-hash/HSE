@@ -40,11 +40,13 @@ const RULE_CATEGORY = '三违管理';
  * @param {number} cycleId 考核周期 id
  * @param {object} [opts]
  * @param {boolean} [opts.dryRun] 只算不写库，返回 details 供人工核对
+ * @param {string}  [opts.executionMode] 'backfill' 仅限人工历史补录入口显式传入
+ *                                        （scheduler/导入联动一律不传 = LIVE）
  * @returns {object} { ok, cycleId, scanned, affected, details, skipped, dryRun, adapters }
  */
-async function syncGridUncheckedDeductions(cycleId, { dryRun = false } = {}) {
+async function syncGridUncheckedDeductions(cycleId, { dryRun = false, executionMode } = {}) {
   if (!isConnected()) return { ok: false, reason: 'memory-mode', adapters: [] };
-  return runCycleAutoDeductions(cycleId, { dryRun: !!dryRun });
+  return runCycleAutoDeductions(cycleId, { dryRun: !!dryRun, executionMode });
 }
 
 // ===== 以下导出为兼容保留（内部转调规则引擎新模块），供历史脚本使用 =====

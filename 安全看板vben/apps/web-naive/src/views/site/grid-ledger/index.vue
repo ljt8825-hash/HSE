@@ -9,7 +9,9 @@
  * 能力：关键字/片区/网格级别/上报状态筛选；HseDataGrid 自定义表格 + 单元格编辑（点击即编辑，关闭即保存）
  *      + 虚拟滚动（大体积台账）。单元格编辑字段对齐后端 GRID_RECORD_EDITABLE 白名单。
  */
-import { onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
+
+import { useAccess } from '@vben/access';
 
 import {
   NButton,
@@ -49,6 +51,12 @@ import { useGenericImport } from '#/views/hse/_shared/useGenericImport';
 import { dialog, message } from '#/adapter/naive';
 
 defineOptions({ name: 'SiteGridPatrolLedger' });
+
+// P2-B1-E-02：「表格清空」（清空全部台账）为高危操作，业务规则限定仅主账号 admin 可见可执行。
+// 前端隐藏仅为体验层控制，最终安全边界在后端（DELETE /api/site-mgmt/grid-records/all
+// 经 requirePermission('hse:site:grid:purge') + requireRole('system_admin','admin') 双闸）。
+const { hasAccessByRoles } = useAccess();
+const canPurge = computed(() => hasAccessByRoles(['admin']));
 
 // ===================== 常量映射 =====================
 const GRID_LEVEL_OPTIONS = ['一级网格长', '二级网格长', '三级网格长'];
@@ -510,7 +518,7 @@ onMounted(async () => {
     <!-- 顶部工具条：与「网格长巡查管理」一致的 6 按钮 -->
     <template #extra>
       <NSpace>
-        <NButton type="warning" secondary @click="onClearAll">表格清空</NButton>
+        <NButton v-if="canPurge" type="warning" secondary @click="onClearAll">表格清空</NButton>
         <NButton type="error" secondary @click="onBatchDelete">批量删除</NButton>
         <HseActionBar
           :actions="actionState"

@@ -31,6 +31,13 @@ const FIELD_MAP = [
   { biz: 'inspectionId',   wps: '巡查编号',          pg: '-',          type: 'text', mode: 'read',     note: '系统巡查编号（预留，后续建列）' },
   { biz: 'inspectorEmployeeId', wps: '巡查人员ID',   pg: '-',          type: 'text', mode: 'readwrite', note: '巡查人员 employeeId（人员关联键）。本 Sprint 起可写，但只允许由后端身份上下文(currentEmployeeContext.employeeId)写入，前端不可覆盖' },
 
+  // CF-WPS-06：移动端业务身份键（花名册员工编码）。
+  //   ⚠️ 语义严格区分：employee_code（VARCHAR，业务快照）≠ employee.id（BIGINT，PG 代理键）
+  //      ≠ inspector_employee_id（= employee.id）。本字段**永不**直接写入 inspector_employee_id，
+  //      必须经 services/gridEmployeeCodeResolver.js 解析为 employee.id 后再归属。
+  //   mode=readonly：WPS 是「员工编码」的产生方（移动端提交），PG 侧只读不反向写。
+  { wps: '员工编码',        biz: 'employee_code',    pg: 'employee_code', type: 'text', mode: 'readonly', note: '花名册员工编码（移动端业务身份键，业务快照）。非身份列；归因须经 gridEmployeeCodeResolver → employee.id；不参与 sync_hash' },
+
   // ---- 巡查人员（快照，不改写主数据） ----
   { wps: '姓名',          biz: 'inspector_name',  pg: 'personnel_name', type: 'text', mode: 'readwrite', note: '巡查人姓名（快照）' },
   { wps: '分组名称',       biz: 'operation_unit',  pg: 'area_team',     type: 'text', mode: 'readwrite', note: '所属乡镇 / 作业中心下的班组分组' },
@@ -100,9 +107,17 @@ function byPg(pgCol) { return BY_PG.get(pgCol) || null; }
  * SYNC_PROJECTION_ORDER：同步引擎的规范化投影顺序。
  *   - 前 18 列 = 历史冻结的 sync_hash 口径（与既有 2061 条 `grid_record_sync_map.sync_hash`
  *     逐字节兼容，实测 199/199 match / 0 mismatch）。**顺序与集合不得改动**。
- *   - 后 5 列 = PC 台账业务列（当前 WPS 板上无对应列 → 记录中永不出现 → 投影惰性）；
- *     不参与 sync_hash，避免历史哈希口径漂移导致存量记录被误判为「已变更」。
+ *   - 第 19 列起 = 不参与 sync_hash 的追加段（只允许**末尾追加**，绝不允许插入前 18 列）：
+ *       · 后 5 列 = PC 台账业务列（当前 WPS 板上无对应列 → 记录中永不出现 → 投影惰性）；
+ *       · 第 24 列 = employee_code（CF-WPS-06 新增，WPS「员工编码」业务快照）。
+ *     追加段不参与 sync_hash，避免历史哈希口径漂移导致存量记录被误判为「已变更」。
  *   - `grid_id` / `inspector_employee_id` 为 PG 权威字段，**永不**进入本投影（fail-closed）。
+ *
+ * ⚠️ hash 口径不变量（CF-WPS-06 实测证据）：
+ *   SYNC_HASH_COLUMNS = SYNC_PROJECTION_ORDER.slice(0, 18) —— **位置敏感**。
+ *   实测 R1：存量 2061/2061 命中；R2：末尾追加 employee_code 后 2061/2061 不变；
+ *   R3：WPS 记录新增「员工编码」字段后 2061/2061 不变；
+ *   R4 负对照：把 employee_code 插到第 1 位 → 2061/2061 全部改变（证明必须末尾追加）。
  */
 const SYNC_PROJECTION_ORDER = [
   // —— 冻结 hash 口径（18 列，顺序不可变）——
@@ -112,12 +127,38 @@ const SYNC_PROJECTION_ORDER = [
   'image_content', 'rectified_photo', 'schematic',
   // —— 非 hash 业务列（5 列）——
   'report_status', 'vehicle_type', 'violation_type_result', 'need_rectification', 'rectifier',
+  // —— 非 hash 移动端业务快照列（CF-WPS-06，仅允许追加在此处及之后）——
+  'employee_code',
 ];
+
+/**
+ * 冻结 hash 段字面量（**绝对不可修改**）。
+ * CF-WPS-06 新增机器级护栏：模块加载即断言 SYNC_PROJECTION_ORDER 前 18 列与之逐字节相同，
+ * 任何「插入 / 删除 / 换位」都会在进程启动时直接抛错（fail-fast），
+ * 彻底杜绝「悄悄改变 hash 口径 → 存量 2061 条被误判为已变更 → 误 UPDATE」的风险。
+ */
+const FROZEN_HASH_SEGMENT = Object.freeze([
+  'nickname', 'area_team', 'personnel_name', 'position', 'grid_level', 'inspection_date',
+  'violation_behavior', 'violator_name', 'violator_gender', 'violator_age',
+  'signup_today', 'marker', 'is_resubmit', 'upload_time', 'serial_no',
+  'image_content', 'rectified_photo', 'schematic',
+]);
 
 /** 参与 sync_hash 的列（= 冻结的历史口径） */
 const SYNC_HASH_COLUMNS = SYNC_PROJECTION_ORDER.slice(0, 18);
 /** 参与 sync_hash 的列数（冻结常量，供门禁断言） */
 const SYNC_HASH_COLUMN_COUNT = 18;
+
+// ---- hash 口径不变量断言（fail-fast；CF-WPS-06） ----
+if (SYNC_PROJECTION_ORDER.slice(0, SYNC_HASH_COLUMN_COUNT).join('|') !== FROZEN_HASH_SEGMENT.join('|')) {
+  throw new Error(
+    'wpsFieldMap 冻结口径违规：SYNC_PROJECTION_ORDER 前 18 列必须与 FROZEN_HASH_SEGMENT 完全一致。' +
+    '新增字段只允许追加在数组末尾（第 19 列及之后），否则 sync_hash 会漂移并误判存量记录为「已变更」。'
+  );
+}
+if (SYNC_PROJECTION_ORDER.length < SYNC_HASH_COLUMN_COUNT) {
+  throw new Error('wpsFieldMap 冻结口径违规：SYNC_PROJECTION_ORDER 长度不得小于冻结 hash 列数 18');
+}
 
 /**
  * PG 权威字段：同步引擎**永不**写入、永不覆盖（WPS 无可靠来源，必须 fail-closed）。
@@ -146,6 +187,7 @@ module.exports = {
   SYNC_PROJECTION_ORDER,
   SYNC_HASH_COLUMNS,
   SYNC_HASH_COLUMN_COUNT,
+  FROZEN_HASH_SEGMENT,
   SYNC_URL_COLUMNS,
   PROTECTED_COLUMNS,
 };

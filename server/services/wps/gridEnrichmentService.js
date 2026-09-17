@@ -23,15 +23,28 @@
  *   attribution_status : pending | attributed   （绝不出 failed —— 无可信来源可判定失败）
  *   attachment_resolution_status : pending | resolved
  *   source_channel     : mobile_h5 | wps_form | unknown（本阶段只可靠判定 mobile_h5；wps_form 需表单来源证据，禁止仅凭 wps_record_id 推断）
+ *
+ * CF-WPS-06 增补（employee_code 巡查归因链最小实现）：
+ *   - 新增 employee_code 业务身份路径：记录带非空 employee_code 时，
+ *     经 services/gridEmployeeCodeResolver.js 解析为 public.employee.id（绝不用 employee_code 当身份），
+ *     再由 gridScope.deriveGridIdForEmployee 派生唯一网格后归属。
+ *   - 写入护栏**不变**：仍然只有 inspector_employee_id IS NULL AND grid_id IS NULL 才写（buildWrites + applyEnrichment）。
+ *   - 本文件仍不调用 WPS 写接口、仍不被 Pull Engine 调用、仍不动 PROTECTED_COLUMNS 设计。
  */
 
 const crypto = require('crypto');
 const gridScope = require('../gridScope');
+// CF-WPS-06：employee_code → employee.id 的**唯一**解析实现（本文件不重复实现该解析）
+const codeResolver = require('../gridEmployeeCodeResolver');
 
 /**
  * §十一（P2-B1-C）身份状态机 —— 规范命名，用于**决策/报告**，不新增 DB 列
  * （持久化仍只有 attribution_status: pending|attributed；本状态机更细粒度）。
  * 禁止自动写 inspector_employee_id，除非到达 ATTRIBUTED。
+ *
+ * CF-WPS-06 追加两个 employee_code 路径的 pending 细分状态（不改变既有状态语义）：
+ *   PENDING_EMPLOYEE_CODE ：有 employee_code 但无法解析为唯一在职员工（空/查无/多命中/非法 id）
+ *   PENDING_CODE_GRID     ：employee_code 已解析到 employee.id，但该员工网格不唯一（0 或 >1）
  */
 const IDENTITY_STATE = {
   PENDING_CREATOR: 'PENDING_CREATOR',   // 没有 Creator
@@ -40,6 +53,8 @@ const IDENTITY_STATE = {
   PENDING_GRID: 'PENDING_GRID',         // employee 无法得到唯一 live grid（0 或 >1）
   ATTRIBUTED: 'ATTRIBUTED',             // WPS Account → employee.id → unique live grid
   UNTRUSTED: 'UNTRUSTED',               // 只有姓名/昵称/业务字段，或 creator 为共享账号 → 无可信账号身份
+  PENDING_EMPLOYEE_CODE: 'PENDING_EMPLOYEE_CODE', // CF-WPS-06：employee_code 未能解析为唯一在职员工
+  PENDING_CODE_GRID: 'PENDING_CODE_GRID',         // CF-WPS-06：employee_code 已解析但网格不唯一
 };
 
 /**
@@ -104,13 +119,57 @@ async function employeeResolvable(employeeId, client) {
 }
 
 /**
+ * CF-WPS-06 §五/§六：employee_code 业务身份路径（**新移动端链路**）。
+ *
+ * 解析实现**唯一**来自 services/gridEmployeeCodeResolver.js（本函数只做结果封装，
+ * 不重复实现查询/派生逻辑，杜绝「第二套归因机制」）。
+ *
+ * 严格规则（全部 fail-closed）：
+ *   空 / 查无此人 / 同码多命中 / 非法 id / 无网格 / 多网格 → pending，绝不归属
+ *   唯一在职员工 + 唯一 live grid                        → attributed（employee_id = employee.id）
+ *
+ * 严禁：把 employee_code 当作 inspector_employee_id 写入；按姓名/昵称兜底匹配。
+ */
+async function resolveAttributionByEmployeeCode(record, ctx = {}) {
+  const { db } = ctx;
+  const code = record && record.employee_code;
+  if (!db) {
+    return { status: 'pending', identityState: IDENTITY_STATE.PENDING_EMPLOYEE_CODE, employee_id: null, gridId: null, writeGrid: false, reason: 'no_db' };
+  }
+  const r = await codeResolver.resolveByEmployeeCode(code, { client: db });
+  if (r.status === codeResolver.CODE_ATTR_STATUS.ATTRIBUTED) {
+    return {
+      status: 'attributed',
+      identityState: IDENTITY_STATE.ATTRIBUTED,
+      employee_id: r.employeeId,      // ← employee.id（BIGINT），绝不是 employee_code
+      gridId: r.gridId,
+      writeGrid: true,
+      reason: 'employee_code+gridscope',
+    };
+  }
+  const gridRelated = r.reason === codeResolver.CODE_ATTR_REASON.NO_GRID
+    || r.reason === codeResolver.CODE_ATTR_REASON.MULTIPLE_GRID;
+  return {
+    status: 'pending',
+    identityState: gridRelated ? IDENTITY_STATE.PENDING_CODE_GRID : IDENTITY_STATE.PENDING_EMPLOYEE_CODE,
+    employee_id: r.employeeId,   // 可解析到人但网格不唯一时保留 id 供审计；否则 null
+    gridId: null,
+    writeGrid: false,
+    reason: 'employee_code_' + r.reason,
+  };
+}
+
+/**
  * §五/§六/§七 attribution 解析（fail-safe）：
  *   - 已有可信 inspector_employee_id → attributed（不再改）
  *   - creatorTrust='shared_account'（creator 为共享/应用账号）→ UNTRUSTED（绝不据此归属）
- *   - 注入可信 creatorWpsAccountId → bridge → employee.id → gridScope 派生 grid
- *       · 精确 1 grid → attributed + 可写 grid（writeGrid=true）
- *       · 0 / >1 grid → pending（PENDING_GRID，或 PENDING_EMPLOYEE 若员工不存在）
- *   - 无 creator 来源 → pending / PENDING_CREATOR
+ *   - **CF-WPS-06 新增**：记录带非空 employee_code → 走 employee_code 业务身份路径
+ *       （优先级高于 WPS creator 账号桥接：employee_code 是移动端显式提交的业务身份键，
+ *         而 wps_account_employee_map 已 0 行并标记 deprecated）
+ *       · 唯一在职员工 + 唯一 grid → attributed（可写 grid）
+ *       · 其余 → pending（PENDING_EMPLOYEE_CODE / PENDING_CODE_GRID），**不回退**到 creator 路径
+ *         （避免同一记录出现两套身份来源的歧义）
+ *   - 否则沿用原 creator → bridge → employee.id → gridScope 路径
  * 严禁姓名匹配 / 猜 grid_id / 猜 inspector_employee_id。
  * 注：status/reason 语义与 P2-B1-B 完全一致（identityState 为**新增**字段），保证既有测试不破。
  */
@@ -122,6 +181,11 @@ async function resolveAttribution(record, ctx = {}) {
   if (creatorTrust === 'shared_account') {
     // creator 已证实为单一应用/属主账号（覆盖多名提交者）⇒ 不构成可信身份
     return { status: 'pending', identityState: IDENTITY_STATE.UNTRUSTED, employee_id: null, gridId: null, writeGrid: false, reason: 'creator_shared_account' };
+  }
+  // CF-WPS-06：employee_code 业务身份路径（仅在字段确实存在且非空时启用；
+  // 历史记录该列为 NULL ⇒ 行为与 CF-WPS-06 之前完全一致）
+  if (record && record.employee_code != null && String(record.employee_code).trim() !== '') {
+    return resolveAttributionByEmployeeCode(record, ctx);
   }
   if (!creatorWpsAccountId || !db) {
     return { status: 'pending', identityState: IDENTITY_STATE.PENDING_CREATOR, employee_id: null, gridId: null, writeGrid: false, reason: 'no_creator_source' };
@@ -267,6 +331,8 @@ module.exports = {
   lookupEmployeeByWpsAccount,
   employeeResolvable,
   resolveAttribution,
+  // CF-WPS-06：employee_code 业务身份路径（解析唯一实现在 services/gridEmployeeCodeResolver.js）
+  resolveAttributionByEmployeeCode,
   resolveSourceChannel,
   detectDuplicateCandidate,
   buildWrites,
