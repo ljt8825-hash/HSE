@@ -366,6 +366,10 @@ grid-mobile-cloudflare/**/node_modules/
 # grid_record_sync_map.json 含 54 个真实手机号（wps_record_id 字段），属 PII，
 # 仅保留在本地；生产变更记录（SQL/回滚/报告）可入库，此文件不可。
 artifacts/cf07-backup/grid_record_sync_map.json
+# 网格长台账对照表：含 62 个真实手机号（台账登录凭据口径）⇒ 仅保留本地，如需入库请先脱敏
+artifacts/cf-wps-19b/网格长台账_员工编码对照表.csv
+# 花名册职位分布导出：rows 含 1291 人完整明细（工号/姓名/性别/年龄/部门/职位/区域）⇒ 禁止入库
+artifacts/cf-wps-22/roster-job-distribution.json
 # extracted_jj/：真实民事判决书 OCR 文本，含当事人姓名/出生日期/住址/案号（PII）
 extracted_jj/
 # safety-check-h5/：未引用的 H5 原型页，内含真实花名册姓名（手机号为假号），
