@@ -22,6 +22,12 @@ const VL_MODEL = process.env.OLLAMA_VL_MODEL || 'qwen2.5vl:7b';
 const BASE_URL = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
 // 超时优先级：OLLAMA_VL_TIMEOUT_MS > AI_TIMEOUT_MS > 默认 300s（覆盖 CPU 冷加载，见 AI-07 延迟口径）
 const AI_TIMEOUT_MS = Number(process.env.OLLAMA_VL_TIMEOUT_MS) || Number(process.env.AI_TIMEOUT_MS) || 5 * 60 * 1000;
+// 签到表「退化输出」重跑次数：模型承认是签到表但内容全空时重跑，0=不重跑，上限 3
+const AI_SIGNIN_RETRY = (() => {
+  const n = Number(process.env.AI_SIGNIN_RETRY);
+  if (!Number.isFinite(n) || n < 0) return 1;
+  return Math.min(Math.floor(n), 3);
+})();
 
 /** 字段说明（snake 口径，与 scripts/ocr_ledger.py 的 FORM_LABELS 一致；补 id_card/grid_level/frequency） */
 const FIELD_DESC = [
@@ -95,9 +101,14 @@ function buildSigninPrompt(rosterText) {
     '  date=培训日期, place=培训地点, host=主持人, recorder=记录人, dept=部门, headcount=参加人数',
     '  逐项输出 true(已填) / false(空白)。**只输出布尔值，绝不要输出单元格里的文字。**',
     '',
-    '第3步 逐行检查下方“序号 | 姓名 | 签名”人员表格：',
-    '  每一行输出 {"n": 序号数字, "name": 姓名格是否有字, "sign": 签名格是否有签名}',
-    '  跳过整行完全空白的记录；只输出布尔值，绝不输出姓名文字。',
+    '第3步 统计下方“序号 | 姓名 | 签名”人员表格（**只报数字，不要逐行列举**）：',
+    '  row_total：表格数据总行数（不含标题行，整行全空的行不计入）；',
+    '  name_count：「姓名」列有字的行数；',
+    '  signature_count：「签名」列有签名/笔迹的行数；',
+    '  missing_signature_count：姓名列有字、但签名列为空白的行数（即未签字人数）；',
+    '  newcomer_count：姓名列为空白、但签名列有签名的行数（即新员工）。',
+    '  可用 name_count 与 signature_count 交叉核对：missing = name_count - signature_count + newcomer_count。',
+    '  只输出整数，绝不输出任何姓名文字。',
     '',
     '第4步 若表上能看出培训人/经理姓名，从下列名单中挑选最可能的一位；',
     '  名单之外的名字不要编造，不确定就输出空字符串。',
@@ -109,7 +120,11 @@ function buildSigninPrompt(rosterText) {
     '  "team_code": "DC-1",',
     '  "manager": "孙建栋",',
     '  "header": {"date":true,"place":true,"host":true,"recorder":true,"dept":true,"headcount":false},',
-    '  "sign_rows": [{"n":1,"name":true,"sign":true},{"n":2,"name":true,"sign":false}]',
+    '  "row_total": 15,',
+    '  "name_count": 15,',
+    '  "signature_count": 14,',
+    '  "missing_signature_count": 1,',
+    '  "newcomer_count": 0',
     '}]}',
   ].join('\n');
 }
@@ -449,14 +464,21 @@ function deriveSigninRow(raw, pageNo = 0) {
     if (hasName && !hasSign) missingSign += 1;
     if (!hasName && hasSign) newcomer += 1;
   }
-  // 模型未给逐行明细时，回退到其自报计数
+  // 模型未给逐行明细时，使用其自报计数，并按「姓名/签名计数交叉核对」做越界校正
   if (signRows.length === 0) {
-    nameFilled = toInt(r.name_count, 0);
+    // 应到人数优先取「姓名列已填行数」，缺失时用表格总行数兜底
+    nameFilled = toInt(r.name_count, 0) || toInt(r.row_total, 0);
     signFilled = toInt(r.signature_count, 0);
-    missingSign = r.missing_signature_count !== undefined
-      ? toInt(r.missing_signature_count, 0)
-      : Math.max(0, nameFilled - signFilled);
     newcomer = toInt(r.newcomer_count, 0);
+    // missing = 姓名已填 - 签名已填 + 新员工（姓名空但签了名）
+    const derived = Math.max(0, nameFilled - signFilled + newcomer);
+    const reported = r.missing_signature_count !== undefined
+      ? toInt(r.missing_signature_count, 0)
+      : null;
+    // 自报值越界（负数或超过应到人数）时，以交叉核对结果为准
+    missingSign = reported === null || reported < 0 || (nameFilled > 0 && reported > nameFilled)
+      ? derived
+      : reported;
   }
 
   const manager = String(r.manager || '').trim();
@@ -478,27 +500,128 @@ function deriveSigninRow(raw, pageNo = 0) {
 }
 
 /**
+ * 退化结果判定：模型承认这是签到表，但既没读出班组编号、所有计数也都是 0。
+ * 7B VL 模型偶发「看得见表但什么都不填」，这类输出不可信，需要重跑。
+ * @param {Object|null} row deriveSigninRow 的产物
+ */
+function isDegenerateRow(row) {
+  if (!row) return true;
+  const noCode = !String(row.team_code || '').trim();
+  const noCount = !row.expected_count && !row.actual_count
+    && !row.missing_signature_count && !row.incomplete_material_count;
+  // 既没编号又全 0 计数 = 模型「看得见表但什么都没填」，必须重跑
+  return noCode && noCount;
+}
+
+/**
+ * 解析花名册文本（形如「大曹镇：宋长城、孙建栋、周福贵」）为 乡镇→经理姓名[] 索引。
+ * @param {string} rosterText
+ * @returns {Map<string, string[]>}
+ */
+function buildRosterIndex(rosterText) {
+  const map = new Map();
+  String(rosterText || '').split(/\r?\n/).forEach((line) => {
+    const m = line.match(/^([^：:]+)[：:](.+)$/);
+    if (!m) return;
+    const town = m[1].trim();
+    const names = m[2].split(/[、,，/|]/).map((s) => s.trim()).filter(Boolean);
+    if (town && names.length) map.set(town, names);
+  });
+  return map;
+}
+
+/**
+ * 用「班组编号推导出的乡镇」反向校验模型挑出的经理姓名。
+ * 模型经常从名单里挑错人（例：把杜集镇的张卫新安到大曹镇的 DC-03 上），
+ * 宁可留空让人工补，也不能把错误培训人写进月度台账。
+ * 若该乡镇只有一位经理，则直接确定（消歧）。
+ */
+function reconcileManager(row, rosterIndex) {
+  if (!row || !rosterIndex || rosterIndex.size === 0) return row;
+  const names = row.town ? rosterIndex.get(row.town) : null;
+  if (!names || names.length === 0) return row;
+  if (row.trainer && !names.includes(row.trainer)) {
+    console.warn(`[vision.signin] 第 ${row.page_no} 页经理「${row.trainer}」不属于${row.town}，已置空待人工补全`);
+    row.trainer = '';
+  }
+  if (!row.trainer && names.length === 1) row.trainer = names[0];
+  return row;
+}
+
+/**
+ * 批次级经理补全。同一份 PDF 通常是同一位乡镇作业中心经理的整套台账，
+ * 逐页识别时总有几页读不出经理姓名（签名潦草/印刷不清）。
+ * 若某乡镇在本批次中只出现**一位**有效经理，则用他补全同乡镇的空缺页，
+ * 避免用户逐页手填。出现两位及以上则说明无法消歧，保持空缺由用户判断。
+ *
+ * @param {Object[]} rows recognizeSigninSheet 逐页产出的行（会被就地修改）
+ * @returns {Object[]} 同一数组
+ */
+function reconcileBatchManagers(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return rows;
+  const byTown = new Map();
+  for (const r of rows) {
+    if (!r || !r.town || !r.trainer) continue;
+    if (!byTown.has(r.town)) byTown.set(r.town, new Set());
+    byTown.get(r.town).add(r.trainer);
+  }
+  for (const r of rows) {
+    if (!r || r.trainer || !r.town) continue;
+    const names = byTown.get(r.town);
+    if (names && names.size === 1) r.trainer = [...names][0];
+  }
+  return rows;
+}
+
+/**
+ * 弱结果：重跑也不值得再等，但数据不足以直接入库 —— 缺班组编号（无法定位乡镇/培训人）
+ * 或应到人数为 0（人员表没读出来）。这类页会在界面上被标出，要求人工核对。
+ */
+function isWeakRow(row) {
+  if (!row) return true;
+  return !String(row.team_code || '').trim() || !Number(row.expected_count);
+}
+
+/**
  * 识别一页「培训会议签到表」的填写完整性。
  * 只判断单元格填/空并计数，不做文字识别；照片页/无关页直接跳过。
+ * 对「退化输出」（识别出是签到表但内容全空）自动重跑，最多 AI_SIGNIN_RETRY 次。
  *
  * @param {Object} p
  * @param {string} p.filePath   页图绝对路径
  * @param {string} [p.rosterText] 乡镇→经理名单（闭集）
  * @param {number} [p.pageNo]   页码（1 基）
- * @returns {Promise<{ row: Object|null, skipped: boolean, reason: string }>}
+ * @returns {Promise<{ row: Object|null, skipped: boolean, reason: string, weak: boolean, attempts: number }>}
  */
 async function recognizeSigninSheet({ filePath, rosterText = '', pageNo = 0 }) {
-  const json = await callVision({ filePath, prompt: buildSigninPrompt(rosterText), tag: 'signin' });
-  const rows = Array.isArray(json.rows) ? json.rows : [];
-  const first = rows.find((x) => x && typeof x === 'object') || null;
+  const prompt = buildSigninPrompt(rosterText);
+  const rosterIndex = buildRosterIndex(rosterText);
+  let last = { row: null, skipped: true, reason: 'other', weak: true, attempts: 0 };
+  const maxAttempts = AI_SIGNIN_RETRY + 1;
 
-  // 跳过判定：rows 为空，或首行显式声明不是签到表
-  const isSignin = first ? first.is_signin_sheet !== false : (json.is_signin_sheet !== false);
-  if (!first || !isSignin) {
-    const reason = String((first && first.skip_reason) || json.skip_reason || 'other');
-    return { row: null, skipped: true, reason };
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    const json = await callVision({ filePath, prompt, tag: 'signin' });
+    const rows = Array.isArray(json.rows) ? json.rows : [];
+    const first = rows.find((x) => x && typeof x === 'object') || null;
+
+    // 跳过判定：rows 为空，或首行显式声明不是签到表
+    const isSignin = first ? first.is_signin_sheet !== false : (json.is_signin_sheet !== false);
+    if (!first || !isSignin) {
+      const reason = String((first && first.skip_reason) || json.skip_reason || 'other');
+      // 「不是签到表」是稳定判断（照片/空白页），无需重试
+      return { row: null, skipped: true, reason, weak: false, attempts: attempt };
+    }
+
+    const row = reconcileManager(deriveSigninRow(first, pageNo), rosterIndex);
+    if (!isDegenerateRow(row)) {
+      return { row, skipped: false, reason: '', weak: isWeakRow(row), attempts: attempt };
+    }
+    last = { row, skipped: false, reason: '', weak: true, attempts: attempt };
+    console.warn(`[vision.signin] 第 ${pageNo} 页第 ${attempt} 次识别为退化输出，准备重跑`);
   }
-  return { row: deriveSigninRow(first, pageNo), skipped: false, reason: '' };
+
+  return last;
 }
 
 /**
@@ -518,6 +641,9 @@ module.exports = {
   recognizeLedgerImage,
   recognizeSigninSheet,
   deriveSigninRow,
+  buildRosterIndex,
+  reconcileManager,
+  reconcileBatchManagers,
   buildSigninPrompt,
   VL_MODEL,
   normalizeRows,

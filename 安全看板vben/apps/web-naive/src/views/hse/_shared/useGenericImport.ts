@@ -349,6 +349,11 @@ export function useGenericImport(
       ocrRows.value = res.rows ?? [];
       ocrColumns.value = res.columns ?? [];
       buildOcrPreview(res);
+      // 重跑后仍未读出内容的页：明确提示人工核对，避免直接导入 0 值
+      const weakPages = (res.meta?.weakPages ?? []) as number[];
+      if (weakPages.length) {
+        ocrAdvice.value = `第 ${weakPages.join('、')} 页 AI 未读出内容（已自动重跑仍为空），请人工核对后再导入。`;
+      }
       if (!(res.rows ?? []).length) {
         importPreviewError.value = 'AI 未识别到有效培训记录，请更换清晰、规整的培训台账照片后重试';
       }

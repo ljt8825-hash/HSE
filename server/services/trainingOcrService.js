@@ -23,7 +23,7 @@ const {
 } = require('./trainingShared');
 const { SigninAttribution } = require('./signinAttribution');
 const {
-  recognizeLedgerImage, recognizeSigninSheet, VL_MODEL,
+  recognizeLedgerImage, recognizeSigninSheet, reconcileBatchManagers, VL_MODEL,
 } = require('./ai/visionService');
 
 const ok = (payload, message) => ({ __t: 'json', payload, message });
@@ -457,6 +457,7 @@ async function aiRecognize(req) {
     if (mode === 'auto' || mode === 'signin') {
       const rosterText = formatRoster(await loadTownManagers());
       const signinRows = [];
+      const weakPages = [];
       for (const img of images) {
         // eslint-disable-next-line no-await-in-loop
         const r = await recognizeSigninSheet({
@@ -470,8 +471,12 @@ async function aiRecognize(req) {
           else skipReasons.other += 1;
           continue;
         }
+        // 重跑后仍为空的页：保留行但标记为待人工核对
+        if (r.weak) weakPages.push(Number(img.pageNo) || 0);
         signinRows.push(r.row);
       }
+      // 批次级补全：同乡镇只出现一位有效经理时，补上其余页的空缺经理
+      reconcileBatchManagers(signinRows);
       if (signinRows.length > 0 || mode === 'signin') {
         usedMode = 'signin';
         rows = signinRows;
@@ -493,6 +498,7 @@ async function aiRecognize(req) {
       skipReasons.blank ? `空白 ${skipReasons.blank} 页` : '',
       skipReasons.other ? `其它 ${skipReasons.other} 页` : '',
     ].filter(Boolean).join('、');
+    const weakDesc = weakPages.length ? `第 ${weakPages.join('、')} 页未读出内容，请人工核对` : '';
 
     if (usedMode === 'signin') {
       return ok(
@@ -502,7 +508,7 @@ async function aiRecognize(req) {
           columns: buildSigninColumns(rows),
           rows,
           message: rows.length
-            ? `AI 识别到 ${rows.length} 张签到表${skipped ? `（跳过 ${skipDesc}）` : ''}`
+            ? `AI 识别到 ${rows.length} 张签到表${skipped ? `（跳过 ${skipDesc}）` : ''}${weakDesc ? `；${weakDesc}` : ''}`
             : `AI 未识别到签到表${skipped ? `（跳过 ${skipDesc}）` : ''}`,
           sourceName: originalName,
           meta: {
@@ -513,10 +519,13 @@ async function aiRecognize(req) {
             scannedPages: images.length,
             skippedPages: skipped,
             skipReasons,
+            weakPages,
             tailPages,
           },
         },
-        rows.length ? 'AI 识别成功，请核对「缺少签字人数 / 资料不完整」' : 'AI 识图完成，但未识别到签到表',
+        rows.length
+          ? (weakDesc ? `AI 识别成功，但${weakDesc}` : 'AI 识别成功，请核对「缺少签字人数 / 资料不完整」')
+          : 'AI 识图完成，但未识别到签到表',
       );
     }
 

@@ -30,6 +30,8 @@ export interface OcrRecognizeResult {
     /** AI 识图签到表：跳过的照片/空白页数 */
     skippedPages?: number;
     skipReasons?: { photo?: number; blank?: number; other?: number };
+    /** AI 识图签到表：自动重跑后仍未读出内容的页码，需人工核对 */
+    weakPages?: number[];
   };
 }
 
