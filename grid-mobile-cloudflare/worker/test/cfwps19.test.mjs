@@ -4,8 +4,8 @@
  *      ?under= 逐层下钻；越权（不在本人子树）→ 403；本人同名歧义 → AMBIGUOUS_SELF；
  *      环检测与深度上限（纯函数直接测）。
  *   ② GET /api/mobile/roster  花名册字段容错映射、离职剔除、班组/网格过滤、姓名/工号搜索。
- *      数据源 = WPS 多维表格 Sheet 11（rosterSource），**与 STORAGE_BACKEND 解耦**：
- *      本用例刻意把 STORAGE_BACKEND 设为 feishu（台账走飞书），花名册仍必须走 WPS。
+ *      数据源 = 飞书多维表格「花名册」表（storageConfig.rosterSheetId = FS_ROSTER_TABLE_ID），
+ *      与台账/身份同后端（生产 = feishu）。
  * GUARDS:
  *  - global fetch fully mocked：NO real network（未 mock 的 URL 直接抛错）
  *  - 全部凭据/姓名/手机号为 fixture 假值；身份证号码列故意填入 → 断言绝不外泄
@@ -14,7 +14,7 @@
  */
 const workerMod = await import('../index.js');
 const worker = workerMod.default;
-const { pinyinInitials, ledgerSubtree, ledgerChildren, splitOrg, ORG_MAX_DEPTH, rosterSource } = workerMod;
+const { pinyinInitials, ledgerSubtree, ledgerChildren, splitOrg, ORG_MAX_DEPTH } = workerMod;
 
 // ---- fixture (all fake) ----
 const SESSION_SECRET = 'mock-session-secret-0123456789abcdef';
@@ -22,8 +22,7 @@ const FS_APP_TOKEN = 'mock-fs-app-token-xyz';
 const FS_APP_ID = 'mock-fs-app-id';
 const FS_APP_SECRET = 'mock-fs-app-secret';
 const LEDGER_TABLE_ID = 'tblMockLedger';
-const WPS_FILE_ID = 'mockWpsFile';
-const WPS_ROSTER_SHEET_ID = '11';
+const ROSTER_TABLE_ID = 'tblMockRoster';
 const FAKE_ID_CARD = '370101199001011234'; // 真实表有「身份证号码」列 → 必须被丢弃
 
 const PW = (name, phone) => pinyinInitials(name) + phone.slice(-4);
@@ -44,22 +43,24 @@ const LEDGER_ROWS = [
 // 该手机号在台账中不存在（未录入 → 不可登录）
 const P_GHOST = '13900000199';
 
-// 花名册 fixture —— 列名与 WPS Sheet 11「员工信息维护」真实列一致
-// （员工编码/姓名/性别/年龄/所属部门/职位/用工关系状态/负责区域（在职）/直接上级 + 身份证号码）
+// 花名册 fixture —— 列名与飞书「花名册」表真实列一致（16 列中的业务相关列）
+// （员工编码/姓名/所属部门/职位/性别/年龄/用工关系状态/负责区域（在职）+ 身份证号码）
 // dept＝所属部门（班组，选人收敛口径）；area＝负责区域（在职）（网格，巡查口径）
+// 注：真实表当前无手机号列；R1/R2 故意使用「手机号」与「手机号码」两种列名，
+//     用于验证别名容错机制（业务后续补列即生效、无需改代码）。
 const ROSTER_ROWS = [
-  { id: 'R1', fields: JSON.stringify({ 员工编码: 'E001', 姓名: '张保洁', 用工关系状态: '正式员工', 所属部门: '测试一班', '负责区域（在职）': '八里堂村+惠宁', 手机号: '13700001111', 性别: '男', 年龄: 55, 职位: '保洁员', 身份证号码: FAKE_ID_CARD }) },
-  { id: 'R2', fields: JSON.stringify({ 员工编码: 'E002', 姓名: '李保洁', 用工关系状态: '正式员工', 所属部门: '测试一班', '负责区域（在职）': '八里堂村', 手机号码: '13700002222', 性别: '女', 年龄: 48, 职位: '保洁员' }) },
-  { id: 'R3', fields: JSON.stringify({ 员工编码: 'E003', 姓名: '王离职', 用工关系状态: '离职', 所属部门: '测试一班', '负责区域（在职）': '八里堂村', 手机号: '13700003333', 性别: '男', 年龄: 60, 职位: '保洁员' }) },
-  { id: 'R4', fields: JSON.stringify({ 员工编码: 'E004', 姓名: '赵司机', 用工关系状态: '正式员工', 所属部门: '测试二班', '负责区域（在职）': '测试一班', 性别: '男', 年龄: 40, 职位: '司机' }) },
+  { record_id: 'R1', fields: { 员工编码: 'E001', 姓名: '张保洁', 用工关系状态: '正式员工', 所属部门: '测试一班', '负责区域（在职）': '八里堂村+惠宁', 手机号: '13700001111', 性别: '男', 年龄: '55', 职位: '保洁员', 身份证号码: FAKE_ID_CARD } },
+  { record_id: 'R2', fields: { 员工编码: 'E002', 姓名: '李保洁', 用工关系状态: '正式员工', 所属部门: '测试一班', '负责区域（在职）': '八里堂村', 手机号码: '13700002222', 性别: '女', 年龄: '48', 职位: '保洁员' } },
+  { record_id: 'R3', fields: { 员工编码: 'E003', 姓名: '王离职', 用工关系状态: '离职', 所属部门: '测试一班', '负责区域（在职）': '八里堂村', 手机号: '13700003333', 性别: '男', 年龄: '60', 职位: '保洁员', 离职日期: '2026/01/01' } },
+  { record_id: 'R4', fields: { 员工编码: 'E004', 姓名: '赵司机', 用工关系状态: '正式员工', 所属部门: '测试二班', '负责区域（在职）': '测试一班', 性别: '男', 年龄: '40', 职位: '司机' } },
   // R5：无「负责区域（在职）」——证明班组口径（dept）独立于网格口径（area）
-  { id: 'R5', fields: JSON.stringify({ 员工编码: 'E005', 姓名: '孙管理', 用工关系状态: '正式员工', 所属部门: '测试片区', 性别: '女', 年龄: 35, 职位: '管理员' }) },
+  { record_id: 'R5', fields: { 员工编码: 'E005', 姓名: '孙管理', 用工关系状态: '正式员工', 所属部门: '测试片区', 性别: '女', 年龄: '35', 职位: '管理员' } },
   // R6：网格串比查询班组更短 → 不得反向误命中（真机教训：宁城街道三班某人网格为「宁城街道」）
-  { id: 'R6', fields: JSON.stringify({ 员工编码: 'E006', 姓名: '吴三班', 用工关系状态: '正式员工', 所属部门: '测试三班', '负责区域（在职）': '测试', 性别: '男', 年龄: 44, 职位: '保洁员' }) },
+  { record_id: 'R6', fields: { 员工编码: 'E006', 姓名: '吴三班', 用工关系状态: '正式员工', 所属部门: '测试三班', '负责区域（在职）': '测试', 性别: '男', 年龄: '44', 职位: '保洁员' } },
 ];
-let wpsRosterCalls = 0;
+let rosterUpstreamCalls = 0;
 
-// ---- mock fetch: feishu 台账 + WPS 花名册；unmocked URL = hard fail ----
+// ---- mock fetch: 飞书（台账 + 花名册）；unmocked URL = hard fail ----
 globalThis.fetch = async (url) => {
   const u = String(url);
   if (u.includes('/auth/v3/tenant_access_token/internal')) {
@@ -68,28 +69,19 @@ globalThis.fetch = async (url) => {
   if (u.includes(`/tables/${LEDGER_TABLE_ID}/records`)) {
     return new Response(JSON.stringify({ code: 0, data: { items: LEDGER_ROWS, has_more: false } }), { status: 200 });
   }
-  if (u.includes('/oauth2/token')) {
-    return new Response(JSON.stringify({ access_token: 'mock-wps-token', expires_in: 7200 }), { status: 200 });
-  }
-  if (u.includes(`/sheets/${WPS_ROSTER_SHEET_ID}/records/list_by_page`)) {
-    wpsRosterCalls++;
-    return new Response(JSON.stringify({ code: 0, data: { records: ROSTER_ROWS } }), { status: 200 });
+  if (u.includes(`/tables/${ROSTER_TABLE_ID}/records`)) {
+    rosterUpstreamCalls++;
+    return new Response(JSON.stringify({ code: 0, data: { items: ROSTER_ROWS, has_more: false } }), { status: 200 });
   }
   throw new Error(`UNMOCKED URL (guard): ${u}`);
 };
 
 function workerEnv(overrides = {}) {
   return {
-    // 台账/身份仍走飞书（生产现状）
     STORAGE_BACKEND: 'feishu',
     FS_APP_TOKEN, FS_APP_ID, FS_APP_SECRET,
     FS_LEDGER_TABLE_ID: LEDGER_TABLE_ID,
-    FS_ROSTER_TABLE_ID: 'tblMockFeishuRosterStub', // 空壳表：花名册读取**不得**走它
-    // 花名册权威来源：WPS Sheet 11
-    WPS_CLIENT_ID: 'mock-wps-id', WPS_CLIENT_SECRET: 'mock-wps-secret',
-    WPS_OPENAPI_BASE: 'https://mock.wps.example',
-    WPS_DBSHEET_FILE_ID: WPS_FILE_ID,
-    IDENTITY_ROSTER_SHEET_ID: WPS_ROSTER_SHEET_ID,
+    FS_ROSTER_TABLE_ID: ROSTER_TABLE_ID, // 飞书「花名册」表 = 选人 + 网格解析的唯一数据源
     ROSTER_CACHE_TTL_MS: '0', // 测试关闭缓存 → 每例确定性
     MOBILE_LOGIN_ENABLED: 'true',
     WORKER_SESSION_SECRET: SESSION_SECRET,
@@ -210,17 +202,12 @@ console.log('===== B. 组织树纯函数（环 / 深度 / 分层） =====');
   assert(splitOrg([]).admins.length === 0, 'B5 空输入安全');
 }
 
-console.log('===== C. 真实花名册（WPS Sheet 11） =====');
-{
-  const src = rosterSource(ENV);
-  assert(src.backend === 'wps' && src.fileId === WPS_FILE_ID && src.sheetId === WPS_ROSTER_SHEET_ID,
-    'C0 花名册源恒为 WPS Sheet 11（STORAGE_BACKEND=feishu 也不受影响）', JSON.stringify(src && { backend: src.backend, fileId: src.fileId, sheetId: src.sheetId }));
-}
+console.log('===== C. 花名册（飞书「花名册」表） =====');
 {
   const r = await get('/api/mobile/roster', tokLi, ENV);
   const j = r.json;
   assert(r.status === 200 && j.success && j.code === 'OK', 'C1 花名册 200/OK', `status=${r.status}`);
-  assert(j.source === 'wps', 'C2 响应标注数据源 = wps', `source=${j.source}`);
+  assert(j.source === 'feishu', 'C2 响应标注数据源 = feishu（与 STORAGE_BACKEND 同源）', `source=${j.source}`);
   assert(j.rosterSize === 5, 'C3 在职人员 5 人（离职已剔除）', `rosterSize=${j.rosterSize}`);
 }
 {
@@ -274,7 +261,7 @@ console.log('===== C. 真实花名册（WPS Sheet 11） =====');
 {
   const r = await get('/api/mobile/roster', '', ENV);
   assert(r.status === 401, 'C21 花名册未认证 → 401', `status=${r.status}`);
-  const r2 = await get('/api/mobile/roster', tokLi, workerEnv({ WPS_DBSHEET_FILE_ID: '' }));
+  const r2 = await get('/api/mobile/roster', tokLi, workerEnv({ FS_ROSTER_TABLE_ID: '' }));
   assert(r2.status === 503 && r2.json.code === 'ROSTER_NOT_CONFIGURED', 'C22 花名册未配置 → 503', `code=${r2.json.code}`);
 }
 {
@@ -283,10 +270,10 @@ console.log('===== C. 真实花名册（WPS Sheet 11） =====');
 }
 {
   // 花名册缓存：默认关闭（本环境 TTL=0）→ 两次调用各扫一次上游
-  const before = wpsRosterCalls;
+  const before = rosterUpstreamCalls;
   await get('/api/mobile/roster?area=' + encodeURIComponent('测试一班'), tokLi, ENV);
   await get('/api/mobile/roster?area=' + encodeURIComponent('测试一班'), tokLi, ENV);
-  assert(wpsRosterCalls - before === 2, 'C24 TTL=0 时不做缓存（每次真实读取上游）', `calls=${wpsRosterCalls - before}`);
+  assert(rosterUpstreamCalls - before === 2, 'C24 TTL=0 时不做缓存（每次真实读取上游）', `calls=${rosterUpstreamCalls - before}`);
 }
 {
   // 上游失败 → 502（不泄漏上游错误细节）
@@ -313,7 +300,7 @@ console.log('===== D. 响应不含敏感字段 =====');
   assert(!joined.includes(SESSION_SECRET), 'D1 不含会话密钥');
   assert(!joined.includes(FS_APP_SECRET), 'D2 不含飞书应用密钥');
   assert(!joined.includes(FS_APP_TOKEN), 'D3 不含 base token');
-  assert(!joined.includes(ENV.WPS_CLIENT_SECRET), 'D4 不含 WPS 应用密钥');
+  assert(!joined.includes('tenant_access_token'), 'D4 不回显上游 token 字段');
   assert(!/password|password_hash|\$2[aby]\$/.test(joined), 'D5 不含任何口令字段');
   assert(!joined.includes(FAKE_ID_CARD) && !/\d{17}[\dXx]/.test(joined), 'D6 身份证号码列被丢弃（真实表有该列）');
 }

@@ -205,21 +205,120 @@ console.log('===== B9 超长问题描述 → 拒绝（不静默截断） =====')
   assert(r.status === 400 && r.json.message.includes('description'), 'B9 501 字描述 → 400', JSON.stringify(r.json));
 }
 
-console.log('===== A7 网格无法确定 / 网格不一致 → 拒绝 =====');
+console.log('===== A7 网格解析：键（工号 → 姓名兜底） / 值（负责区域 → 所属部门） =====');
 {
+  // ① 负责区域与所属部门皆缺 → 仍 fail-closed（不猜网格）
   rosterRows = [{ id: 'R1', fields: JSON.stringify({ 员工编码: EMP, 姓名: EMP_NAME, '负责区域（在职）': '' }) }];
   const r1 = await call('/api/mobile/patrol/submit', { body: validBody({ client_request_id: 'CID13GRID0001' }) });
-  assert(r1.status === 422 && r1.json.code === 'GRID_UNRESOLVED' && r1.json.message === '当前人员无法确定巡查网格，请联系管理员', 'A7 负责区域为空 → 422 + 明确文案', JSON.stringify(r1.json));
+  assert(r1.status === 422 && r1.json.code === 'GRID_UNRESOLVED' && r1.json.message === '当前人员无法确定巡查网格，请联系管理员', 'A7a 两列皆空 → 422 + 明确文案', JSON.stringify(r1.json));
   const m1 = await call('/api/mobile/patrol/meta');
-  assert(m1.json.grid_resolved === false && m1.json.message === '当前人员无法确定巡查网格，请联系管理员', 'A7 meta 同样返回 unresolved + 文案');
+  assert(m1.json.grid_resolved === false && m1.json.message === '当前人员无法确定巡查网格，请联系管理员', 'A7a meta 同样 unresolved + 文案');
+
+  // ② 业务口径「负责区域就是所属部门」：负责区域为空 → 回落「所属部门」
+  rosterRows = [{ id: 'R1', fields: JSON.stringify({ 员工编码: EMP, 姓名: EMP_NAME, '负责区域（在职）': '', '所属部门': '某某镇一班' }) }];
+  const m0 = await call('/api/mobile/patrol/meta');
+  assert(m0.json.grid_resolved === true && m0.json.grids.join(',') === '某某镇一班' && m0.json.grid_resolved_by === 'employee_code',
+    'A7b 负责区域为空 → 回落「所属部门」解析出网格', JSON.stringify({ grids: m0.json.grids, by: m0.json.grid_resolved_by }));
+  const r1b = await call('/api/mobile/patrol/submit', { body: validBody({ grid: '某某镇一班', client_request_id: 'CID13GRID0011' }) });
+  assert(r1b.status === 200, 'A7b 以「所属部门」作为网格提交 → 200', JSON.stringify(r1b.json).slice(0, 140));
+
+  // ③ 工号多行命中 → fail-closed
   rosterRows = [{ id: 'RX', fields: JSON.stringify({ 员工编码: EMP, 姓名: EMP_NAME }), }, { id: 'RY', fields: JSON.stringify({ 员工编码: EMP, 姓名: EMP_NAME, '负责区域（在职）': '甲村' }) }];
   const r2 = await call('/api/mobile/patrol/submit', { body: validBody({ client_request_id: 'CID13GRID0002' }) });
-  assert(r2.status === 422 && r2.json.code === 'GRID_UNRESOLVED', 'A7 花名册多行命中 → fail-closed 422');
+  assert(r2.status === 422 && r2.json.code === 'GRID_UNRESOLVED', 'A7c 工号多行命中 → fail-closed 422');
+
+  // ④ 真机根因复现：台账登录的 Session sub 是手机号（不匹配任何员工编码）→ 必须按姓名兜底
+  const PHONE_SESSION = await signJwtHs256({ iss: 'hse-worker-mobile', aud: 'hse-mobile-h5', sub: '13900001234', name: EMP_NAME, department: '某某镇作业中心', iat: nowSec, exp: nowSec + 7200, jti: 'c13p' }, SESSION_SECRET);
+  rosterRows = [{ id: 'R1', fields: JSON.stringify({ 员工编码: EMP, 姓名: EMP_NAME, '负责区域（在职）': '八里堂村+惠宁' }) }];
+  const m2 = await call('/api/mobile/patrol/meta', { token: PHONE_SESSION });
+  assert(m2.json.grid_resolved === true && m2.json.grids.join(',') === '八里堂村,惠宁' && m2.json.grid_resolved_by === 'name',
+    'A7d 手机号 sub 匹配不到工号 → 按姓名兜底解析成功（修复真机恒 unresolved）', JSON.stringify({ grids: m2.json.grids, by: m2.json.grid_resolved_by }));
+  // 姓名重名时兜底同样 fail-closed
+  rosterRows = [{ id: 'RX', fields: JSON.stringify({ 员工编码: 'X1', 姓名: EMP_NAME, '负责区域（在职）': '甲村' }) }, { id: 'RY', fields: JSON.stringify({ 员工编码: 'X2', 姓名: EMP_NAME, '负责区域（在职）': '乙村' }) }];
+  const m3 = await call('/api/mobile/patrol/meta', { token: PHONE_SESSION });
+  assert(m3.json.grid_resolved === false, 'A7e 姓名兜底遇重名 → 仍 fail-closed（不猜网格）', JSON.stringify(m3.json.grids));
+
+  // ⑤ 网格不一致
   rosterRows = [{ id: 'R1', fields: JSON.stringify({ 员工编码: EMP, 姓名: EMP_NAME, '负责区域（在职）': '八里堂村+惠宁' }) }];
   const r3 = await call('/api/mobile/patrol/submit', { body: validBody({ grid: '不存在的网格', client_request_id: 'CID13GRID0003' }) });
-  assert(r3.status === 422 && r3.json.code === 'GRID_NOT_ALLOWED', 'A7 body.grid 不在服务端解析集 → 422 GRID_NOT_ALLOWED', JSON.stringify(r3.json));
+  assert(r3.status === 422 && r3.json.code === 'GRID_NOT_ALLOWED', 'A7f body.grid 不在服务端解析集 → 422 GRID_NOT_ALLOWED', JSON.stringify(r3.json));
   const r4 = await call('/api/mobile/patrol/submit', { body: validBody({ grid: '惠宁', client_request_id: 'CID13GRID0004', employee_code: 'FAKE' }) });
   assert(r4.status === 200, 'B5 补充：前端带 employee_code 不影响正常提交');
+}
+
+console.log('===== A8 重名消歧：手机号 → 员工编码 → 姓名 → +所属部门 → +直接上级 → fail-closed =====');
+{
+  // 真机事实：花名册 1291 人含 24 个重名。单一「姓名」键会错挂网格，必须多键联合识别。
+  const phoneSession = (over = {}) => signJwtHs256(
+    { iss: 'hse-worker-mobile', aud: 'hse-mobile-h5', sub: '13900001234', name: EMP_NAME, department: '', superior: '', iat: nowSec, exp: nowSec + 7200, jti: 'c13a8' + Math.random().toString(36).slice(2, 6) },
+    SESSION_SECRET,
+  );
+
+  // ① 重名 + 手机号 —— 唯一命中（最稳键，不依赖部门/上级）
+  rosterRows = [
+    { id: 'R1', fields: JSON.stringify({ 员工编码: 'X1', 姓名: EMP_NAME, 手机号: '13900001234', '负责区域（在职）': '甲村' }) },
+    { id: 'R2', fields: JSON.stringify({ 员工编码: 'X2', 姓名: EMP_NAME, 手机号: '13900005678', '负责区域（在职）': '乙村' }) },
+  ];
+  const m1 = await call('/api/mobile/patrol/meta', { token: await phoneSession() });
+  assert(m1.json.grid_resolved === true && m1.json.grids.join(',') === '甲村' && m1.json.grid_resolved_by === 'phone',
+    'A8a 重名 + 手机号 → 精确命中本人网格（by=phone）', JSON.stringify({ grids: m1.json.grids, by: m1.json.grid_resolved_by }));
+
+  // ② 手机号脏数据（两行同号）→ 不盲选，继续降级
+  rosterRows = [
+    { id: 'R1', fields: JSON.stringify({ 员工编码: 'X1', 姓名: '某甲', 手机号: '13900001234', '负责区域（在职）': '甲村' }) },
+    { id: 'R2', fields: JSON.stringify({ 员工编码: 'X2', 姓名: '某乙', 手机号: '13900001234', '负责区域（在职）': '乙村' }) },
+  ];
+  const m2 = await call('/api/mobile/patrol/meta', { token: await phoneSession() });
+  assert(m2.json.grid_resolved === false && m2.json.grid_resolved_by === null,
+    'A8b 手机号命中多行（脏数据）→ 不盲选，fail-closed', JSON.stringify({ grids: m2.json.grids, matched: m2.json.roster_matches }));
+
+  // ③ 重名 + 员工编码（会话 sub 即工号）→ 唯一命中，且优先于姓名
+  rosterRows = [
+    { id: 'R1', fields: JSON.stringify({ 员工编码: EMP, 姓名: EMP_NAME, '负责区域（在职）': '甲村' }) },
+    { id: 'R2', fields: JSON.stringify({ 员工编码: 'X2', 姓名: EMP_NAME, '负责区域（在职）': '乙村' }) },
+  ];
+  const m3 = await call('/api/mobile/patrol/meta', { token: SESSION });
+  assert(m3.json.grid_resolved === true && m3.json.grids.join(',') === '甲村' && m3.json.grid_resolved_by === 'employee_code',
+    'A8c 重名 + 员工编码 → 精确命中（by=employee_code，不走姓名）', JSON.stringify({ grids: m3.json.grids, by: m3.json.grid_resolved_by }));
+
+  // ④ 重名 + 所属部门消歧（无手机号、无工号可用时）
+  rosterRows = [
+    { id: 'R1', fields: JSON.stringify({ 员工编码: 'X1', 姓名: EMP_NAME, 所属部门: '柴胡店镇一班', '负责区域（在职）': '甲村' }) },
+    { id: 'R2', fields: JSON.stringify({ 员工编码: 'X2', 姓名: EMP_NAME, 所属部门: '张大庄镇二班', '负责区域（在职）': '乙村' }) },
+  ];
+  const deptTok = await signJwtHs256({ iss: 'hse-worker-mobile', aud: 'hse-mobile-h5', sub: '13900001234', name: EMP_NAME, department: '柴胡店镇一班', iat: nowSec, exp: nowSec + 7200, jti: 'c13a8d' }, SESSION_SECRET);
+  const m4 = await call('/api/mobile/patrol/meta', { token: deptTok });
+  assert(m4.json.grid_resolved === true && m4.json.grids.join(',') === '甲村' && m4.json.grid_resolved_by === 'name+dept',
+    'A8d 重名 + 所属部门 → 唯一命中（by=name+dept）', JSON.stringify({ grids: m4.json.grids, by: m4.json.grid_resolved_by }));
+
+  // ⑤ 重名 + 同部门 + 直接上级消歧（部门收敛不到唯一时再降一级）
+  rosterRows = [
+    { id: 'R1', fields: JSON.stringify({ 员工编码: 'X1', 姓名: EMP_NAME, 所属部门: '柴胡店镇一班', 直接上级: '甲领导', '负责区域（在职）': '甲村' }) },
+    { id: 'R2', fields: JSON.stringify({ 员工编码: 'X2', 姓名: EMP_NAME, 所属部门: '柴胡店镇一班', 直接上级: '乙领导', '负责区域（在职）': '乙村' }) },
+  ];
+  const supTok = await signJwtHs256({ iss: 'hse-worker-mobile', aud: 'hse-mobile-h5', sub: '13900001234', name: EMP_NAME, department: '柴胡店镇一班', superior: '甲领导', iat: nowSec, exp: nowSec + 7200, jti: 'c13a8s' }, SESSION_SECRET);
+  const m5 = await call('/api/mobile/patrol/meta', { token: supTok });
+  assert(m5.json.grid_resolved === true && m5.json.grids.join(',') === '甲村' && m5.json.grid_resolved_by === 'name+superior',
+    'A8e 重名 + 同部门 → 直接上级消歧（by=name+superior）', JSON.stringify({ grids: m5.json.grids, by: m5.json.grid_resolved_by }));
+
+  // ⑥ 重名 + 部门/上级都收敛不到唯一 → fail-closed，绝不猜网格
+  const noMatchTok = await signJwtHs256({ iss: 'hse-worker-mobile', aud: 'hse-mobile-h5', sub: '13900001234', name: EMP_NAME, department: '柴胡店镇一班', superior: '丙领导', iat: nowSec, exp: nowSec + 7200, jti: 'c13a8n' }, SESSION_SECRET);
+  const m6 = await call('/api/mobile/patrol/meta', { token: noMatchTok });
+  assert(m6.json.grid_resolved === false && m6.json.message === '当前人员无法确定巡查网格，请联系管理员' && m6.json.roster_matches === 2,
+    'A8f 重名无法唯一收敛 → fail-closed（matched=2 便于排查）', JSON.stringify({ grids: m6.json.grids, matched: m6.json.roster_matches }));
+  const r6 = await call('/api/mobile/patrol/submit', { token: noMatchTok, body: validBody({ client_request_id: 'CID13A8F0001' }) });
+  assert(r6.status === 422 && r6.json.code === 'GRID_UNRESOLVED', 'A8f 重名未收敛时提交同样被挡住 → 422', JSON.stringify(r6.json));
+
+  // ⑦ 姓名唯一 + 负责区域多网格（+ 分隔）→ 仍走姓名键（确认重名分支未误伤唯一姓名）
+  rosterRows = [
+    { id: 'R1', fields: JSON.stringify({ 员工编码: 'X1', 姓名: EMP_NAME, 手机号: '13900009999', '负责区域（在职）': '八里堂村+惠宁' }) },
+  ];
+  const m7 = await call('/api/mobile/patrol/meta', { token: await phoneSession() });
+  assert(m7.json.grid_resolved === true && m7.json.grids.length === 2 && m7.json.grid_resolved_by === 'name',
+    'A8g 手机号未列/未命中 → 姓名唯一仍可解析（多网格保留）', JSON.stringify({ grids: m7.json.grids, by: m7.json.grid_resolved_by }));
+
+  // 收尾还原默认花名册，避免后续块受影响
+  rosterRows = [{ id: 'R1', fields: JSON.stringify({ 员工编码: EMP, 姓名: EMP_NAME, 用工关系状态: '正式员工', '负责区域（在职）': '八里堂村+惠宁' }) }];
 }
 
 console.log('===== 门控：写开关 / 目标未配置 / 生产三开关 =====');

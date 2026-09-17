@@ -10,7 +10,8 @@ import { getFsToken } from '../storage/feishuAdapter.js';
 const FS_BASE = 'https://open.feishu.cn/open-apis';
 const EXPECT = {
   identity: ['姓名', '手机号码', 'password_hash', '部门', '职位', '网格长等级', '身份状态', 'employee_code'],
-  roster: ['员工编码', '姓名', '用工关系状态', '负责区域（在职）'],
+  // 「花名册」表：选人（所属部门）与巡查网格解析（负责区域（在职））的唯一数据源
+  roster: ['员工编码', '姓名', '用工关系状态', '所属部门', '负责区域（在职）'],
   test: ['测试编号', 'employee_code', '姓名', '巡查时间', '网格', '问题描述', '问题类型', '是否三违', '三违行为描述', '涉及人员', '照片状态', '来源', '测试状态', 'client_request_id', '创建时间'],
   prod: ['巡查人员ID', '姓名', '巡查时间', '网格', '问题描述', '问题类型', '是否三违', '三违行为', '涉及人员', '来源', 'client_request_id', '创建时间'],
 };

@@ -1,31 +1,28 @@
 /* cfwps19-realtest.mjs —— CF-WPS-19 真实数据联通验证（只读，不写任何表）
- * 目的：用 Worker 真实代码路径直读 WPS 多维表格 Sheet 11「员工信息维护」，
+ * 目的：用 Worker 真实代码路径直读 飞书多维表格「花名册」表，
  *       证明「选人花名册」拿到的确实是 1291 名真实员工，且班组口径（所属部门）可命中。
  * 用法（worker 目录）：
- *   WPS_CLIENT_ID=... WPS_CLIENT_SECRET=... node test/cfwps19-realtest.mjs
- *   （WPS_CLIENT_ID/SECRET 即 server/.env 的 WPS_APP_ID/WPS_APP_SECRET）
+ *   FS_APP_ID=... FS_APP_SECRET=... FS_APP_TOKEN=... FS_ROSTER_TABLE_ID=... \
+ *   node test/cfwps19-realtest.mjs
  * GUARDS：只调用 scanRecords / handleRoster（GET 语义），无 create/batch_delete。
  */
 const workerMod = await import('../index.js');
-const { handleRoster, rosterSource, mapRosterRecord, signJwtHs256 } = workerMod;
+const { handleRoster, signJwtHs256 } = workerMod;
 
 const SESSION_SECRET = 'realtest-session-secret-' + 'x'.repeat(20);
-const FILE_ID = process.env.WPS_DBSHEET_FILE_ID || 'cn229thwalDs';
-const ROSTER_SHEET_ID = process.env.IDENTITY_ROSTER_SHEET_ID || '11';
 
 const env = {
-  STORAGE_BACKEND: 'wps',
-  WPS_CLIENT_ID: process.env.WPS_CLIENT_ID,
-  WPS_CLIENT_SECRET: process.env.WPS_CLIENT_SECRET,
-  WPS_OPENAPI_BASE: process.env.WPS_OPENAPI_BASE || 'https://openapi.wps.cn',
-  WPS_DBSHEET_FILE_ID: FILE_ID,
-  IDENTITY_ROSTER_SHEET_ID: ROSTER_SHEET_ID,
+  STORAGE_BACKEND: 'feishu',
+  FS_APP_ID: process.env.FS_APP_ID,
+  FS_APP_SECRET: process.env.FS_APP_SECRET,
+  FS_APP_TOKEN: process.env.FS_APP_TOKEN,
+  FS_ROSTER_TABLE_ID: process.env.FS_ROSTER_TABLE_ID,
   ROSTER_CACHE_TTL_MS: '0',
   WORKER_SESSION_SECRET: SESSION_SECRET,
 };
 
-if (!env.WPS_CLIENT_ID || !env.WPS_CLIENT_SECRET) {
-  console.log('缺少 WPS_CLIENT_ID / WPS_CLIENT_SECRET —— 跳过真实联通验证');
+if (!env.FS_APP_ID || !env.FS_APP_SECRET || !env.FS_APP_TOKEN || !env.FS_ROSTER_TABLE_ID) {
+  console.log('缺少 FS_APP_ID / FS_APP_SECRET / FS_APP_TOKEN / FS_ROSTER_TABLE_ID —— 跳过真实联通验证');
   process.exit(2);
 }
 
@@ -52,25 +49,23 @@ async function roster(query, token) {
 }
 
 console.log('===== 花名册源与全量规模 =====');
-const src = rosterSource(env);
-assert(src.backend === 'wps' && src.sheetId === '11', 'R1 花名册源 = WPS Sheet 11', JSON.stringify({ backend: src.backend, fileId: src.fileId, sheetId: src.sheetId }));
-
 const t0 = Date.now();
 const tok = await sessionFor('联通验证甲', '13900000000', '宁城街道一班');
 const r1 = await roster('?area=' + encodeURIComponent('宁城街道一班') + '&limit=200', tok);
 const ms1 = Date.now() - t0;
-assert(r1.status === 200 && r1.json.code === 'OK', 'R2 area=宁城街道一班 查询成功', `status=${r1.status} ms=${ms1}`);
+assert(r1.status === 200 && r1.json.code === 'OK', 'R1 area=宁城街道一班 查询成功', `status=${r1.status} ms=${ms1}`);
+assert(r1.json.source === 'feishu', 'R2 数据源标注 = feishu（飞书「花名册」表）', `source=${r1.json.source}`);
 assert(r1.json.rosterSize > 1000, 'R3 全量花名册规模 > 1000 人（真实数据已接通）', `rosterSize=${r1.json.rosterSize} 耗时=${ms1}ms`);
-assert(r1.json.total >= 15 && r1.json.total <= 30, 'R4 宁城街道一班 命中 15~30 人（与表内 21 人量级一致）', `total=${r1.json.total}`);
+assert(r1.json.total >= 15 && r1.json.total <= 30, 'R4 宁城街道一班 命中 15~30 人', `total=${r1.json.total}`);
 assert(r1.json.items.every((x) => (x.dept || '').includes('宁城街道一班') || (x.area || '').includes('宁城街道一班')),
   'R5 每条结果班组或负责区域含目标班组');
 assert(r1.json.items.every((x) => x.name && x.code), 'R6 每条结果都有姓名与员工编码');
 const sample = r1.json.items[0];
-assert(!('idcard' in sample) && !JSON.stringify(sample).match(/\d{17}[\dXx]/), 'R7 身份证号码列未被下发');
+assert(!JSON.stringify(sample).match(/\d{17}[\dXx]/), 'R7 身份证号码列未被下发');
 assert(!/password|secret|token/i.test(r1.text), 'R8 响应无凭据字样');
 
 console.log('===== 班组口径（所属部门）跨片区 =====');
-for (const dept of ['柴胡店镇一班', '津城街道二班', '车队']) {
+for (const dept of ['柴胡店镇一班', '津城街道二班', '项目管理层']) {
   const r = await roster('?area=' + encodeURIComponent(dept) + '&limit=200', tok);
   assert(r.json.total > 0 && r.json.items.every((x) => (x.dept || '').includes(dept)),
     `R9「${dept}」命中 ${r.json.total} 人且班组一致`, JSON.stringify(r.json.items.slice(0, 2).map((x) => x.name + '/' + x.dept)));
@@ -90,7 +85,7 @@ assert(rScope.json.filters.scopedToSelf === true && rScope.json.filters.area ===
   'R12 无 area/q → 收敛到本人部门', JSON.stringify(rScope.json.filters));
 assert(rScope.json.total <= 30, 'R13 收敛后不返回全公司名单', `total=${rScope.json.total}`);
 
-console.log('===== 未认证 / 上限 =====');
+console.log('===== 未认证 =====');
 const rNoAuth = await handleRoster(new Request('https://worker.local/api/mobile/roster', { method: 'GET' }), env);
 assert(rNoAuth.status === 401, 'R14 未认证 → 401', `status=${rNoAuth.status}`);
 
