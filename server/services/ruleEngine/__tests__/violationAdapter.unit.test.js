@@ -49,8 +49,10 @@ beforeEach(() => {
 });
 
 describe('violationAdapter · 纯函数', () => {
-  it('buildDeductKey = violation:{cycleId}:{sourceId}', () => {
-    expect(adapter.buildDeductKey({ cycleId: 24, sourceId: '901' })).toBe('violation:24:901');
+  // E-08-04：键增 employeeId 段（传递下一记录多对象扣分追溯）；缺省 '-'
+  it('buildDeductKey = violation:{cycleId}:{sourceId}:{employeeId|-"-"}', () => {
+    expect(adapter.buildDeductKey({ cycleId: 24, sourceId: '901' })).toBe('violation:24:901:-');
+    expect(adapter.buildDeductKey({ cycleId: 24, sourceId: '901', employeeId: 7643 })).toBe('violation:24:901:7643');
   });
 
   it('buildItem：公司查处带括号标注，其余仅「三违1次」', () => {
@@ -66,7 +68,7 @@ describe('violationAdapter · 纯函数', () => {
       { cap: { cap: 15, cappedScore: 5, otherCatScore: 0 }, cappedScore: 5, otherCatScore: 0 }
     );
     expect(detail.kind).toBe('violation_event');
-    expect(detail.deductKey).toBe('violation:24:901');
+    expect(detail.deductKey).toBe('violation:24:901:-'); // E-08-04：键含 employeeId 段（缺省 '-'）
     expect(detail.sourceId).toBe('901');
     expect(detail.violationDate).toBe('2026-08-10');
     expect(detail.checkSource).toBe('company');
@@ -74,17 +76,18 @@ describe('violationAdapter · 纯函数', () => {
     expect(detail.summary).toContain('公司查处');
   });
 
-  it('buildReportDetail：deduct / revoke / capped-out 三种形态', () => {
+  it('buildReportDetail：deduct / revoke / capped-out 三种形态（E-08-04 增 isTransmission）', () => {
     const base = {
       employeeId: 7643, employeeName: '张三', checkSource: 'company',
       checkSourceText: '公司查处', rawScore: 5,
     };
+    const withFlag = { ...base, isTransmission: false };
     expect(adapter.buildReportDetail(base, { type: 'deduct', action: 'inserted', cappedScore: 5 }))
-      .toEqual({ ...base, cappedScore: 5, action: 'inserted' });
+      .toEqual({ ...withFlag, cappedScore: 5, action: 'inserted' });
     expect(adapter.buildReportDetail(base, { type: 'revoke', action: 'removed' }))
-      .toEqual({ ...base, cappedScore: 0, action: 'removed' });
+      .toEqual({ ...withFlag, cappedScore: 0, action: 'removed' });
     expect(adapter.buildReportDetail(base, { type: 'capped-out', action: 'capped-out' }))
-      .toEqual({ ...base, cappedScore: 0, cappedOut: true, action: 'capped-out' });
+      .toEqual({ ...withFlag, cappedScore: 0, cappedOut: true, action: 'capped-out' });
   });
 });
 
@@ -116,6 +119,7 @@ describe('violationAdapter · scan 计分口径', () => {
     );
 
     pool.query
+      .mockResolvedValueOnce({ rows: [{ present: true }] }) // ⓪ vr source_type 列探测（E-06 隔离守卫，仅首 scan 消耗）
       .mockResolvedValueOnce({
         // ① 本月窗口候选
         rows: [

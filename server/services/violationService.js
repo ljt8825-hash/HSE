@@ -25,6 +25,7 @@ const { camelKeys, buildListResponse } = require('../utils/commonResponse');
 const { auditLog } = require('../routes/audit');
 const hseEventSync = require('../services/hseEventSyncService');
 const assessmentEvent = require('../services/assessmentEventService'); // 月度自动考核事件
+const violationCheckerScope = require('../services/violationCheckerScope'); // E-08-08 检查人身份权威判定
 const { hashSensitive } = require('../utils/encryption');
 
 const ok = (payload, message) => ({ __t: 'json', payload, message });
@@ -254,6 +255,18 @@ function formatRow(row) {
     isSupplementary: row.is_supplementary || '',
     // 阶段2a：查处来源（company/township/self，未标注为 null）
     checkSource: row.check_source || null,
+    // E-08-01：来源与追溯字段（grid_candidate=网格候选确认；NULL=历史正式三违）
+    sourceType: row.source_type || null,
+    sourceRecordId: row.source_record_id || null,
+    candidateId: row.candidate_id || null,
+    confirmedBy: row.confirmed_by || null,
+    confirmedAt: row.confirmed_at || null,
+    isDeleted: row.is_deleted || false,
+    // E-08-01：本记录关联扣分条数（source_table='violation_records' 且未软删）
+    deductionCount: row.deduction_count != null ? Number(row.deduction_count) : null,
+    // E-08-02：扣分状态派生字段（纯查询派生，无 DB 字段）
+    deductionStatus: row.deduction_status || null,
+    deductionTotalScore: row.deduction_total_score != null ? Number(row.deduction_total_score) : null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   });
@@ -314,9 +327,90 @@ function buildMemoryRecord(id, data) {
   };
 }
 
+// ========== E-08-02：扣分状态模型（纯查询派生，无新增 DB 字段） ==========
+/**
+ * 扣分状态（SQL CASE 片段，参数 v=violation_records 别名，dd=扣分 LATERAL 别名）。
+ * 全部由真实字段/结构化外键推导，禁弱字段猜测：
+ *   revoked         已撤销        vr.is_deleted=true（含撤销后 deduction 状态在详情展示）
+ *   history         历史正式记录  source_type IS NULL（不套用 grid_candidate 新规则）
+ *   deducted        已扣分        存在有效 deduction（source_table='violation_records' AND source_id=v.id AND 未软删）
+ *   no_deduct       不扣分        check_source IN ('self','township')（按规则不扣）
+ *   unresolved      身份未解析    check_source='company' 且 violator_id IS NULL（fail-closed，不猜测身份）
+ *   pending_deduct  应扣未扣      company + grid_candidate + violator_id 有效 + GRIDVIOL001 active，但尚无有效 deduction
+ *   pending_review  待核验        其余（如 GRIDVIOL001 非 active / check_source 未知）
+ */
+function deductionStatusSql(v, dd, ruleActive) {
+  return `CASE
+    WHEN ${v}.is_deleted THEN 'revoked'
+    WHEN ${v}.source_type IS NULL THEN 'history'
+    WHEN COALESCE(${dd}.deduction_count, 0) > 0 THEN 'deducted'
+    WHEN ${v}.check_source IN ('self', 'township') THEN 'no_deduct'
+    WHEN ${v}.check_source = 'company' AND ${v}.violator_id IS NULL THEN 'unresolved'
+    WHEN ${v}.check_source = 'company' AND ${v}.violator_id IS NOT NULL AND ${ruleActive ? 'TRUE' : 'FALSE'} THEN 'pending_deduct'
+    ELSE 'pending_review'
+  END`;
+}
+
+/** GRIDVIOL001 规则当前状态（integration_status + 分值），规则库唯一权威，本地零常量。 */
+async function getGridViolationRuleState() {
+  const r = await pool.query(
+    `SELECT integration_status, deduct_score FROM hse_assessment_rule WHERE rule_code = 'GRIDVIOL001' LIMIT 1`
+  );
+  const row = r.rows[0] || null;
+  return { active: !!row && row.integration_status === 'active', deductScore: row ? Number(row.deduct_score) : null };
+}
+
+const DEDUCTION_STATUS_LABELS = {
+  deducted: '已扣分',
+  pending_deduct: '应扣未扣',
+  no_deduct: '不扣分',
+  unresolved: '身份未解析',
+  pending_review: '待核验',
+  revoked: '已撤销',
+  history: '历史正式记录',
+};
+
+/**
+ * 扣分状态解释（服务层派生，供详情/证据链）。deductionRows 须含软删（撤销后状态可解释）。
+ */
+function deriveDeductionStatusInfo(vr, deductionRows, ruleState) {
+  const alive = (deductionRows || []).filter((d) => !d.is_deleted);
+  const softDeleted = (deductionRows || []).filter((d) => d.is_deleted);
+  const base = { status: 'pending_review', label: DEDUCTION_STATUS_LABELS.pending_review, ruleActive: ruleState.active, ruleScore: ruleState.deductScore };
+  if (vr.is_deleted) {
+    const allRows = (deductionRows || []).map((d) => ({ id: d.id, metricCode: d.metric_code, deductionItem: d.deduction_item, deductionSource: d.deduction_source, confirmedScore: d.confirmed_score, suggestedScore: d.suggested_score, targetEmployeeName: d.target_employee_name || null, cycleName: d.cycle_name || null, isDeleted: d.is_deleted, createdAt: d.created_at }));
+    return { ...base, status: 'revoked', label: DEDUCTION_STATUS_LABELS.revoked,
+      explanation: '正式三违记录已撤销。' + (alive.length > 0 ? '注意：仍存在有效扣分记录，需人工核查。' : softDeleted.length > 0 ? '关联扣分已同步撤销（软删保留）。' : '本记录无关联扣分。'),
+      deductions: allRows };
+  }
+  if (vr.source_type == null) {
+    return { ...base, status: 'history', label: DEDUCTION_STATUS_LABELS.history,
+      explanation: '历史正式记录（source_type 为空），不适用网格候选事件级扣分规则。' };
+  }
+  if (alive.length > 0) {
+    return { ...base, status: 'deducted', label: DEDUCTION_STATUS_LABELS.deducted,
+      explanation: '已产生有效扣分记录（结构化外键 source_table=violation_records, source_id=本记录）。',
+      deductions: alive.map((d) => ({ id: d.id, metricCode: d.metric_code, deductionItem: d.deduction_item, deductionSource: d.deduction_source, confirmedScore: d.confirmed_score, suggestedScore: d.suggested_score, targetEmployeeName: d.target_employee_name || null, cycleName: d.cycle_name || null, isDeleted: d.is_deleted, createdAt: d.created_at })) };
+  }
+  if (vr.check_source === 'self' || vr.check_source === 'township') {
+    return { ...base, status: 'no_deduct', label: DEDUCTION_STATUS_LABELS.no_deduct,
+      explanation: `根据当前检查来源规则（${vr.check_source === 'self' ? '自查自纠' : '乡镇查处'}），本事件不产生扣分。` };
+  }
+  if (vr.check_source === 'company' && vr.violator_id == null) {
+    return { ...base, status: 'unresolved', label: DEDUCTION_STATUS_LABELS.unresolved,
+      explanation: '正式三违记录已建立，但当前人员身份无法可靠解析，因此未产生扣分（fail-closed，不做身份猜测）。' };
+  }
+  if (vr.check_source === 'company' && vr.violator_id != null && ruleState.active) {
+    return { ...base, status: 'pending_deduct', label: DEDUCTION_STATUS_LABELS.pending_deduct,
+      explanation: `满足 GRIDVIOL001 扣分条件（公司查处 + 网格候选 + 身份有效，规则分值 ${ruleState.deductScore} 分/次），但尚无有效扣分记录——评分周期可能尚未运行。` };
+  }
+  return { ...base, status: 'pending_review', label: DEDUCTION_STATUS_LABELS.pending_review,
+    explanation: !ruleState.active ? 'GRIDVIOL001 规则当前未激活，扣分状态待核验。' : '检查来源未知或状态无法判定，扣分状态待核验。' };
+}
+
 // ========== GET / — 列表 ==========
 async function list(query) {
-  const { page = 1, pageSize = 10, keyword, violationType, areaTeam, gridLevel, startDate, endDate, checkSource } = query;
+  const { page = 1, pageSize = 10, keyword, violationType, areaTeam, gridLevel, startDate, endDate, checkSource, sourceType, includeDeleted, deductionStatus } = query;
   const pageNum = Math.max(1, parseInt(page));
   const sizeNum = Math.min(100, Math.max(1, parseInt(pageSize)));
   const offset = (pageNum - 1) * sizeNum;
@@ -338,6 +432,9 @@ async function list(query) {
     if (endDate) records = records.filter(r => (r.violation_date || r.upload_time) <= endDate);
     // 阶段2a：按查处来源筛选（camelCase 契约）
     if (checkSource) records = records.filter(r => r.check_source === checkSource);
+    // E-08-01：按记录来源筛选（白名单两态，禁弱字段猜测）
+    if (sourceType === 'grid_candidate') records = records.filter(r => r.source_type === 'grid_candidate');
+    else if (sourceType === 'history') records = records.filter(r => !r.source_type);
 
     const total = records.length;
     records.sort((a, b) => {
@@ -356,7 +453,9 @@ async function list(query) {
 
   await ensureTables();
 
-  const conditions = ['is_deleted = false'];
+  // E-08-01：默认仅未删除；includeDeleted=1 时含软删（撤销记录追溯展示）
+  const showDeleted = String(includeDeleted) === '1';
+  const conditions = [showDeleted ? 'TRUE' : 'is_deleted = false'];
   const params = [];
   let i = 1;
 
@@ -414,13 +513,40 @@ async function list(query) {
     params.push(checkSource);
     i++;
   }
+  // E-08-01：按记录来源筛选（白名单两态：grid_candidate=网格候选确认 / history=历史正式）
+  if (sourceType === 'grid_candidate') {
+    conditions.push(`source_type = 'grid_candidate'`);
+  } else if (sourceType === 'history') {
+    conditions.push(`source_type IS NULL`);
+  }
 
-  const whereClause = conditions.join(' AND ');
-  const countResult = await pool.query(`SELECT COUNT(*) FROM violation_records WHERE ${whereClause}`, params);
+  // E-08-02：扣分状态筛选（白名单七态；状态推导规则见 deductionStatusSql 注释）
+  const DEDUCTION_STATUS_KEYS = Object.keys(DEDUCTION_STATUS_LABELS);
+  const ruleState = await getGridViolationRuleState();
+  let whereClause = conditions.join(' AND ');
+  if (deductionStatus) {
+    if (!DEDUCTION_STATUS_KEYS.includes(deductionStatus)) return err(-2, `无效的扣分状态筛选值，允许：${DEDUCTION_STATUS_KEYS.join('/')}`);
+    // 白名单校验后内联字面量（非用户自由输入），状态表达式与 SELECT 保持同一推导
+    whereClause += ` AND ${deductionStatusSql('v', 'dd', ruleState.active)} = '${deductionStatus}'`;
+  }
+  // E-08-02：count 查询与主查询保持同一状态推导（dd LATERAL + deductionStatusSql）
+  const ddLateral = `LEFT JOIN LATERAL (
+       SELECT count(*)::int AS deduction_count,
+              COALESCE(sum(COALESCE(d.confirmed_score, d.suggested_score)), 0)::numeric AS deduction_total_score
+         FROM hse_assessment_deduction d
+        WHERE d.source_table = 'violation_records' AND d.source_id = v.id AND d.is_deleted = false
+     ) dd ON true`;
+  const countResult = await pool.query(
+    `SELECT COUNT(*) FROM violation_records v ${ddLateral} WHERE ${whereClause}`,
+    params
+  );
   const total = parseInt(countResult.rows[0].count);
 
   const result = await pool.query(
     `SELECT v.*,
+      dd.deduction_count,
+      dd.deduction_total_score,
+      ${deductionStatusSql('v', 'dd', ruleState.active)} AS deduction_status,
       emp.supervisor_id,
       emp.supervisor_name,
       CASE
@@ -444,6 +570,7 @@ async function list(query) {
          AND (v.area_team IS NULL OR v.area_team = '' OR emp.org_name LIKE '%' || v.area_team || '%')
        LIMIT 1
      ) emp ON true
+     ${ddLateral}
      WHERE ${whereClause}
      ORDER BY
        CASE WHEN (v.image_content IS NOT NULL AND v.image_content != '') THEN 0 ELSE 1 END,
@@ -564,8 +691,14 @@ async function detail(params) {
 
   await ensureTables();
 
+  // E-08-02：详情携带扣分状态与合计（与列表同一推导）
+  const ruleStateDetail = await getGridViolationRuleState();
+  const detailStatusExpr = deductionStatusSql('v', 'dd', ruleStateDetail.active);
   const result = await pool.query(`
     SELECT v.*,
+      dd.deduction_count,
+      dd.deduction_total_score,
+      ${detailStatusExpr} AS deduction_status,
       CASE
         WHEN (v.violation_type_result IS NULL OR v.violation_type_result = '')
           AND emp.position_name IS NOT NULL
@@ -587,12 +720,127 @@ async function detail(params) {
          AND (v.area_team IS NULL OR v.area_team = '' OR emp.org_name LIKE '%' || v.area_team || '%')
        LIMIT 1
      ) emp ON true
+     LEFT JOIN LATERAL (
+       SELECT count(*)::int AS deduction_count,
+              COALESCE(sum(COALESCE(d.confirmed_score, d.suggested_score)), 0)::numeric AS deduction_total_score
+         FROM hse_assessment_deduction d
+        WHERE d.source_table = 'violation_records' AND d.source_id = v.id AND d.is_deleted = false
+     ) dd ON true
      WHERE v.id = $1 AND v.is_deleted = false`, [params.id]);
   if (result.rows.length === 0) return err(-2, '记录不存在');
 
   const row = result.rows[0];
   row.violation_type_result = row.violation_type_result_resolved || row.violation_type_result || '';
-  return ok(formatRow(row), '查询成功');
+  // E-08-02：扣分状态解释（含软删 deduction，撤销后状态可解释）
+  const dAllR = await pool.query(
+    `SELECT d.id, d.metric_code, d.deduction_item, d.suggested_score, d.confirmed_score,
+            d.source_table, d.source_id, d.is_deleted, d.created_at,
+            t.employee_name AS target_employee_name, cy.cycle_name
+       FROM hse_assessment_deduction d
+       LEFT JOIN hse_assessment_score s ON s.id = d.score_id
+       LEFT JOIN hse_assessment_target t ON t.id = s.target_id
+       LEFT JOIN hse_assessment_cycle cy ON cy.id = d.cycle_id
+      WHERE d.source_table = 'violation_records' AND d.source_id = $1
+      ORDER BY d.id`,
+    [row.id]
+  );
+  const statusInfo = deriveDeductionStatusInfo(row, dAllR.rows, ruleStateDetail);
+  return ok({ ...formatRow(row), deductionStatusInfo: statusInfo }, '查询成功');
+}
+
+// ========== GET /:id/evidence-chain — 证据链（E-08-01，只读） ==========
+/**
+ * 正式三违记录证据链：
+ *   vr（含软删，撤销可追溯）
+ *   → candidate（vr.candidate_id 结构化回指 grid_violation_candidates）
+ *   → gir（candidate.grid_record_id / vr.source_record_id 结构化回指 grid_inspection_records）
+ *   → deduction（source_table='violation_records' AND source_id=vr.id）
+ *   → audit（vr 侧 + 候选侧）
+ * 严禁经姓名/日期/序号等弱字段反查——全部走结构化外键链。
+ */
+async function evidenceChain(params) {
+  const id = parseInt(params.id);
+  if (!Number.isInteger(id)) return err(-2, '记录不存在');
+  await ensureTables();
+
+  const vrR = await pool.query(`SELECT * FROM violation_records WHERE id = $1`, [id]);
+  if (vrR.rows.length === 0) return err(-2, '记录不存在');
+  const vr = vrR.rows[0];
+
+  // 候选（仅结构化 candidate_id 回指）
+  let candidate = null;
+  if (vr.candidate_id != null) {
+    const cR = await pool.query(
+      `SELECT c.id, c.grid_record_id, c.behavior_id, c.behavior_text, c.raw_violation_behavior,
+              c.candidate_type, c.candidate_reason, c.inspection_source, c.candidate_status,
+              c.suggested_score, c.confirmed_violation_id, c.confirmed_by, c.confirmed_at,
+              c.rejected_at, c.revoked_at, c.revoke_reason, c.created_at,
+              d.behavior_code, d.behavior_name AS dict_behavior_name
+         FROM grid_violation_candidates c
+         JOIN sanwei_behavior_dict d ON d.id = c.behavior_id
+        WHERE c.id = $1`,
+      [vr.candidate_id]
+    );
+    candidate = cR.rows[0] || null;
+  }
+
+  // 原始巡查记录（候选链：candidate.grid_record_id；无候选时退回 vr.source_record_id——均为结构化字段）
+  const gridRecordId = candidate ? candidate.grid_record_id : vr.source_record_id;
+  let gridRecord = null;
+  if (gridRecordId != null) {
+    const gR = await pool.query(
+      `SELECT id, serial_no, inspection_date, violator_name, personnel_name, area_team,
+              grid_level, position, image_content, violation_behavior, inspector_employee_id
+         FROM grid_inspection_records
+        WHERE id = $1`,
+      [gridRecordId]
+    );
+    gridRecord = gR.rows[0] || null;
+  }
+
+  // 扣分（事件级幂等键 source_table+source_id；含软删——撤销后状态可解释；
+  // E-08-02：联查评估主体（score→target）与考核周期，供扣分状态说明展示）
+  const ruleStateChain = await getGridViolationRuleState();
+  const dR = await pool.query(
+    `SELECT d.id, d.cycle_id, d.metric_code, d.deduction_item, d.deduction_type, d.deduction_source,
+            d.source_table, d.source_id, d.source_detail, d.suggested_score, d.confirmed_score,
+            d.violation_date, d.violator_id, d.violator_name, d.is_deleted, d.created_at,
+            t.employee_name AS target_employee_name, t.position AS target_position,
+            cy.cycle_name
+       FROM hse_assessment_deduction d
+       LEFT JOIN hse_assessment_score s ON s.id = d.score_id
+       LEFT JOIN hse_assessment_target t ON t.id = s.target_id
+       LEFT JOIN hse_assessment_cycle cy ON cy.id = d.cycle_id
+      WHERE d.source_table = 'violation_records' AND d.source_id = $1
+      ORDER BY d.id`,
+    [id]
+  );
+
+  // E-08-02：扣分状态解释（与列表/详情同一推导函数）
+  const deductionStatusInfo = deriveDeductionStatusInfo(vr, dR.rows, ruleStateChain);
+
+  // 审计（vr 侧 + 候选侧）
+  const aR = await pool.query(
+    `SELECT id, username, module, table_name, record_id, action, old_value, new_value,
+            changed_fields, ip_address, created_at
+       FROM audit_record
+      WHERE (table_name = 'violation_records' AND record_id = $1)
+         OR ($2::bigint IS NOT NULL AND table_name = 'grid_violation_candidates' AND record_id = $2::text)
+      ORDER BY id`,
+    [String(id), vr.candidate_id != null ? String(vr.candidate_id) : null]
+  );
+
+  return ok(
+    camelKeys({
+      violation: formatRow(vr),
+      candidate,
+      gridRecord,
+      deductions: dR.rows,
+      deductionStatusInfo,
+      audits: aR.rows,
+    }),
+    '查询成功'
+  );
 }
 
 // ========== POST / — 创建 ==========
@@ -638,11 +886,20 @@ async function create(body, req) {
   const mark = b.mark || '';
   const isSupplementary = b.is_supplementary || b.isSupplementary || '';
   // 阶段2a：查处来源（company / township / self；未标注为 null）
-  const checkSource = b.checkSource || b.check_source || null;
+  const frontendCheckSource = b.checkSource || b.check_source || null;
   // 阶段2：新建时查处来源必选（从源头消灭新的 NULL）
-  if (!checkSource) {
+  if (!frontendCheckSource) {
     return err(-1, '查处来源为必填项（公司查处 / 乡镇查处 / 自查自纠）');
   }
+
+  // E-08-08/09：检查人身份权威判定（req.user → 正式身份 → 组织/岗位范围）。
+  // 前端 check_source 仅作参考输入（requested），不直接信任：
+  //   company 范围人员 → 恒为 company；乡镇经理/管理员自查 → 不得为 company（纠正为 self）；
+  //   身份不可解析 → fail-closed：有效值置 null（引擎非 company → 责任扣分=0），
+  //   前端提交值仅进审计留痕（E-08-09 §四B）。检查人字段同步以正式身份为准。
+  const checkerScope = await violationCheckerScope.resolveCheckerScopeFromRequest(req);
+  const authSource = violationCheckerScope.authoritativeCheckSource(checkerScope, frontendCheckSource);
+  const checkSource = authSource.value;
 
   const needRetraining = b.needRetraining || b.need_retraining || (violationLevel === '严重');
 
@@ -690,6 +947,13 @@ async function create(body, req) {
     is_supplementary: isSupplementary,
     check_source: checkSource,
   };
+
+  // E-08-08：检查人身份以正式身份链为准（req.user → users.employee_id → employee），
+  // 覆盖前端自报检查人；身份不可解析（ok=false）时保留前端值并在审计中告警。
+  if (checkerScope.ok) {
+    fields.inspector_id = checkerScope.employeeId;
+    fields.inspector_name = checkerScope.employeeName;
+  }
 
   if (!isConnected()) {
     const record = buildMemoryRecord(memoryIdCounter++, fields);
@@ -739,6 +1003,18 @@ async function create(body, req) {
   });
 
   auditLog({ userId: req?.user?.id, username: req?.user?.username, action: 'create', module: 'violations', description: `创建三违记录`, ip: req?.ip }).catch(() => {});
+  // E-08-08/09：检查来源权威判定留痕（三值同录：requested / resolved_scope / effective）
+  if (authSource.overridden || !checkerScope.ok) {
+    const unresolvedSuffix = checkerScope.ok
+      ? ` 检查人=#${checkerScope.employeeId} ${checkerScope.employeeName}(${checkerScope.orgName || '-'}/${checkerScope.positionName || '-'})`
+      : ` 检查人身份不可解析（fail-closed：责任扣分=0，前端值不作扣分依据）`;
+    auditLog({
+      userId: req?.user?.id, username: req?.user?.username, action: 'check_source_authority',
+      module: 'violations',
+      description: `记录#${newRecord.id} 检查来源判定：requested=${frontendCheckSource || 'null'} resolved_scope=${authSource.scope} effective=${authSource.value || 'null'} 原因=${authSource.reason || checkerScope.reason || '-'}${unresolvedSuffix}`,
+      ip: req?.ip,
+    }).catch(() => {});
+  }
   return ok(formatRow(newRecord), '创建成功');
 }
 
@@ -788,7 +1064,21 @@ async function update(params, body, req) {
   if (b.mark !== undefined) { setClauses.push(`mark = $${i++}`); ps.push(b.mark); }
   if (b.isSupplementary !== undefined) { setClauses.push(`is_supplementary = $${i++}`); ps.push(b.isSupplementary); }
   // 阶段2a：查处来源（camelCase；显式传 null 表示清除标注）
-  if (b.checkSource !== undefined) { setClauses.push(`check_source = $${i++}`); ps.push(b.checkSource || null); }
+  // E-08-08：编辑修改查处来源同样走检查人身份权威判定（不直接信任前端值）；
+  //   检查人字段为历史事实不回写（编辑人≠原始检查人）。
+  if (b.checkSource !== undefined) {
+    const checkerScopeUpd = await violationCheckerScope.resolveCheckerScopeFromRequest(req);
+    const authSourceUpd = violationCheckerScope.authoritativeCheckSource(checkerScopeUpd, b.checkSource || null);
+    setClauses.push(`check_source = $${i++}`); ps.push(authSourceUpd.value);
+    if (authSourceUpd.overridden || !checkerScopeUpd.ok) {
+      auditLog({
+        userId: req?.user?.id, username: req?.user?.username, action: 'check_source_authority',
+        module: 'violations',
+        description: `记录#${params.id} 编辑检查来源判定：requested=${b.checkSource || 'null'} resolved_scope=${authSourceUpd.scope} effective=${authSourceUpd.value || 'null'} 原因=${authSourceUpd.reason || checkerScopeUpd.reason || '-'}${checkerScopeUpd.ok ? '' : '（fail-closed：责任扣分=0）'}`,
+        ip: req?.ip,
+      }).catch(() => {});
+    }
+  }
 
   setClauses.push('updated_at = CURRENT_TIMESTAMP');
   ps.push(params.id);
@@ -1259,6 +1549,7 @@ module.exports = {
   stats,
   filterOptions,
   detail,
+  evidenceChain,
   create,
   update,
   batchDelete,

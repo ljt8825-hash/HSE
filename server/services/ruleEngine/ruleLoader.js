@@ -14,6 +14,8 @@ const { pool, isConnected } = require('../../config/db');
 const RULE_FIELDS = `
   id, rule_code, rule_name, category, metric_code, indicator_name,
   source_table, trigger_type, deduct_type, deduct_score, max_deduct,
+  deduct_config, transmission_config, condition_mode, condition_expr, scope_config,
+  valid_from, valid_to,
   adapter_key, integration_status, integration_note,
   last_run_at, last_run_cycle_id, last_scanned_count, last_deducted_count, last_run_summary
 `;
@@ -35,6 +37,15 @@ function toRuleConfig(row) {
     deductType: row.deduct_type,
     deductScore: row.deduct_score != null ? Number(row.deduct_score) : 0,
     maxDeduct: row.max_deduct != null ? Number(row.max_deduct) : null,
+    // P2-B1-E-06-IMPLEMENT：透传扩展字段（纯增量，存量消费者零影响）
+    deductConfig: row.deduct_config || null,
+    // P2-B1-E-08-04：传递配置（扣分对象岗位传递），此前为死字段，现接入执行链
+    transmissionConfig: row.transmission_config || null,
+    conditionMode: row.condition_mode || null,
+    conditionExpr: row.condition_expr || null,
+    scopeConfig: row.scope_config || null,
+    validFrom: row.valid_from || null,
+    validTo: row.valid_to || null,
     adapterKey: row.adapter_key || null,
     integrationStatus: row.integration_status,
     integrationNote: row.integration_note || null,

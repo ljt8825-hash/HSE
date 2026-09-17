@@ -837,6 +837,35 @@ function goCategory(row: any) {
   window.open(router.resolve(path).href, '_blank', 'noopener');
 }
 
+// ===== P2-B1-E-08-04：有效期生效状态展示（口径与后端 ruleValidity 一致：含端点） =====
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
+/** 数据库 date → 本地时区 YYYY-MM-DD（API 返回 ISO UTC 串，须按本地时区还原日期） */
+function fmtLocalDate(v: any): string {
+  if (!v) return '';
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return String(v);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+function validityInfo(row: any) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const from = row?.validFrom ? new Date(row.validFrom) : null;
+  const to = row?.validTo ? new Date(row.validTo) : null;
+  if (from) from.setHours(0, 0, 0, 0);
+  if (to) to.setHours(0, 0, 0, 0);
+  const notYet = !!(from && today < from);
+  const expired = !!(to && today > to);
+  return { effective: !notYet && !expired, notYet, expired };
+}
+
+function validityText(row: any) {
+  const from = row?.validFrom ? fmtLocalDate(row.validFrom) : '—';
+  const to = row?.validTo ? fmtLocalDate(row.validTo) : '长期';
+  return `${from} ~ ${to}`;
+}
+
 const stats = reactive<AssessmentRuleApi.Stats>({
   total: 0, enabled: 0, fixedCnt: 0, cumulativeCnt: 0,
   detailCnt: 0, tieredCnt: 0, autoCnt: 0, manualCnt: 0, detailRows: 0,
@@ -845,21 +874,24 @@ const stats = reactive<AssessmentRuleApi.Stats>({
 const columns = computed<VxeTableGridColumns>(() => [
   { title: '规则编码', field: 'ruleCode', minWidth: 110, align: 'center' },
   { title: '类别', field: 'category', minWidth: 130, align: 'center', showOverflow: 'tooltip', slots: { default: 'categoryCell' } },
-  { title: '考核内容', field: 'ruleName', minWidth: 150, align: 'center', showOverflow: 'tooltip' },
-  { title: '数据来源', field: 'sourceTable', minWidth: 190, align: 'center', slots: { default: 'sourceCell' } },
+  { title: '考核内容', field: 'ruleName', minWidth: 250, maxWidth: 400, align: 'center', showOverflow: false, slots: { default: 'ruleNameCell' } },
+  { title: '数据来源', field: 'sourceTable', minWidth: 230, maxWidth: 400, align: 'center', showOverflow: 'tooltip', slots: { default: 'sourceCell' } },
   {
     title: '扣分',
     field: 'deductScore',
-    minWidth: 110,
+    minWidth: 95,
     align: 'center',
     formatter: ({ row }: any) => {
       if (row.deductType === 'detail') return `${row.detailCount ?? 0} 项子项`;
       if (row.deductType === 'tiered') return `${(row.deductConfig?.tiers || []).length || 0} 档`;
-      return `${row.deductScore} 分/次`;
+      // P2-B1-E-08-04：TRANSFER001 实际扣分 = 转运站五列之和，固定分值不参与计算，
+      //   禁止再显示「固定 2 分」误导使用者（scope_config.calc_mode 配置驱动）。
+      if (row.scopeConfig?.calc_mode === 'ledger_five_columns_sum') return '按转运站五列之和';
+      return row.deductScore == null || row.deductScore === '' ? '—' : `${row.deductScore} 分/次`;
     },
   },
-  { title: '方式', field: 'deductType', minWidth: 80, align: 'center', slots: { default: 'deductTypeCell' } },
-  { title: '触发', field: 'triggerType', minWidth: 70, align: 'center', slots: { default: 'triggerCell' } },
+  { title: '方式', field: 'deductType', minWidth: 70, align: 'center', slots: { default: 'deductTypeCell' } },
+  { title: '触发', field: 'triggerType', minWidth: 64, align: 'center', slots: { default: 'triggerCell' } },
   // 阶段0 新增：接入状态（已接入/待数据/未接表/人工），未接通路给出「暂不会自动扣分」提示
   {
     title: '接入状态',
@@ -876,7 +908,15 @@ const columns = computed<VxeTableGridColumns>(() => [
     align: 'center',
     slots: { default: 'lastRunCell' },
   },
-  { title: '状态', field: 'status', minWidth: 70, align: 'center', slots: { default: 'statusCell' } },
+  // P2-B1-E-08-04：有效期真实生效状态（valid_from/valid_to 参与后端统一执行判断，此处如实展示）
+  {
+    title: '有效期',
+    field: 'validFrom',
+    minWidth: 140,
+    align: 'center',
+    slots: { default: 'validityCell' },
+  },
+  { title: '状态', field: 'status', minWidth: 64, align: 'center', slots: { default: 'statusCell' } },
   { title: '操作', field: 'action', minWidth: 210, align: 'center', fixed: 'right', slots: { default: 'action' } },
 ]);
 
@@ -1493,15 +1533,20 @@ async function handleTabChange(name: string) {
         <NInput v-model:value="searchForm.keyword" placeholder="搜索名称/编码/来源" clearable style="min-width: 200px" @keyup.enter="onSearch" />
       </HseSearchPanel>
 
+      <!-- 宽表（12 列）不复用 auto-width：auto-width 会禁用横向滚动（scrollX:enabled=false），
+           窄屏下大量列被压缩截断且无法滚动查看完整内容；此处保持横向滚动兜底，
+           长文本列（考核内容/数据来源等）仍由 showOverflow:'tooltip' 悬停展示全部 -->
       <HseDataGrid
         :columns="columns"
         :data="dataSource"
         :loading="loading"
         :pager="true"
         :total="total"
-        auto-width
         @page-change="onPageChange"
       >
+        <template #ruleNameCell="{ row }">
+          <span class="rule-name-cell">{{ row.ruleName }}</span>
+        </template>
         <template #sourceCell="{ row }">
           <span v-if="row.sourceRoute || SOURCE_ROUTE[row.sourceTable]">
             <a
@@ -1513,13 +1558,37 @@ async function handleTabChange(name: string) {
           <span v-else>{{ sourceLabel(row.sourceTable) }}</span>
         </template>
         <template #categoryCell="{ row }">
+          <div
+            v-if="row.scopeConfig?.category_by_position"
+            style="display: flex; flex-direction: column; align-items: center; gap: 2px"
+          >
+            <a
+              v-if="categoryRoute(row.category)"
+              role="button"
+              style="color: #1677ff; cursor: pointer"
+              @click="goCategory(row)"
+            >{{ row.category }}</a>
+            <span v-else>{{ row.category }}</span>
+            <!-- P2-B1-E-08-04：SAFE_AUTO 等按岗位解析类别的规则，展示岗位→类别映射 -->
+            <span style="font-size: 12px; opacity: 0.65">
+              {{ Object.entries(row.scopeConfig.category_by_position).map(([p, c]) => `${p}→${c}`).join('；') }}
+            </span>
+          </div>
           <a
-            v-if="categoryRoute(row.category)"
+            v-else-if="categoryRoute(row.category)"
             role="button"
             style="color: #1677ff; cursor: pointer"
             @click="goCategory(row)"
           >{{ row.category }}</a>
           <span v-else>{{ row.category }}</span>
+        </template>
+        <template #validityCell="{ row }">
+          <div style="display: flex; flex-direction: column; align-items: center; gap: 2px">
+            <span>{{ validityText(row) }}</span>
+            <NTag size="small" :bordered="false" :type="validityInfo(row).effective ? 'success' : validityInfo(row).notYet ? 'warning' : 'default'">
+              {{ validityInfo(row).notYet ? '未生效' : validityInfo(row).expired ? '已失效' : '生效中' }}
+            </NTag>
+          </div>
         </template>
         <template #deductTypeCell="{ row }">
           <HseStatusTag :type="DEDUCT_TAG[row.deductType] || 'info'">
@@ -1966,6 +2035,15 @@ async function handleTabChange(name: string) {
 </template>
 
 <style>
+/* 考核内容列：单元格内完整换行显示，避免长文本被省略截断 */
+.rule-name-cell {
+  display: block;
+  white-space: pre-wrap;
+  word-break: break-word;
+  text-align: left;
+  line-height: 1.45;
+  padding-right: 2px;
+}
 .cat-drag-row:hover {
   background: rgba(24, 160, 88, 0.04);
 }

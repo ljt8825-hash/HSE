@@ -65,6 +65,68 @@ export namespace ViolationApi {
      * null=未标注（历史数据默认）。
      */
     checkSource?: CheckSource | null;
+    /**
+     * E-08-01 新增：记录来源（正式字段 source_type）。
+     * 'grid_candidate'=网格候选确认；null=历史正式三违。禁止弱字段猜测。
+     */
+    sourceType?: 'grid_candidate' | null;
+    /** E-08-01：原始巡查记录回指（grid_inspection_records.id） */
+    sourceRecordId?: number | null;
+    /** E-08-01：候选回指（grid_violation_candidates.id，一对一） */
+    candidateId?: number | null;
+    /** E-08-01：人工确认人（users.id） */
+    confirmedBy?: number | null;
+    confirmedAt?: string | null;
+    /** E-08-01：是否已软删（撤销） */
+    isDeleted?: boolean;
+    /** E-08-01：关联扣分条数（deduction，未软删） */
+    deductionCount?: number | null;
+    /** E-08-02：扣分状态（服务端派生，七态） */
+    deductionStatus?: DeductionStatus | null;
+    /** E-08-02：扣分合计分值（COALESCE(confirmed, suggested) 之和，未软删） */
+    deductionTotalScore?: number | null;
+  }
+
+  /** E-08-02：扣分状态（服务端由真实字段/结构化外键派生，非 DB 字段） */
+  export type DeductionStatus =
+    | 'deducted'
+    | 'pending_deduct'
+    | 'no_deduct'
+    | 'unresolved'
+    | 'pending_review'
+    | 'revoked'
+    | 'history';
+
+  /** E-08-02：扣分状态标签 */
+  export const DEDUCTION_STATUS_TEXT: Record<DeductionStatus, string> = {
+    deducted: '已扣分',
+    pending_deduct: '应扣未扣',
+    no_deduct: '不扣分',
+    unresolved: '身份未解析',
+    pending_review: '待核验',
+    revoked: '已撤销',
+    history: '历史正式记录',
+  };
+
+  /** E-08-02：详情/证据链返回的扣分状态解释 */
+  export interface DeductionStatusInfo {
+    status: DeductionStatus;
+    label: string;
+    explanation: string;
+    ruleActive?: boolean;
+    ruleScore?: number | null;
+    deductions?: Array<{
+      id: number;
+      metricCode?: string;
+      deductionItem?: string;
+      deductionSource?: string;
+      confirmedScore?: string | number | null;
+      suggestedScore?: string | number | null;
+      targetEmployeeName?: string | null;
+      cycleName?: string | null;
+      isDeleted?: boolean;
+      createdAt?: string;
+    }>;
   }
 
   /** 查处来源字典值 */
@@ -87,6 +149,15 @@ export namespace ViolationApi {
     endDate?: string;
     /** 阶段2a 新增：按查处来源筛选（company / township / self） */
     checkSource?: CheckSource;
+    /**
+     * E-08-01 新增：按记录来源筛选（白名单两态，基于正式字段 source_type）。
+     * 'grid_candidate'=网格候选确认；'history'=历史正式（source_type IS NULL）。
+     */
+    sourceType?: 'grid_candidate' | 'history';
+    /** E-08-01：'1'=包含已撤销/软删记录（默认仅未删除） */
+    includeDeleted?: string;
+    /** E-08-02：按扣分状态筛选（白名单七态，服务端派生） */
+    deductionStatus?: DeductionStatus;
     /** 排序字段 */
     sortField?: string;
     /** 排序方向（asc/desc） */
@@ -159,6 +230,51 @@ export function getViolationStats() {
 /** 详情 */
 export function getViolationDetail(id: number) {
   return requestClient.get<ViolationApi.ViolationItem>(`${BASE}/${id}`);
+}
+
+/** E-08-01：证据链（vr→candidate→gir→deduction→audit，全部结构化外键追溯） */
+export interface ViolationEvidenceChain {
+  violation: ViolationApi.ViolationItem;
+  candidate?: {
+    id: number;
+    gridRecordId: number;
+    behaviorId: number;
+    behaviorText: string;
+    rawViolationBehavior: string;
+    candidateType: string;
+    candidateReason?: string;
+    inspectionSource: string;
+    candidateStatus: string;
+    suggestedScore?: string | number;
+    confirmedViolationId?: number | null;
+    confirmedBy?: number | null;
+    confirmedAt?: string | null;
+    revokedAt?: string | null;
+    revokeReason?: string | null;
+    createdAt?: string;
+    behaviorCode?: string;
+    dictBehaviorName?: string;
+  } | null;
+  gridRecord?: {
+    id: number;
+    serialNo?: string;
+    inspectionDate?: string;
+    violatorName?: string;
+    personnelName?: string;
+    areaTeam?: string;
+    gridLevel?: string;
+    position?: string;
+    imageContent?: string;
+    violationBehavior?: string;
+    inspectorEmployeeId?: number | null;
+  } | null;
+  deductions?: Record<string, unknown>[];
+  /** E-08-02：扣分状态解释（状态/文案/deduction 明细含软删） */
+  deductionStatusInfo?: ViolationApi.DeductionStatusInfo;
+  audits?: Record<string, unknown>[];
+}
+export function getViolationEvidenceChain(id: number) {
+  return requestClient.get<ViolationEvidenceChain>(`${BASE}/${id}/evidence-chain`);
 }
 
 /** 创建 */

@@ -154,6 +154,16 @@ async function scan({ cycle, year, month, rule, dryRun }) {
       continue;
     }
 
+    // P2-B1-E-08-04：按考核对象岗位解析归属类别（配置驱动，scope_config.category_by_position）。
+    //   冻结口径：乡镇作业中心经理 → 安全文化建设；管理员 → 目标职责。
+    //   无配置或岗位未命中 → 回退规则行类别（历史行为，零漂移）。
+    const catCfg =
+      rule.scopeConfig && rule.scopeConfig.category_by_position
+        ? rule.scopeConfig.category_by_position
+        : null;
+    const resolvedCategory =
+      (catCfg && target.position && catCfg[target.position]) || rule.category;
+
     const base = {
       _seq: seq++,
       cycleId,
@@ -161,7 +171,8 @@ async function scan({ cycle, year, month, rule, dryRun }) {
       employeeId: target.employeeId || target.id,
       employeeName: target.name || rec.name,
       ruleName: rule.ruleName,
-      category: rule.category,
+      category: resolvedCategory,
+      targetPosition: target.position || rec.level || '',
       missingLabels: missing.map((a) => a.name),
       dept: rec.dept,
       level: rec.level,

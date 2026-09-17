@@ -15,6 +15,7 @@ const { pool, isConnected } = require('../config/db');
 const engine = require('./assessmentScoringEngine');
 const eventService = require('./assessmentEventService');
 const gridUncheckedDeduction = require('./gridUncheckedDeductionService');
+const { CONFIRMED_TARGET_ELIGIBILITY_SQL, FORMAL_EMPLOYEE_ELIGIBILITY_SQL } = require('./assessmentTargetEligibility');
 
 // ============================================================
 // 配置
@@ -134,6 +135,7 @@ async function syncAssessmentTargets(cycleId) {
              v.position_name='乡镇作业中心经理'
              OR (v.position_name='管理员' AND v.org_type='town_center')
              OR v.employee_id IN (SELECT ga.personnel_id FROM grid_areas ga WHERE ga.personnel_id IS NOT NULL AND COALESCE(ga.is_deleted, FALSE)=FALSE)
+             OR ${CONFIRMED_TARGET_ELIGIBILITY_SQL}
            )
            AND (v.start_date IS NULL OR v.start_date <= (SELECT end_time FROM hse_assessment_cycle WHERE id=$1))
            AND (v.end_date IS NULL OR v.end_date >= (SELECT start_time FROM hse_assessment_cycle WHERE id=$1))
@@ -154,10 +156,12 @@ async function syncAssessmentTargets(cycleId) {
        COALESCE(v.org_name,'')
      FROM v_employee_org_full v
      WHERE v.relation_status='active'
+       AND ${FORMAL_EMPLOYEE_ELIGIBILITY_SQL}
        AND (
          v.position_name='乡镇作业中心经理'
          OR (v.position_name='管理员' AND v.org_type='town_center')
          OR v.employee_id IN (SELECT ga.personnel_id FROM grid_areas ga WHERE ga.personnel_id IS NOT NULL AND COALESCE(ga.is_deleted, FALSE)=FALSE)
+         OR ${CONFIRMED_TARGET_ELIGIBILITY_SQL}
        )
        AND (v.start_date IS NULL OR v.start_date <= (SELECT end_time FROM hse_assessment_cycle WHERE id=$1))
        AND (v.end_date IS NULL OR v.end_date >= (SELECT start_time FROM hse_assessment_cycle WHERE id=$1))

@@ -45,10 +45,22 @@ async function executeScoring(user, body) {
       return { __t: 'error', code: 409, message: '未启动的周期不可评分，请先启动周期' };
     }
 
-    // 当场扫描「网格长未巡查」缺次扣分（幂等 upsert，随后统一重算）
+    // 当场扫描「网格未巡查」缺次扣分（幂等 upsert，随后统一重算）
+    // P2-B1-E-08-04-R2 LIVE / HISTORICAL_BACKFILL 语义边界：
+    //   本 API 是唯一「人工对任意周期触发评分」的入口。
+    //   - 周期窗口已整体结束超过调度宽限（end_time + 3 天 < now）→ 该周期属于
+    //     「业务上早已完成考核、系统只是数字化录入/纠错」→ executionMode='backfill'，
+    //     规则配置有效期（valid_from/valid_to）不阻断；审计记录显式标记 historical_backfill。
+    //   - 其余（当期 / 宽限期内）→ 'live'，规则配置有效期严格生效。
+    //   scheduler（assessmentScheduler）只跑当期+宽限 3 天，永远走 LIVE，不经过本分支。
+    const GRACE_MS = 3 * 24 * 60 * 60 * 1000; // 与调度宽限窗口一致（3 天）
+    const endMs = cycle.end_time ? new Date(cycle.end_time).getTime() : null;
+    const isHistoricalBackfill = endMs != null && Date.now() > endMs + GRACE_MS;
+    const executionMode = isHistoricalBackfill ? 'backfill' : 'live';
+
     let uncheckedSync = null;
     try {
-      uncheckedSync = await gridUncheckedDeduction.syncGridUncheckedDeductions(cycle_id);
+      uncheckedSync = await gridUncheckedDeduction.syncGridUncheckedDeductions(cycle_id, { executionMode });
     } catch (e) {
       logger.warn(`[assessment-scoring] 网格未巡查扫描失败（不阻断评分）: ${e.message}`);
     }
@@ -99,8 +111,13 @@ async function executeScoring(user, body) {
 
     await recordAudit(user.id, user.name, user.role, 'CALCULATE', 'SCORE', cycle_id, cycle.cycle_code,
       { scored_count: scoredCount, version: newVersion, engine: 'event-driven', recalculated: okResults.length, failed,
-        grid_unchecked: gridUncheckedInfo },
-      '执行自动评分（事件引擎口径）', user.ip);
+        grid_unchecked: gridUncheckedInfo,
+        // R2：LIVE / HISTORICAL_BACKFILL 审计留痕（补录模式必须显式可见）
+        execution_mode: executionMode,
+        historical_backfill: isHistoricalBackfill },
+      isHistoricalBackfill
+        ? '执行自动评分（历史补录模式：规则配置有效期不阻断）'
+        : '执行自动评分（事件引擎口径）', user.ip);
 
     return {
       __t: 'json',
@@ -110,6 +127,7 @@ async function executeScoring(user, body) {
         score_version: newVersion,
         status: CYCLE_STATUS.PENDING_REVIEW,
         grid_unchecked: gridUncheckedInfo,
+        execution_mode: executionMode,
       }),
       message: '自动评分执行完成',
     };

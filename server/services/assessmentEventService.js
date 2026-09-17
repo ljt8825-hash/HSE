@@ -8,7 +8,9 @@
  *   4. 失败不阻塞主流程，由每日校验定时任务做最终补偿
  *
  * 已支持事件：
- *   VIOLATION_CREATED / VIOLATION_DELETED  —— 三违（个人+直属上级传导）
+ *   VIOLATION_CREATED / VIOLATION_DELETED  —— 三违（E-08-08 起事件只触发 violation_record
+ *                                             适配器即时重扫，扣分唯一权威=规则引擎单链：
+ *                                             岗位传递 + 1/5 分值规则 + 类别上限 + 幂等撤销）
  *   HAZARD_OVERDUE / HAZARD_RESOLVED        —— 隐患整改超期 / 闭环撤销
  *   ACCIDENT_CREATED / ACCIDENT_DELETED     —— 事故否决项
  *   TRAINING_FAILED / TRAINING_DELETED      —— 本人培训不合格
@@ -43,10 +45,13 @@ const EVENT_TYPES = {
   MEETING_ATTEND: 'MEETING_ATTEND',
 };
 
-// 三违「自身行为」个人扣分基准分（仅作直属上级传导比例基准使用）。
-// 注：阶段2 起，违规人个人 HSE-KPI-SAF-001 扣分已移交规则引擎（violation_record 适配器）
-// 按月度统一扫描落库，本文件不再对个人 applyDeduction，避免与引擎路径重复扣分。
-const THREE_VIOLATION_PERSONAL_SCORE = 5;
+// 【E-08-08 移除】原 THREE_VIOLATION_PERSONAL_SCORE=5 与 onViolationCreated 内的
+// applyTransmission 直属上级盲传导 —— 该事件链不看检查来源、不看具体三违项目、
+// 不经岗位传递 resolver、与月度引擎传递链互不去重，是 E-09 实证的重复扣分根因
+//（同一事件：事件链扣直属上级 5 分 + 引擎链按传递再扣 5 分/目标）。
+// E-08-08 起：三违扣分唯一权威 = 规则引擎 violation_record 适配器
+//（VIOLATION003 传递配置 + 普通三违 1 分/头盔 5 分分值规则 + 类别上限 + 事件级幂等撤销），
+// 事件只负责触发该周期适配器即时重扫（与 accident_veto 同一模式）。
 
 /**
  * 对外发布事件（fire-and-forget，抛错不影响调用方）
@@ -329,61 +334,32 @@ async function onViolationClosed(payload, cycle, sourceTable, sourceId) {
   return { affected: removed ? 1 : 0, cycleId: cycle.id };
 }
 
-async function onViolationCreated(payload, cycle, sourceTable, sourceId) {
-  const violatorId = payload.violatorId;
-  const spec = {
-    metricCode: 'HSE-KPI-SAF-001', // 三违行为管控（仅作传导比例基准）
-    sourceTable: 'violation_records',
-    sourceId: payload.violationId,
-    item: `三违1次`,
-    score: THREE_VIOLATION_PERSONAL_SCORE,
-    detail: {
-      violationType: payload.violationType,
-      violationDate: payload.violationDate,
-      violatorName: payload.violatorName,
-    },
+async function onViolationCreated(payload, cycle /* , sourceTable, sourceId */) {
+  // E-08-08：三违扣分唯一权威 = 规则引擎 violation_record 适配器（单链，修复双链重复扣分）：
+  //   - 岗位传递 resolver（violationTargetResolver，fail-closed 四态）
+  //   - 分值规则：公司检查普通三违 1 分；仅「不戴安全头盔」5 分（scope_config 配置驱动）
+  //   - 类别上限钳制（管理员/乡镇作业中心经理分设）+ 事件级幂等撤销
+  // 事件链不再自行 applyTransmission —— 原「直属上级×5 分」盲传导与引擎传递链互不去重，
+  // 为 E-09 实证的重复扣分根因；本事件仅触发适配器对本周期的即时重扫（与事故否决同模式）。
+  const res = await ruleEngine.runCycleAdapters(cycle.id, { adapterKeys: ['violation_record'] });
+  return {
+    affected: res.affected || 0,
+    ok: !!res.ok,
+    reason: res.reason || 'violation-adapter-rescanned',
+    cycleId: cycle.id,
   };
-
-  const results = [];
-
-  // 违规人个人 HSE-KPI-SAF-001 扣分已移交规则引擎（violation_record 适配器）按月度统一扫描落库，
-  // 此处不再 applyDeduction 到违规人 target，避免与引擎路径重复扣分。
-  // 仅保留「直属上级传导」（chain_transmission，引擎不覆盖）
-  const violatorEmp = await engine.getEmployeeWithManager(violatorId);
-  if (violatorEmp) {
-    // 直属上级传导（若上级是考核对象）
-    results.push(await applyTransmission(cycle, violatorEmp, spec, 'VIOLATION_CREATED'));
-  }
-  return { affected: results.length, cycleId: cycle.id };
 }
 
-async function onViolationDeleted(payload, cycle, sourceTable, sourceId) {
-  const spec = {
-    metricCode: 'HSE-KPI-SAF-001',
-    sourceTable: 'violation_records',
-    sourceId: payload.violationId,
+async function onViolationDeleted(payload, cycle /* , sourceTable, sourceId */) {
+  // E-08-08：撤销同样收敛到引擎单链 —— 适配器重扫按「当前期望扣分对象集合」自动撤销
+  // 已失效记录的扣分（软删/落键丢失/改挂他人），替代原事件链 removeAutoDeduction 直删。
+  const res = await ruleEngine.runCycleAdapters(cycle.id, { adapterKeys: ['violation_record'] });
+  return {
+    affected: res.affected || 0,
+    ok: !!res.ok,
+    reason: res.reason || 'violation-adapter-rescanned',
+    cycleId: cycle.id,
   };
-  const results = [];
-
-  const violatorEmp = await engine.getEmployeeWithManager(payload.violatorId);
-  if (violatorEmp) {
-    // 个人扣分撤销：已移交规则引擎（软删违规记录后由引擎 scan 自动撤销），此处不再处理
-    // 撤销上级传导（上级 target 上对应的明细也删）
-    if (violatorEmp.manager) {
-      const mTarget = await targetOrNull(cycle, violatorEmp.manager.id);
-      if (mTarget) {
-        const removed = await engine.removeAutoDeduction({
-          targetId: mTarget.id, cycleId: cycle.id, metricCode: spec.metricCode,
-          sourceTable: spec.sourceTable, sourceId: spec.sourceId,
-        });
-        if (removed) {
-          await engine.recalculateTarget(cycle.id, mTarget.id);
-          results.push(removed);
-        }
-      }
-    }
-  }
-  return { affected: results.length, cycleId: cycle.id };
 }
 
 // --- 隐患整改超期 ---

@@ -7,6 +7,7 @@
  */
 
 const { camelKeys } = require('../utils/commonResponse');
+const { CONFIRMED_TARGET_ELIGIBILITY_SQL, FORMAL_EMPLOYEE_ELIGIBILITY_SQL } = require('./assessmentTargetEligibility');
 const {
   pool,
   logger,
@@ -267,10 +268,12 @@ async function startCycle(user, id) {
                 COALESCE(v.org_name, '')
          FROM v_employee_org_full v
          WHERE v.relation_status = 'active'
+           AND ${FORMAL_EMPLOYEE_ELIGIBILITY_SQL}
            AND (
              v.position_name = '乡镇作业中心经理'
              OR (v.position_name = '管理员' AND v.org_type = 'town_center')
              OR v.employee_id IN (SELECT ga.personnel_id FROM grid_areas ga WHERE ga.personnel_id IS NOT NULL AND COALESCE(ga.is_deleted, FALSE) = FALSE)
+             OR ${CONFIRMED_TARGET_ELIGIBILITY_SQL}
              -- TODO 市政绿化作业中心公园负责人：花名册录入后在此处追加 OR 分支
            )
            AND v.employee_id NOT IN (SELECT employee_id FROM ${TABLES.target} WHERE cycle_id = $1)

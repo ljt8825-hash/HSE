@@ -7,6 +7,7 @@
  */
 
 const { camelKeys } = require('../utils/commonResponse');
+const { CONFIRMED_TARGET_ELIGIBILITY_SQL, FORMAL_EMPLOYEE_ELIGIBILITY_SQL } = require('./assessmentTargetEligibility');
 const {
   pool,
   logger,
@@ -179,6 +180,7 @@ async function syncTargets(user, id) {
                  v.position_name = '乡镇作业中心经理'
                  OR (v.position_name = '管理员' AND v.org_type = 'town_center')
                  OR v.employee_id IN (SELECT ga.personnel_id FROM grid_areas ga WHERE ga.personnel_id IS NOT NULL AND COALESCE(ga.is_deleted, FALSE) = FALSE)
+                 OR ${CONFIRMED_TARGET_ELIGIBILITY_SQL}
                )
                AND (v.start_date IS NULL OR v.start_date <= (SELECT end_time FROM ${TABLES.cycle} WHERE id = $1))
                AND (v.end_date IS NULL OR v.end_date >= (SELECT start_time FROM ${TABLES.cycle} WHERE id = $1))
@@ -194,10 +196,12 @@ async function syncTargets(user, id) {
                 COALESCE(v.org_name, '')
          FROM v_employee_org_full v
          WHERE v.relation_status = 'active'
+           AND ${FORMAL_EMPLOYEE_ELIGIBILITY_SQL}
            AND (
              v.position_name = '乡镇作业中心经理'
              OR (v.position_name = '管理员' AND v.org_type = 'town_center')
              OR v.employee_id IN (SELECT ga.personnel_id FROM grid_areas ga WHERE ga.personnel_id IS NOT NULL AND COALESCE(ga.is_deleted, FALSE) = FALSE)
+             OR ${CONFIRMED_TARGET_ELIGIBILITY_SQL}
              -- TODO 市政绿化作业中心公园负责人：花名册录入后在此处追加 OR 分支
            )
            AND (v.start_date IS NULL OR v.start_date <= (SELECT end_time FROM ${TABLES.cycle} WHERE id = $1))
@@ -269,11 +273,12 @@ async function addTargets(user, id, body) {
       let added = 0;
       for (const empId of employee_ids) {
         const empResult = await client.query(
-          `SELECT employee_id as id, name, employee_code, position_name,
-                  COALESCE((SELECT t.org_name FROM hse_org_unit t WHERE t.org_type = 'town_center' AND t.is_deleted = false AND (v_employee_org_full.org_path = t.org_path OR v_employee_org_full.org_path LIKE t.org_path || '/%') ORDER BY length(t.org_path) DESC LIMIT 1), v_employee_org_full.org_name) as township,
-                  COALESCE(org_name, '') as department
-           FROM v_employee_org_full
-           WHERE employee_id = $1 AND relation_status = 'active'
+          `SELECT v.employee_id as id, v.name, v.employee_code, v.position_name,
+                  COALESCE((SELECT t.org_name FROM hse_org_unit t WHERE t.org_type = 'town_center' AND t.is_deleted = false AND (v.org_path = t.org_path OR v.org_path LIKE t.org_path || '/%') ORDER BY length(t.org_path) DESC LIMIT 1), v.org_name) as township,
+                  COALESCE(v.org_name, '') as department
+           FROM v_employee_org_full v
+           WHERE v.employee_id = $1 AND v.relation_status = 'active'
+             AND ${FORMAL_EMPLOYEE_ELIGIBILITY_SQL}
            LIMIT 1`,
           [empId]
         );

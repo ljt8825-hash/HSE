@@ -301,8 +301,8 @@ async function removeAutoDeduction({ targetId, cycleId, metricCode, sourceTable,
  * 生效分口径（全系统唯一）：approved/adjusted 用 confirmed_score（人工锁定），
  * 其余（pending）用 suggested_score（自动值），rejected/软删为 0。
  */
-async function getEffectiveDeductionTotal(targetId, cycleId) {
-  const r = await pool.query(
+async function getEffectiveDeductionTotal(targetId, cycleId, executor = pool) {
+  const r = await executor.query(
     `SELECT COALESCE(SUM(
        CASE WHEN review_status IN ('approved','adjusted')
             THEN COALESCE(confirmed_score, suggested_score)
@@ -321,10 +321,18 @@ async function getEffectiveDeductionTotal(targetId, cycleId) {
 /**
  * 重算单个考核对象分数（以扣分明细为准）
  * 更新：hse_assessment_target.score_auto / score_total / grade / rank
+ * P2-B1-E-08-04：新增可选 executor（事务 client），供「撤销即时回滚」在同一业务事务内重算；
+ *   缺省 pool，既有调用方零漂移。
+ * P2-B1-E-08-04-R2：新增 opts.force（默认 false）——撤销即时恢复场景下，
+ *   周期 frozen/not_started 的应用层软拦截放行（仍走完整正式评分链：
+ *   getEffectiveDeductionTotal → target UPDATE → 快照同步；DB 触发器
+ *   prevent_frozen_target_modify 拦截的是 target 行级冻结，作为兜底保留）。
+ *   仅 revokeConfirmation 传 force=true；其余调用方零漂移。
  * @returns {object} 重算结果
  */
-async function recalculateTarget(cycleId, targetId) {
-  const tR = await pool.query(
+async function recalculateTarget(cycleId, targetId, executor = pool, opts = {}) {
+  const force = opts && opts.force === true;
+  const tR = await executor.query(
     `SELECT * FROM hse_assessment_target
      WHERE id = $1 AND cycle_id = $2 AND is_deleted = FALSE`,
     [targetId, cycleId]
@@ -334,20 +342,30 @@ async function recalculateTarget(cycleId, targetId) {
   const target = tR.rows[0];
 
   // 冻结周期禁止自动变更（DB 触发器是兜底，这里先软拦截，避免异常幂等）
-  const cycleR = await pool.query(
+  // R2：撤销即时恢复（force）放行本软拦截——事实撤销成功提交 = 相关对象分数立即恢复，
+  //     不允许出现「扣分行已回滚但分数快照仍旧值」的中间态。
+  const cycleR = await executor.query(
     `SELECT status FROM hse_assessment_cycle WHERE id = $1 AND is_deleted = FALSE`,
     [cycleId]
   );
   const cycleStatus = cycleR.rows.length ? cycleR.rows[0].status : null;
-  if (cycleStatus === 'frozen' || cycleStatus === 'not_started') {
+  if (!force && (cycleStatus === 'frozen' || cycleStatus === 'not_started')) {
     return { ok: false, reason: `cycle-status-${cycleStatus}` };
   }
 
-  const totalDeduction = await getEffectiveDeductionTotal(targetId, cycleId);
+  // R2-FIX：force（撤销即时恢复）时开启事务本地白名单，放行 DB 触发器
+  // prevent_frozen_target_modify 对 target.status='frozen' 行的评分更新拦截。
+  // set_config 第三参 true = 事务本地（随 COMMIT/ROLLBACK 自动失效，不泄漏到连接池）；
+  // 仍走完整评分链重算，非绕过式直改。
+  if (force) {
+    await executor.query(`SELECT set_config('app.allow_frozen_target_score_recalc', 'on', true)`);
+  }
+
+  const totalDeduction = await getEffectiveDeductionTotal(targetId, cycleId, executor);
   const scoreAuto = Math.max(0, Math.round((MAX_SCORE - totalDeduction) * 100) / 100);
 
   // 重算总分
-  const updated = await pool.query(
+  const updated = await executor.query(
     `UPDATE hse_assessment_target
      SET score_auto = $1,
          score_total = COALESCE(score_manual,0) + $1 + COALESCE(score_bonus,0),
@@ -361,7 +379,7 @@ async function recalculateTarget(cycleId, targetId) {
   const newTarget = updated.rows[0];
 
   // 同步该 target 聚合指标评分记录（保持 hse_assessment_score 可视化一致）
-  await syncTargetScoreSnapshot(cycleId, newTarget, scoreAuto, totalDeduction);
+  await syncTargetScoreSnapshot(cycleId, newTarget, scoreAuto, totalDeduction, executor);
 
   return {
     ok: true,
@@ -398,17 +416,17 @@ async function recalculateCycle(cycleId) {
  * 汇总目标聚合分写入：将自动/传导负分写入一条 target 指标评分摘要。
  * 不破坏 /scoring/execute 生成的逐指标评分，仅保证 target 总分在一处可读。
  */
-async function syncTargetScoreSnapshot(cycleId, target, scoreAuto, totalDeduction) {
+async function syncTargetScoreSnapshot(cycleId, target, scoreAuto, totalDeduction, executor = pool) {
   try {
     // 标记一条“自动考核汇总”评分记录（deduction_total=总扣分, final_score=自动分）
-    const r = await pool.query(
+    const r = await executor.query(
       `SELECT id FROM hse_assessment_score
        WHERE target_id = $1 AND cycle_id = $2
          AND metric_code = 'AUTO_TOTAL_SNAPSHOT' AND is_deleted = FALSE`,
       [target.id, cycleId]
     );
     if (r.rows.length) {
-      await pool.query(
+      await executor.query(
         `UPDATE hse_assessment_score
          SET raw_value = $1, deduction_total = $2, original_score = 100,
              final_score = $3, is_auto = TRUE, calc_time = NOW(), updated_at = NOW()
@@ -416,7 +434,7 @@ async function syncTargetScoreSnapshot(cycleId, target, scoreAuto, totalDeductio
         [totalDeduction, totalDeduction, scoreAuto, r.rows[0].id]
       );
     } else {
-      await pool.query(
+      await executor.query(
         `INSERT INTO hse_assessment_score
           (target_id, cycle_id, metric_id, metric_code, raw_value, raw_value_desc,
            deduction_total, original_score, final_score, is_auto, is_manual,

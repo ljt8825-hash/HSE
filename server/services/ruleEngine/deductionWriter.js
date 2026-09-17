@@ -113,7 +113,7 @@ function createDeductionWriter(config) {
    * @returns {'inserted'|'revived'|'updated'|'noop'|'locked'}
    */
   async function upsert(
-    { cycleId, targetId, employeeId, metricId, metricCode, score, item, detail, sourceId },
+    { cycleId, targetId, employeeId, metricId, metricCode, score, item, detail, sourceId, isTransmission },
     { dryRun = false } = {}
   ) {
     // 事件模式适配器（如 violation）的 buildDeductKey 依赖 sourceId，月度模式忽略之
@@ -136,8 +136,8 @@ function createDeductionWriter(config) {
            (score_id, target_id, cycle_id, metric_id, metric_code, deduction_item,
             deduction_type, deduction_source, source_table, source_id, source_detail,
             suggested_score, current_version, review_status, is_transmission, is_deleted)
-         VALUES ($1,$2,$3,$4,$5,$6,'auto_deduction','auto',$7,$8,$9,$10,1,'pending',FALSE,FALSE)`,
-        [scoreId, targetId, cycleId, metricId, metricCode, item, sourceTable, realSourceId, fullDetail, score]
+         VALUES ($1,$2,$3,$4,$5,$6,'auto_deduction','auto',$7,$8,$9,$10,1,'pending',$11,FALSE)`,
+        [scoreId, targetId, cycleId, metricId, metricCode, item, sourceTable, realSourceId, fullDetail, score, isTransmission === true]
       );
       return 'inserted';
     }

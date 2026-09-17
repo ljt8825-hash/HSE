@@ -51,6 +51,8 @@ const filterOptions = (req, res) => run(req, res, () => service.filterOptions())
 
 // ---- 详情 + CRUD ----
 const detail = (req, res) => run(req, res, () => service.detail(req.params));
+// E-08-01：证据链（vr→candidate→gir→deduction→audit，只读）
+const evidenceChain = (req, res) => run(req, res, () => service.evidenceChain(req.params));
 const create = (req, res) => run(req, res, () => service.create(req.body, req));
 const update = (req, res) => run(req, res, () => service.update(req.params, req.body, req));
 const batchDelete = (req, res) => run(req, res, () => service.batchDelete(req.body, req));
@@ -74,6 +76,7 @@ module.exports = {
   stats,
   filterOptions,
   detail,
+  evidenceChain,
   create,
   update,
   batchDelete,

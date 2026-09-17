@@ -16,6 +16,7 @@
 const { pool, isConnected } = require('../../config/db');
 const engine = require('../assessmentScoringEngine');
 const { getRuleByAdapterKey, getRuleByCode } = require('./ruleLoader');
+const { isRuleEffectiveForWindow } = require('./ruleValidity');
 const { getAdapter, listActiveAdapterKeys, registerAdapter } = require('./adapterRegistry');
 const { createDeductionWriter } = require('./deductionWriter');
 const { applyCap, roleFromPosition } = require('./categoryCap');
@@ -37,6 +38,10 @@ const AUTO_DEDUCTION_ADAPTERS = [
   'safety_culture',
   'sanwei_excel',
   'accident_veto',
+  // P2-B1-E-06-PROD：三违候选确认记录（GRIDVIOL001，公司查处5分/次）纳入统一门面。
+  //   生产 vr 5 列 DDL 已执行（2026-09-13，备份 G:/pg_backup/safety_dashboard_2026-09-13_21-11-04.dump）；
+  //   存量 grid_candidate 行=0 ⇒ 激活初期零意图零影响；violationAdapter 存量域已隔离（source_type IS NULL）。
+  'sanwei_candidate',
 ];
 
 // 阶段1/2 注册适配器
@@ -59,6 +64,11 @@ function ensureAdaptersRegistered() {
   registerAdapter('sanwei_excel', require('./adapters/sanweiExcelAdapter'));
   // 2026-09-05：事故否决项（交通/生产安全责任，一票否决100分）接入自动评分
   registerAdapter('accident_veto', require('./adapters/accidentVetoAdapter'));
+  // P2-B1-E-06-IMPLEMENT：三违候选确认记录（GRIDVIOL001，公司查处5分/次）。
+  // ⚠️ 仅注册（resolveTasks 可显式指定 adapterKeys 调用，供 DEV 测试/生产门禁阶段验证），
+  //    不加入 AUTO_DEDUCTION_ADAPTERS 统一门面——生产激活（vr 5 列 DDL + 门禁审计）另走阶段。
+  //    生产库 DDL 前即使被调入也会因列守卫安全空转（见 candidateViolationAdapter）。
+  registerAdapter('sanwei_candidate', require('./adapters/candidateViolationAdapter'));
   _initialized = true;
 }
 
@@ -107,12 +117,23 @@ async function resolveTasks(adapterKeys) {
  * @param {object} [opts]
  * @param {string[]} [opts.adapterKeys] 限定适配器；缺省为全部已注册
  * @param {boolean} [opts.dryRun] 只算不写库
+ * @param {string}  [opts.executionMode='live'] 执行模式（P2-B1-E-08-04-R2）：
+ *   - 'live'     默认。正常实时执行（scheduler / 导入联动 / 当期评分）。
+ *                规则 valid_from/valid_to（= 系统规则配置有效期）严格参与过滤。
+ *   - 'backfill' 历史考核补录/重跑。仅限人工入口显式传入；表示本周期属于
+ *                「业务上早已完成考核、现数字化录入/纠错」场景，规则配置有效期
+ *                不阻断（不重新解释历史事实，只建立系统扣分结果）。
+ *                scheduler 及一切自动触发点【不得】传入本值。
  * @returns {Promise<object>}
- *   { ok, cycleId, dryRun, scanned, assessed, affected, details, skipped,
+ *   { ok, cycleId, dryRun, executionMode, scanned, assessed, affected, details, skipped,
  *     adapters: [{ key, ok, reason, scanned, assessed, affected, deducted }] }
  */
-async function runCycleAdapters(cycleId, { adapterKeys, dryRun = false } = {}) {
+async function runCycleAdapters(cycleId, { adapterKeys, dryRun = false, executionMode = 'live' } = {}) {
   if (!isConnected()) return { ok: false, reason: 'memory-mode', adapters: [] };
+  const mode = executionMode === 'backfill' ? 'backfill' : 'live';
+  if (mode === 'backfill') {
+    console.warn(`[rule-engine] HISTORICAL_BACKFILL：周期 ${cycleId} 以历史补录模式执行（规则配置有效期不阻断，须人工入口触发）`);
+  }
 
   // 1) 周期加载与状态守卫
   const cycR = await pool.query(
@@ -158,6 +179,16 @@ async function runCycleAdapters(cycleId, { adapterKeys, dryRun = false } = {}) {
   let affected = 0;
 
   for (const { key, adapter, rule } of tasks) {
+    // 3.8) 统一规则有效期过滤（P2-B1-E-08-04；R2 语义修正）：
+    //      valid_from/valid_to = 「系统规则配置进入系统并允许参与执行的有效期」，
+    //      仅约束 LIVE 实时执行；HISTORICAL_BACKFILL（历史考核数字化补录）不因
+    //      规则配置晚于业务事件日期而被阻断。判断位于统一执行链（引擎层），
+    //      各 Adapter 不复制日期逻辑。
+    if (mode !== 'backfill' && !isRuleEffectiveForWindow(rule, cycle)) {
+      adapters.push({ key, ok: false, reason: 'rule-not-effective', executionMode: mode, scanned: 0, assessed: 0, affected: 0, deducted: 0 });
+      continue;
+    }
+
     // 4) 扫描（适配器内部保留「当月无台账 → noLedger」守卫）
     const res = await adapter.scan({ cycle, year, month, rule, dryRun });
 
@@ -203,13 +234,15 @@ async function runCycleAdapters(cycleId, { adapterKeys, dryRun = false } = {}) {
       }
 
       // 5b) 类别上限钳制（仅自动扣分通路）
+      //     类别取「意图自带类别」优先（P2-B1-E-08-04：SAFE_AUTO 等按岗位解析类别的规则
+      //     在 Adapter 内按 target 岗位从规则配置解析后写入 item.category），无则回退规则行类别。
       //     先按幂等键定位当前行，按「行」排除（excludeId）而非按「kind」排除，
       //     使同一 kind 的多次扣分（如一人多次三违）也能正确累加到类别上限（三违管理 15 分）。
       const existing = await writer.findExisting(cycleId, item.targetId, item.employeeId, item.sourceId);
       const capRes = await applyCap({
         cycleId,
         targetId: item.targetId,
-        category: rule.category,
+        category: item.category || rule.category,
         excludeId: existing ? existing.id : null,
         rawScore: item.rawScore,
         role: targetRoleMap.get(Number(item.targetId)) || 'manager',
@@ -242,6 +275,8 @@ async function runCycleAdapters(cycleId, { adapterKeys, dryRun = false } = {}) {
           item: adapter.buildItem(item, rule),
           detail: adapter.buildDetail(item, capRes),
           sourceId: item.sourceId,
+          // P2-B1-E-08-04：岗位传递产生的扣分行标记 is_transmission=TRUE（可观测）
+          isTransmission: item.isTransmission === true,
         },
         { dryRun }
       );
@@ -289,7 +324,7 @@ async function runCycleAdapters(cycleId, { adapterKeys, dryRun = false } = {}) {
     }
   }
 
-  return { ok: true, cycleId, dryRun, scanned, assessed, affected, details, skipped, adapters };
+  return { ok: true, cycleId, dryRun, executionMode: mode, scanned, assessed, affected, details, skipped, adapters };
 }
 
 /**
@@ -301,10 +336,13 @@ async function runCycleAdapters(cycleId, { adapterKeys, dryRun = false } = {}) {
  * @param {number} cycleId
  * @param {object} [opts]
  * @param {boolean} [opts.dryRun]
+ * @param {string}  [opts.executionMode] 仅人工历史补录入口显式传 'backfill'；
+ *                                       scheduler/自动触发点一律不传（= LIVE）。
  * @returns {Promise<object>} 同 runCycleAdapters 返回形状（含 adapters 明细）
  */
-async function runCycleAutoDeductions(cycleId, { dryRun = false } = {}) {
-  return runCycleAdapters(cycleId, { adapterKeys: [...AUTO_DEDUCTION_ADAPTERS], dryRun });
+async function runCycleAutoDeductions(cycleId, { dryRun = false, executionMode } = {}) {
+  const mode = executionMode === 'backfill' ? 'backfill' : undefined;
+  return runCycleAdapters(cycleId, { adapterKeys: [...AUTO_DEDUCTION_ADAPTERS], dryRun, ...(mode ? { executionMode: mode } : {}) });
 }
 
 module.exports = {
