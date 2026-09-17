@@ -1,0 +1,188 @@
+{
+  "at": "2026-09-14T11:21:53.054Z",
+  "cycle": 43,
+  "pass": 23,
+  "fail": 0,
+  "results": [
+    {
+      "name": "T1 普通三违(保洁员,上级管理员)=管理员-1+经理-1",
+      "ok": true,
+      "detail": "7512"
+    },
+    {
+      "name": "T2 头盔(保洁员,上级管理员)=管理员-5+经理-5",
+      "ok": true,
+      "detail": "7513"
+    },
+    {
+      "name": "T3 普通三违(保洁员,上级经理)=经理-1",
+      "ok": true,
+      "detail": "7514"
+    },
+    {
+      "name": "T4 头盔(保洁员,上级经理)=经理-5",
+      "ok": true,
+      "detail": "7515"
+    },
+    {
+      "name": "T5 普通三违(驾驶员)=经理-1",
+      "ok": true,
+      "detail": "7516"
+    },
+    {
+      "name": "T6 头盔(驾驶员)=经理-5",
+      "ok": true,
+      "detail": "7517"
+    },
+    {
+      "name": "T7 普通三违(收运辅助工)=经理-1",
+      "ok": true,
+      "detail": "7518"
+    },
+    {
+      "name": "T8 头盔(收运辅助工)=经理-5",
+      "ok": true,
+      "detail": "7519"
+    },
+    {
+      "name": "T9 普通三违(转运站操作员)=经理-1",
+      "ok": true,
+      "detail": "7520"
+    },
+    {
+      "name": "T10 头盔(转运站操作员)=经理-5",
+      "ok": true,
+      "detail": "7521"
+    },
+    {
+      "name": "T11 普通三违(管理员违规)=仅经理-1",
+      "ok": true,
+      "detail": "7522"
+    },
+    {
+      "name": "T12 头盔(管理员违规)=仅经理-5",
+      "ok": true,
+      "detail": "7523"
+    },
+    {
+      "name": "T13 自查·检查人=张万恒(乡镇经理账号)=纠正self+扣分0",
+      "ok": true,
+      "detail": {
+        "rows": [],
+        "src": {
+          "check_source": "self",
+          "inspector_name": "张万恒"
+        }
+      }
+    },
+    {
+      "name": "T14 管理员自查=扣分0",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "T15 非正式员工违规=扣分0(fail-closed)",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "T16 岗位未配置(项目总经理)=扣分0(fail-closed)",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "T17 同一事件幂等重扫×2=仍1份/目标(共2行)",
+      "ok": true,
+      "detail": [
+        {
+          "id": "1748",
+          "emp": 6713,
+          "score": 1,
+          "status": "pending"
+        },
+        {
+          "id": "1749",
+          "emp": 6709,
+          "score": 1,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "name": "T18 规则区分: 普通1分+头盔5分并存; 自查+头盔纠正self且0扣分(5分不外溢)",
+      "ok": true,
+      "detail": {
+        "t1": {
+          "6709": 1,
+          "6713": 1
+        },
+        "t2": {
+          "6709": 5,
+          "6713": 5
+        },
+        "self": [],
+        "src": {
+          "check_source": "self"
+        }
+      }
+    },
+    {
+      "name": "T19a manager钳制(other=21,cap=25): 头盔5→4, 次事件capped-out无新行",
+      "ok": true,
+      "detail": {
+        "a1": 4,
+        "a2rows": []
+      }
+    },
+    {
+      "name": "T19b admin钳制(other=46,cap=50): 头盔5→4, 次事件capped-out无新行, 上限复原40/15",
+      "ok": true,
+      "detail": {
+        "b1": 4,
+        "b2rows": [],
+        "capsEnd": [
+          {
+            "target_role": "admin",
+            "max_deduct": "40.00"
+          },
+          {
+            "target_role": "manager",
+            "max_deduct": "15.00"
+          }
+        ]
+      }
+    },
+    {
+      "name": "T20a 2026-08 历史违规记录数不变",
+      "ok": true,
+      "detail": {
+        "before": 824,
+        "after": 824
+      }
+    },
+    {
+      "name": "T20b 清理后: 测试违规全软删+引擎撤销全部测试扣分(全库扣分回归基线)",
+      "ok": true,
+      "detail": {
+        "baseline": 663,
+        "end": 663,
+        "softDeleted": 21,
+        "created": 21
+      }
+    },
+    {
+      "name": "T20c 类别上限精确复原(40/15)",
+      "ok": true,
+      "detail": [
+        {
+          "target_role": "admin",
+          "max_deduct": "40.00"
+        },
+        {
+          "target_role": "manager",
+          "max_deduct": "15.00"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,139 @@
+{
+  "at": "2026-09-14T11:32:26.466Z",
+  "db": "safety_dashboard",
+  "current_database": "safety_dashboard",
+  "before": {
+    "id": "12",
+    "rule_code": "VIOLATION003",
+    "rule_name": "自身三违行为",
+    "scope_config": {
+      "object_type": "township",
+      "transmission": true,
+      "company_score": 5
+    },
+    "transmission_config": {
+      "fallback": "skip",
+      "only_check_source": "company",
+      "by_violator_position": {
+        "保洁员": [
+          "管理员",
+          "乡镇作业中心经理"
+        ],
+        "管理员": [
+          "管理员",
+          "乡镇作业中心经理"
+        ],
+        "乡镇作业中心经理": [
+          "乡镇作业中心经理"
+        ]
+      }
+    },
+    "updated_at": "2026-09-14T07:57:06.975Z"
+  },
+  "baseline": {
+    "deductionTotal": 733,
+    "deductionAlive": 593,
+    "violationTotal": 2506,
+    "targetAlive": 897
+  },
+  "executed": [
+    {
+      "rowCount": 1,
+      "head": "UPDATE hse_assessment_rule\n   SET scope_config = jsonb_build"
+    }
+  ],
+  "after": {
+    "id": "12",
+    "scope_config": {
+      "object_type": "township",
+      "transmission": true,
+      "checker_scope": {
+        "company_org_names": [
+          "安环管理部",
+          "生产管理部",
+          "人力综合部",
+          "财务部",
+          "项目管理层",
+          "环卫作业中心",
+          "市政绿化作业中心"
+        ],
+        "company_position_names": [
+          "项目总经理",
+          "部门经理",
+          "安环专员",
+          "人力综合部经理"
+        ],
+        "township_self_positions": [
+          "乡镇作业中心经理",
+          "管理员"
+        ]
+      },
+      "company_score": 1,
+      "company_item_scores": {
+        "不戴安全头盔": {
+          "score": 5,
+          "match_keywords": [
+            "不戴安全头盔",
+            "骑车不戴头盔"
+          ]
+        }
+      }
+    },
+    "transmission_config": {
+      "fallback": "skip",
+      "only_check_source": "company",
+      "by_violator_position": {
+        "保洁员": [
+          "管理员",
+          "乡镇作业中心经理"
+        ],
+        "管理员": [
+          "乡镇作业中心经理"
+        ],
+        "收运辅助工": [
+          "乡镇作业中心经理"
+        ],
+        "转运站操作员": [
+          "乡镇作业中心经理"
+        ],
+        "乡镇作业中心经理": [
+          "乡镇作业中心经理"
+        ],
+        "垃圾收运车驾驶员": [
+          "乡镇作业中心经理"
+        ],
+        "垃圾转运车驾驶员": [
+          "乡镇作业中心经理"
+        ]
+      }
+    },
+    "updated_at": "2026-09-14T11:32:26.617Z"
+  },
+  "verification": {
+    "companyScore": 1,
+    "companyItemScores": {
+      "不戴安全头盔": {
+        "score": 5,
+        "match_keywords": [
+          "不戴安全头盔",
+          "骑车不戴头盔"
+        ]
+      }
+    },
+    "checkerScopeOrgs": [
+      "安环管理部",
+      "生产管理部",
+      "人力综合部",
+      "财务部",
+      "项目管理层",
+      "环卫作业中心",
+      "市政绿化作业中心"
+    ],
+    "adminSlots": [
+      "乡镇作业中心经理"
+    ],
+    "updated": "2026-09-14T11:32:26.617Z",
+    "beforeUpdated": "2026-09-14T07:57:06.975Z"
+  },
+  "idempotent": true
+}

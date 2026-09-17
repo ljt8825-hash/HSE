@@ -1,0 +1,43 @@
+{
+ "generated_at": "2026-09-14T12:48:35.796Z",
+ "database": "safety_dashboard",
+ "real_event": "NOT_OBSERVED",
+ "company_events": [],
+ "side_observations": [],
+ "checks": {
+  "R1": "PASS_BY_VACUITY",
+  "R2": "PASS_BY_VACUITY",
+  "R3": "PASS_BY_VACUITY",
+  "R4": "PASS_BY_VACUITY",
+  "R5": "PASS_BY_VACUITY",
+  "R6": "PASS"
+ },
+ "rule_config": {
+  "company_score": 1,
+  "company_item_scores": {
+   "不戴安全头盔": {
+    "score": 5,
+    "match_keywords": [
+     "不戴安全头盔",
+     "骑车不戴头盔"
+    ]
+   }
+  }
+ },
+ "category_caps": [
+  {
+   "target_role": "admin",
+   "max_deduct": "40.00"
+  },
+  {
+   "target_role": "manager",
+   "max_deduct": "15.00"
+  }
+ ],
+ "company_event_count": 0,
+ "r6_historical_protected_count": 36,
+ "notes": {
+  "helmet_fact": "当前实现=责任链全部责任目标各 5 分（violationAdapter.scan 对 tRes.targets 每目标各生成一条 rawScore=5 的扣分 intent）",
+  "write_guarantee": "本脚本全程只读（SELECT），未执行任何 INSERT/UPDATE/DELETE"
+ }
+}

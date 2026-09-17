@@ -1,0 +1,50 @@
+{
+ "current_database": "safety_dashboard",
+ "generated_at": "2026-09-14T12:48:35.290Z",
+ "baseline": {
+  "employee_alive": 3401,
+  "employee_assignment_alive": 22295,
+  "violation_records_alive": 2506,
+  "violation_records_total": 2506,
+  "assessment_targets_alive": 897,
+  "assessment_deductions_total": 733,
+  "assessment_deductions_alive": 593,
+  "assessment_cycles": 14,
+  "assessment_rules_alive": 19,
+  "grid_inspection_records_alive": 2061,
+  "grid_record_sync_map": 2061,
+  "users": 63,
+  "sys_operation_log": 4590
+ },
+ "diff_vs_e0809": {
+  "violation_records_alive": {
+   "e0809": 2506,
+   "now": 2506,
+   "changed": false
+  },
+  "assessment_targets_alive": {
+   "e0809": 897,
+   "now": 897,
+   "changed": false
+  },
+  "assessment_deductions_total": {
+   "e0809": 733,
+   "now": 733,
+   "changed": false
+  },
+  "assessment_deductions_alive": {
+   "e0809": 593,
+   "now": 593,
+   "changed": false
+  }
+ },
+ "writes_last_24h": {
+  "violation_inserted": 0,
+  "violation_updated": 0,
+  "deduction_inserted": 0,
+  "deduction_deleted_since_deploy": 0,
+  "oplog_since_deploy": 0
+ },
+ "production_write": "0",
+ "verdict": "BASELINE_UNCHANGED"
+}

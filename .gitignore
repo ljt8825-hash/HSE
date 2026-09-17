@@ -360,3 +360,23 @@ grid-mobile-cloudflare/**/_*_tmp.mjs
 grid-mobile-cloudflare/**/_*.log
 grid-mobile-cloudflare/**/test/_*_shots/
 grid-mobile-cloudflare/**/node_modules/
+
+# ===== 含个人信息的导出快照（禁止入库） =====
+# grid_record_sync_map.json 含 54 个真实手机号（wps_record_id 字段），属 PII，
+# 仅保留在本地；生产变更记录（SQL/回滚/报告）可入库，此文件不可。
+artifacts/cf07-backup/grid_record_sync_map.json
+# extracted_jj/：真实民事判决书 OCR 文本，含当事人姓名/出生日期/住址/案号（PII）
+extracted_jj/
+# safety-check-h5/：未引用的 H5 原型页，内含真实花名册姓名（手机号为假号），
+# 且无工程引用价值；如后续确需入库，请先脱敏
+safety-check-h5/
+
+# ===== 明确自述为临时的验证配置（AI-08 / UI-01 期） =====
+安全看板vben/apps/web-naive/vite.config.ai08.ts
+安全看板vben/apps/web-naive/vite.config.ui01.ts
+
+# ===== AI-06 期调试脚本与根级错误转储 =====
+server/ai06_debug*.cjs
+server/ai06_quick.cjs
+server/ai06_route_test.cjs
+/ai06_*.txt

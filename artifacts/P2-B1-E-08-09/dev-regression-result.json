@@ -1,0 +1,96 @@
+{
+  "at": "2026-09-14T12:11:37.876Z",
+  "cycle": 43,
+  "pass": 11,
+  "fail": 0,
+  "results": [
+    {
+      "name": "D1 company+普通三违(保洁员,上级管理员)=管理员-1+经理-1",
+      "ok": true,
+      "detail": "7540"
+    },
+    {
+      "name": "D2 company+头盔(保洁员,上级管理员)=管理员-5+经理-5",
+      "ok": true,
+      "detail": "7541"
+    },
+    {
+      "name": "D3/D5 乡镇经理(张万恒)自查·前端伪造company=纠正self+0责任扣分",
+      "ok": true,
+      "detail": {
+        "rows": [],
+        "checkSource": "self"
+      }
+    },
+    {
+      "name": "D4 管理员自查·前端伪造company=纠正self+0责任扣分",
+      "ok": true,
+      "detail": {
+        "rows": [],
+        "checkSource": "self"
+      }
+    },
+    {
+      "name": "D6 身份不可解析=fail-closed(effective NULL+0责任扣分+审计留痕)",
+      "ok": true,
+      "detail": {
+        "rows": [],
+        "checkSource": null,
+        "auditFound": 1,
+        "auditDetail": "记录#7544 检查来源判定：requested=company resolved_scope=unknown effective=null 原因=EMPLOYEE_NOT_BOUND(requested=company-fail-closed) 检查人身份不可解析（fail-closed：责任扣分=0，前端值不作扣分依据）"
+      }
+    },
+    {
+      "name": "D7 同一事件重复扫描×2=仍1份/目标(管理员-1+经理-1)",
+      "ok": true,
+      "detail": [
+        {
+          "emp": 6713,
+          "score": 1
+        },
+        {
+          "emp": 6709,
+          "score": 1
+        }
+      ]
+    },
+    {
+      "name": "D8 撤销测试事件(soft delete)→引擎重扫→deduction 回滚(0存活)",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "D9 非正式员工违规=INVALID_TARGET+0责任扣分",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "D10 岗位未配置(项目总经理)=UNRESOLVED+0责任扣分",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "清理后: 测试违规全软删+引擎撤销全部测试扣分(全库扣分回归基线)",
+      "ok": true,
+      "detail": {
+        "baseline": 663,
+        "end": 663,
+        "created": 7
+      }
+    },
+    {
+      "name": "I-护栏: 类别上限精确复原(40/15，新代码未破坏月度护栏)",
+      "ok": true,
+      "detail": [
+        {
+          "target_role": "admin",
+          "max_deduct": "40.00"
+        },
+        {
+          "target_role": "manager",
+          "max_deduct": "15.00"
+        }
+      ]
+    }
+  ]
+}

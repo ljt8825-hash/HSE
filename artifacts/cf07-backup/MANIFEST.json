@@ -1,0 +1,20 @@
+{
+ "stage": "CF-WPS-07",
+ "purpose": "pre-migration logical backup",
+ "at": "2026-09-15T09:03:58.687Z",
+ "database": "safety_dashboard",
+ "files": {
+  "gir_identity_cols": {
+   "rows": 2061,
+   "sha256_attribution": "6188e34cead446e3709e01db136cd9e301d0e40124333479430f67c5c5f609de"
+  },
+  "grid_record_sync_map": {
+   "rows": 2061,
+   "sha256_sync_hash": "f0584a719ead25e71688ac70314f89a37cd70c7afb64949aa3bdb23865a639c1"
+  },
+  "employee_code_index": {
+   "rows": 3269
+  }
+ },
+ "restore_note": "回滚：按 id 逐行比对 inspector_employee_id/grid_id 是否与备份一致；schema 回滚 DROP COLUMN employee_code / DROP INDEX idx_gir_employee_code_pending。"
+}

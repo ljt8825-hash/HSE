@@ -1,0 +1,296 @@
+{
+  "generated_at": "2026-09-14T13:53:33.209Z",
+  "database": "safety_dashboard",
+  "cycle_id": 53,
+  "config": {
+    "updated_at": "2026-09-14T13:30:32.471Z",
+    "by_violator_position": {
+      "保洁员": [
+        "管理员",
+        "乡镇作业中心经理"
+      ],
+      "管理员": [
+        "管理员",
+        "乡镇作业中心经理"
+      ],
+      "收运辅助工": [
+        "乡镇作业中心经理"
+      ],
+      "转运站操作员": [
+        "乡镇作业中心经理"
+      ],
+      "乡镇作业中心经理": [
+        "乡镇作业中心经理"
+      ],
+      "垃圾收运车驾驶员": [
+        "乡镇作业中心经理"
+      ],
+      "垃圾转运车驾驶员": [
+        "乡镇作业中心经理"
+      ]
+    },
+    "helmet_layer_scores": {
+      "escalated": 1,
+      "self_violator": 5,
+      "direct_supervisor": 5
+    },
+    "company_score": 1
+  },
+  "baseline": {
+    "employee": 3417,
+    "employee_assignment": 28864,
+    "violation_records": 2506,
+    "hse_assessment_target": 913,
+    "hse_assessment_target_active": 897,
+    "hse_assessment_deduction": 733,
+    "hse_assessment_deduction_active": 593,
+    "grid_inspection_records": 2061,
+    "grid_record_sync_map": 2061,
+    "hse_assessment_rule": 22,
+    "users": 63,
+    "sys_operation_log": 4590,
+    "hse_assessment_cycle": 15
+  },
+  "pass": 25,
+  "fail": 0,
+  "results": [
+    {
+      "name": "P0-目标库硬校验",
+      "ok": true,
+      "detail": {
+        "db": "safety_dashboard"
+      }
+    },
+    {
+      "name": "C1-VIOLATION003存在且恰1行",
+      "ok": true,
+      "detail": 1
+    },
+    {
+      "name": "C2-管理员槽位含本人+经理",
+      "ok": true,
+      "detail": [
+        "管理员",
+        "乡镇作业中心经理"
+      ]
+    },
+    {
+      "name": "C3-保洁员槽位不变",
+      "ok": true,
+      "detail": [
+        "管理员",
+        "乡镇作业中心经理"
+      ]
+    },
+    {
+      "name": "C4-helmet_layer_scores=5/5/1",
+      "ok": true,
+      "detail": {
+        "escalated": 1,
+        "self_violator": 5,
+        "direct_supervisor": 5
+      }
+    },
+    {
+      "name": "C5-普通company_score=1",
+      "ok": true,
+      "detail": 1
+    },
+    {
+      "name": "C6-company_item_scores在位未覆盖",
+      "ok": true,
+      "detail": [
+        "不戴安全头盔"
+      ]
+    },
+    {
+      "name": "C7-checker_scope在位未覆盖",
+      "ok": true,
+      "detail": [
+        "company_org_names",
+        "company_position_names",
+        "township_self_positions"
+      ]
+    },
+    {
+      "name": "B1-核心基线与部署记录一致",
+      "ok": true,
+      "detail": {
+        "vr": 2506,
+        "t": 897,
+        "d": 733,
+        "da": 593
+      }
+    },
+    {
+      "name": "A-保洁员7086(杜集)→管理员5+经理1",
+      "ok": true,
+      "detail": {
+        "status": "RESOLVED",
+        "mode": "transmitted",
+        "got": [
+          {
+            "id": 7085,
+            "layer": "direct_supervisor",
+            "score": 5
+          },
+          {
+            "id": 7008,
+            "layer": "escalated",
+            "score": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "B-保洁员→经理直管(动态样本)",
+      "ok": true,
+      "detail": "NOT_OBSERVED: 全部周期责任池无「保洁员→经理直管」结构样本；该路径由 DEV 矩阵 managerDirect 用例行为级覆盖"
+    },
+    {
+      "name": "C-管理员6713(马金华)→本人5+经理5",
+      "ok": true,
+      "detail": {
+        "status": "RESOLVED",
+        "mode": "transmitted",
+        "got": [
+          {
+            "id": 6713,
+            "layer": "self_violator",
+            "score": 5
+          },
+          {
+            "id": 6709,
+            "layer": "direct_supervisor",
+            "score": 5
+          }
+        ]
+      }
+    },
+    {
+      "name": "D-经理6709(张万恒)→本人5",
+      "ok": true,
+      "detail": {
+        "status": "RESOLVED",
+        "mode": "transmitted",
+        "got": [
+          {
+            "id": 6709,
+            "layer": "self_violator",
+            "score": 5
+          }
+        ]
+      }
+    },
+    {
+      "name": "E-普通company(7086)每目标1分解析面",
+      "ok": true,
+      "detail": {
+        "status": "RESOLVED",
+        "mode": "transmitted",
+        "got": [
+          {
+            "id": 7085,
+            "layer": "direct_supervisor",
+            "score": 5
+          },
+          {
+            "id": 7008,
+            "layer": "escalated",
+            "score": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "F-辞职人员8253→INVALID_TARGET/0",
+      "ok": true,
+      "detail": {
+        "status": "INVALID_TARGET",
+        "mode": "none",
+        "reason": "violator-invalid",
+        "got": []
+      }
+    },
+    {
+      "name": "G-无上级样本6692(黄殿兴)→UNRESOLVED/0",
+      "ok": true,
+      "detail": {
+        "status": "UNRESOLVED",
+        "mode": "none",
+        "reason": "position-not-configured",
+        "got": []
+      }
+    },
+    {
+      "name": "H1-unknown checker→effective NULL",
+      "ok": true,
+      "detail": {
+        "value": null,
+        "scope": "unknown",
+        "overridden": true,
+        "reason": "checker-unknown(requested=company-fail-closed)"
+      }
+    },
+    {
+      "name": "H2-解析失败checker→effective NULL",
+      "ok": true,
+      "detail": {
+        "value": null,
+        "scope": "unknown",
+        "overridden": true,
+        "reason": "checker-unknown(requested=company-fail-closed)"
+      }
+    },
+    {
+      "name": "H3-company checker 纠正前端值",
+      "ok": true,
+      "detail": {
+        "value": "company",
+        "scope": "company",
+        "overridden": true,
+        "reason": "checker-is-company-scope(frontend=township_self)"
+      }
+    },
+    {
+      "name": "P1-cycle53两条辞职target保持登记未清理",
+      "ok": true,
+      "detail": [
+        "1454:白庆元:deleted=false",
+        "1453:尤清林:deleted=false"
+      ]
+    },
+    {
+      "name": "D1-三违来源(source_id非空)×目标无重复有效deduction",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "D2-全量source×目标无重复有效deduction",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "P2-部署后(21:36起)业务表写入痕迹全零",
+      "ok": true,
+      "detail": {
+        "target": 0,
+        "deduction": 0,
+        "employee": 0,
+        "assignment": 0,
+        "violation": 0,
+        "syslog": 0
+      }
+    },
+    {
+      "name": "W1-grid_inspection_records=2061",
+      "ok": true,
+      "detail": 2061
+    },
+    {
+      "name": "W2-grid_record_sync_map=2061",
+      "ok": true,
+      "detail": 2061
+    }
+  ]
+}

@@ -1,0 +1,138 @@
+{
+  "at": "2026-09-14T13:19:00.997Z",
+  "cycle": 43,
+  "pass": 20,
+  "fail": 0,
+  "results": [
+    {
+      "name": "T0 配置在位(helmet_layer_scores+管理员本人槽位)",
+      "ok": true,
+      "detail": {
+        "hls": {
+          "escalated": 1,
+          "self_violator": 5,
+          "direct_supervisor": 5
+        },
+        "admin_slots": [
+          "管理员",
+          "乡镇作业中心经理"
+        ]
+      }
+    },
+    {
+      "name": "T1 helmet(保洁员,上级管理员)=管理员-5(direct)+经理-1(escalated)",
+      "ok": true,
+      "detail": "7561"
+    },
+    {
+      "name": "T2 helmet(保洁员,经理直管)=经理-5(direct)",
+      "ok": true,
+      "detail": "7562"
+    },
+    {
+      "name": "T3 helmet(管理员)=管理员-5(self)+经理-5(direct)",
+      "ok": true,
+      "detail": "7563"
+    },
+    {
+      "name": "T4 helmet(乡镇经理)=经理-5(self)",
+      "ok": true,
+      "detail": "7564"
+    },
+    {
+      "name": "T5 普通(保洁员,上级管理员)=管理员-1+经理-1",
+      "ok": true,
+      "detail": "7565"
+    },
+    {
+      "name": "T6 普通(保洁员,经理直管)=经理-1",
+      "ok": true,
+      "detail": "7566"
+    },
+    {
+      "name": "T7 普通(管理员)=管理员-1(self)+经理-1",
+      "ok": true,
+      "detail": "7567"
+    },
+    {
+      "name": "T8 普通(乡镇经理)=经理-1(self)",
+      "ok": true,
+      "detail": "7568"
+    },
+    {
+      "name": "T9 township+helmet=0传递扣分",
+      "ok": true,
+      "detail": "7569"
+    },
+    {
+      "name": "T10 self+helmet=0传递扣分",
+      "ok": true,
+      "detail": "7570"
+    },
+    {
+      "name": "T11 岗位未配置=UNRESOLVED/0扣分",
+      "ok": true,
+      "detail": "7571"
+    },
+    {
+      "name": "T12 非正式员工=INVALID_TARGET/0扣分",
+      "ok": true,
+      "detail": "7572"
+    },
+    {
+      "name": "T13 unknown checker=fail-closed(入库NULL+0扣分+审计留痕)",
+      "ok": true,
+      "detail": {
+        "recId": "7573",
+        "stored": null,
+        "oplogDelta": 1
+      }
+    },
+    {
+      "name": "T14 confirmed下属+helmet=6702单目标-5(direct)",
+      "ok": true,
+      "detail": "7574"
+    },
+    {
+      "name": "T15 重扫×2=每目标恰一份(不重复扣分)",
+      "ok": true,
+      "detail": {}
+    },
+    {
+      "name": "T16 撤销=软删后引擎回滚扣分",
+      "ok": true,
+      "detail": "7564"
+    },
+    {
+      "name": "T-Hist 2026-08 历史违规记录数不变",
+      "ok": true,
+      "detail": {
+        "before": 824,
+        "after": 824
+      }
+    },
+    {
+      "name": "T-Clean 清理后全库扣分回归基线",
+      "ok": true,
+      "detail": {
+        "baseline": 663,
+        "end": 663,
+        "created": 13
+      }
+    },
+    {
+      "name": "T-Cap 类别上限精确复原(40/15)",
+      "ok": true,
+      "detail": [
+        {
+          "target_role": "admin",
+          "max_deduct": "40.00"
+        },
+        {
+          "target_role": "manager",
+          "max_deduct": "15.00"
+        }
+      ]
+    }
+  ]
+}
