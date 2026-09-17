@@ -218,6 +218,7 @@ dist_*/
 .trae/
 .trae-html-share-packages/
 .workbuddy/
+.workbuddy-ai/
 .playwright-cli/
 playwright-report/
 test-results/
