@@ -9,8 +9,9 @@ import { requestClient } from '#/api/request';
 /** 识别结果 */
 export interface OcrRecognizeResult {
   sourceType: 'pdf_text' | 'pdf_scan' | 'image';
-  /** 'record'：普通培训台账识别；'signin'：培训签到表 */
-  mode?: 'record' | 'signin';
+  /** 'record'：普通培训台账识别；'signin'：培训签到表（OCR 通道）；
+   *  'ai_signin'：AI 识图签到表「填写完整性」统计（一行一张表，含缺少签字人数/资料不完整） */
+  mode?: 'record' | 'signin' | 'ai_signin';
   columns: string[];
   rows: Record<string, any>[];
   /** signin 模式：签到表头部字段 + 已签到人名清单 */
@@ -24,12 +25,23 @@ export interface OcrRecognizeResult {
     untouchedTail?: number;
     signinPages?: number;
     signedTotal?: number;
+    /** AI 识图：识别模式 */
+    mode?: 'signin' | 'ledger';
+    /** AI 识图签到表：跳过的照片/空白页数 */
+    skippedPages?: number;
+    skipReasons?: { photo?: number; blank?: number; other?: number };
   };
 }
 
 /** 确认入库返回 */
 export interface OcrConfirmResult {
   inserted: number;
+  /** 签到表统计写入月度台账时的归属月份 / 未匹配姓名等 */
+  month?: string;
+  unmatched?: string[];
+  missingTotal?: number;
+  incompleteTotal?: number;
+  message?: string;
 }
 
 /** 签到表识别校验返回 */
@@ -77,10 +89,15 @@ export async function ocrRecognize(file: File): Promise<OcrRecognizeResult> {
   return r;
 }
 
-/** AI 识图：把培训台账照片交给本地 Ollama 视觉大模型，识别为结构化行（多模态较慢，超时取 40 分钟） */
-export async function aiRecognize(file: File): Promise<OcrRecognizeResult> {
+/** AI 识图：把培训台账照片交给本地 Ollama 视觉大模型，识别为结构化行（多模态较慢，超时取 40 分钟）
+ *  mode 缺省 auto：先按「培训会议签到表」做填写完整性检查，识别不到再回退通用台账识别。 */
+export async function aiRecognize(
+  file: File,
+  mode?: 'auto' | 'signin' | 'ledger',
+): Promise<OcrRecognizeResult> {
   const formData = new FormData();
   formData.append('file', file);
+  if (mode) formData.append('mode', mode);
   const r = await requestClient.post<OcrRecognizeResult>(`${BASE}/ai-recognize`, formData, {
     headers: { 'Content-Type': undefined as any },
     timeout: OCR_TIME_OUT,
@@ -110,9 +127,16 @@ export async function ocrExportExcel(params: {
   });
 }
 
-/** 确认入库（body: rows） */
-export async function ocrConfirm(rows: Record<string, any>[]): Promise<OcrConfirmResult> {
-  return requestClient.post<OcrConfirmResult>(`${BASE}/confirm`, { rows }, {
+/**
+ * 确认入库（body: rows）
+ * extra.sourceName 用于 AI 签到表统计推断归属月份（如文件名含「2026年8月」）；
+ * extra.month 可显式指定 YYYY-MM，优先级最高。
+ */
+export async function ocrConfirm(
+  rows: Record<string, any>[],
+  extra?: { month?: string; sourceName?: string },
+): Promise<OcrConfirmResult> {
+  return requestClient.post<OcrConfirmResult>(`${BASE}/confirm`, { rows, ...(extra || {}) }, {
     timeout: OCR_TIME_OUT,
   });
 }

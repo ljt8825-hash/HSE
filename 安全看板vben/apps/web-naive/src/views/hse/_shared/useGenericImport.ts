@@ -93,6 +93,18 @@ const OCR_LABEL_TO_FIELD: Record<string, string> = {
   培训方式: 'remark',
   备注: 'remark',
   说明: 'remark',
+  // —— AI 识图「培训会议签到表 · 填写完整性检查」列（映射到月度培训台账两列）——
+  // 缺少签字人数 → 列表「缺少」；资料不完整 → 列表「资料不完整」
+  页码: 'page_no',
+  班组编号: 'team_code',
+  乡镇: 'town',
+  '部门/班组': 'dept',
+  应到人数: 'expected_count',
+  实到人数: 'actual_count',
+  缺少签字人数: 'missing_signature_count',
+  资料不完整: 'incomplete_material_count',
+  新入职: 'newcomer_count',
+  空缺表头项: 'missing_fields',
 };
 
 const OCR_EXTS = ['.pdf', '.png', '.jpg', '.jpeg', '.bmp', '.webp'];
@@ -448,12 +460,16 @@ export function useGenericImport(
     }
     // OCR 模式：直接入库识别到的行
     if (ocrActive.value) {
-      ocrConfirm(ocrRows.value)
+      // AI 签到表统计写入月度台账时需按来源推断月份，故附带上文件名
+      ocrConfirm(ocrRows.value, { sourceName: ocrSourceName.value })
         .then((res) => {
           const ok = !!(res && res.inserted > 0);
+          const unit = res?.month ? '人' : '条';
           importResult.value = {
             success: ok,
-            message: ok ? `成功入库 ${res.inserted} 条` : '入库失败：未写入记录',
+            message: ok
+              ? res.message || `成功入库 ${res.inserted} ${unit}`
+              : '入库失败：未写入记录',
           };
           if (ok) {
             onRefresh?.();

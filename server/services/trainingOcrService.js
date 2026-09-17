@@ -18,9 +18,13 @@ const multer = require('multer');
 const XLSX = require('xlsx');
 
 const { pool, isConnected } = require('../config/db');
-const { resolveTrainingPersonId, resolveTrainingPersonName } = require('./trainingShared');
+const {
+  resolveTrainingPersonId, resolveTrainingPersonName, computeMonthRange,
+} = require('./trainingShared');
 const { SigninAttribution } = require('./signinAttribution');
-const { recognizeLedgerImage, VL_MODEL } = require('./ai/visionService');
+const {
+  recognizeLedgerImage, recognizeSigninSheet, VL_MODEL,
+} = require('./ai/visionService');
 
 const ok = (payload, message) => ({ __t: 'json', payload, message });
 const err = (code, message) => ({ __t: 'json', error: { code, message } });
@@ -45,7 +49,8 @@ function resolvePythonPath() {
 const OCR_SCRIPT = path.join(__dirname, '../../scripts/ocr_ledger.py');
 const SIGNIN_OCR_SCRIPT = path.join(__dirname, '../../scripts/training_signin_ocr.py');
 const PDF_RENDER_SCRIPT = path.join(__dirname, '../../scripts/pdf_render_png.py');
-const AI_PDF_MAX_PAGES = 8;
+// 签到表合集常达十余页；缺省放宽到 20 页（前端超时 40min 足够），可用环境变量收紧/放开
+const AI_PDF_MAX_PAGES = Number(process.env.AI_PDF_MAX_PAGES) || 20;
 
 // 花名册匹配/归属服务（懒加载单例，加载全量在册员工）
 let _attribution = null;
@@ -141,6 +146,18 @@ const FIELD_LABELS = {
   score: '成绩',
   trainer: '培训人',
   remark: '备注',
+  // —— 签到表「填写完整性检查」专用字段（AI 识图输出，映射到月度培训台账两列）——
+  page_no: '页码',
+  team_code: '班组编号',
+  town: '乡镇',
+  dept: '部门/班组',
+  trainee_role: '培训对象',
+  expected_count: '应到人数',
+  actual_count: '实到人数',
+  missing_signature_count: '缺少签字人数',
+  incomplete_material_count: '资料不完整',
+  newcomer_count: '新入职',
+  missing_fields: '空缺表头项',
 };
 
 // ---------- 1. 识别 ----------
@@ -244,20 +261,121 @@ function buildAiColumns(rows) {
   }
   return cols;
 }
-async function renderPdfPages(pdfPath) {
-  const candidates = [];
-  if (process.env.PDF_RENDER_PYTHON && fs.existsSync(process.env.PDF_RENDER_PYTHON)) {
-    candidates.push(process.env.PDF_RENDER_PYTHON);
+
+// 签到表「填写完整性检查」列序：核心统计列**恒定展示**（即使为 0，业务需要看到「0 缺失」）
+const AI_SIGNIN_FIELD_ORDER = [
+  'page_no', 'team_code', 'town', 'dept', 'trainer', 'trainee_role',
+  'expected_count', 'actual_count', 'missing_signature_count',
+  'incomplete_material_count', 'newcomer_count', 'missing_fields',
+];
+// 任何情况下都要透出的列（缺了就无法与「培训记录」列表的缺少/资料不完整对齐）
+const AI_SIGNIN_ALWAYS = [
+  'team_code', 'trainer', 'missing_signature_count', 'incomplete_material_count',
+];
+function buildSigninColumns(rows) {
+  const cols = [];
+  for (const f of AI_SIGNIN_FIELD_ORDER) {
+    if (AI_SIGNIN_ALWAYS.includes(f) || hasValueInRows(rows, f)) {
+      cols.push(FIELD_LABELS[f] || f);
+    }
   }
-  candidates.push('python');
+  return cols;
+}
+
+// ---------- 乡镇作业中心经理花名册（注入提示词的闭集名单） ----------
+async function loadTownManagers() {
+  if (!isConnected()) return [];
+  try {
+    const r = await pool.query(`
+      SELECT name, roster_department
+        FROM employee
+       WHERE is_deleted = false
+         AND roster_position IN ('人工片区长', '乡镇作业中心经理')
+         AND roster_department LIKE '%乡镇作业中心'
+       ORDER BY roster_department, name`);
+    const byTown = new Map();
+    for (const row of r.rows) {
+      const town = String(row.roster_department || '').replace(/乡镇作业中心\s*$/, '').trim();
+      const name = String(row.name || '').trim();
+      if (!town || !name) continue;
+      if (!byTown.has(town)) byTown.set(town, []);
+      const list = byTown.get(town);
+      if (!list.includes(name)) list.push(name);
+    }
+    return [...byTown.entries()].map(([town, names]) => ({ town, names }));
+  } catch (e) {
+    console.warn('[trainingOcr] 读取乡镇经理花名册失败：', e.message);
+    return [];
+  }
+}
+
+function formatRoster(list) {
+  if (!Array.isArray(list) || list.length === 0) return '';
+  return list.map((x) => `${x.town}：${x.names.join('、')}`).join('\n');
+}
+/** 读取 server/.env 中的某个键（进程环境变量优先，其次文件） */
+function readEnvValue(key) {
+  const fromProc = process.env[key];
+  if (fromProc && String(fromProc).trim()) return String(fromProc).trim();
   try {
     const envFile = fs.readFileSync(path.join(__dirname, '../.env'), 'utf8');
-    const m = envFile.match(/^PYTHON_PATH\s*=\s*(.+)$/m);
-    if (m) {
-      const p = m[1].trim().replace(/^["']|["']$/g, '');
-      if (fs.existsSync(p)) candidates.push(p);
-    }
+    const m = envFile.match(new RegExp(`^${key}\\s*=\\s*(.+)$`, 'm'));
+    if (m) return m[1].trim().replace(/^["']|["']$/g, '');
   } catch (e) { /* 忽略 */ }
+  return '';
+}
+
+/**
+ * 枚举可用于渲染 PDF 的 Python 解释器。
+ * 痛点：PyMuPDF(fitz) 只装在某一个解释器上（本机会话里是系统 Python 3.10），
+ * 而 PYTHON_PATH / PATH 上的 python 可能是另一个没装 fitz 的版本，导致渲染必失败。
+ * 这里把「环境变量指定 → 命令名 → 常见安装目录扫描」全部列为候选，
+ * renderPdfPages 会依次尝试（脚本在 fitz 缺失时以 code=2 退出），直到某个能跑通。
+ */
+function listRenderPythonCandidates() {
+  const seen = new Set();
+  const push = (p) => {
+    if (!p) return;
+    const s = String(p).trim();
+    if (!s || seen.has(s)) return;
+    if (path.isAbsolute(s) && !fs.existsSync(s)) return;
+    seen.add(s);
+  };
+
+  push(readEnvValue('PDF_RENDER_PYTHON'));
+  push(readEnvValue('PYTHON_PATH'));
+  push('python');
+  push('python3');
+
+  // 常见安装目录扫描（Windows / 托管运行时）
+  const home = os.homedir();
+  const roots = [
+    path.join(home, 'AppData/Local/Programs/Python'),
+    path.join(home, '.workbuddy-ai/binaries/python/versions'),
+    path.join(home, 'anaconda3'),
+    path.join(home, 'miniconda3'),
+    'C:/ProgramData/Anaconda3',
+    'C:/ProgramData/miniconda3',
+    'C:/Python313', 'C:/Python312', 'C:/Python311', 'C:/Python310', 'C:/Python39',
+  ];
+  for (const root of roots) {
+    try {
+      const exe = path.join(root, 'python.exe');
+      if (fs.existsSync(exe)) push(exe);
+      if (!fs.existsSync(root)) continue;
+      const entries = fs.readdirSync(root, { withFileTypes: true });
+      for (const e of entries) {
+        if (!e.isDirectory()) continue;
+        const p = path.join(root, e.name, 'python.exe');
+        if (fs.existsSync(p)) push(p);
+      }
+    } catch (e) { /* 忽略无权限/不存在的目录 */ }
+  }
+  return [...seen];
+}
+
+async function renderPdfPages(pdfPath) {
+  const candidates = listRenderPythonCandidates();
 
   const outDir = path.join(os.tmpdir(), `hse-ai-pdf-${Date.now()}`);
   fs.mkdirSync(outDir, { recursive: true });
@@ -284,18 +402,25 @@ async function renderPdfPages(pdfPath) {
     });
   });
 
-  let lastErr = null;
+  const failures = [];
   for (let i = 0; i < candidates.length; i += 1) {
+    const py = candidates[i];
     try {
-      const pages = await run(candidates[i]);
+      const pages = await run(py);
+      if (i > 0) {
+        console.warn(`[trainingOcr] PDF 渲染已回退到解释器：${py}（前 ${i} 个候选不可用）`);
+      }
       return { pages, outDir };
     } catch (e) {
-      lastErr = e;
-      if (i < candidates.length - 1) continue;
+      failures.push(`${py} → ${e.message}`);
     }
   }
   try { fs.rmSync(outDir, { recursive: true, force: true }); } catch (e) { /* 忽略 */ }
-  throw lastErr || new Error('PDF 渲染失败');
+  throw new Error(
+    `PDF 渲染失败：已尝试 ${candidates.length} 个 Python 解释器均不可用（多为缺少 PyMuPDF）。`
+    + `请执行「pip install pymupdf」或设置 PDF_RENDER_PYTHON 指向已安装 PyMuPDF 的解释器。`
+    + `明细：${failures.slice(0, 3).join(' | ')}`,
+  );
 }
 
 async function aiRecognize(req) {
@@ -305,27 +430,96 @@ async function aiRecognize(req) {
     if (!req.file) return err(-2, '未接收到文件');
     const originalName = (req.file.originalname || '').replace(/\.[^.]+$/, '');
     const ext = path.extname(tmp).toLowerCase();
-    let rows = [];
-    let scannedPages = 0;
+    // mode: auto(默认，先按签到表试，识别不到再回退通用台账) | signin(强制签到表) | ledger(强制通用台账)
+    const mode = String((req.body && req.body.mode) || 'auto').toLowerCase();
+
+    // 统一成「页图 + 页码」列表
+    let images = [];
+    let totalPages = 0;
     if (ext === '.pdf') {
       const { pages, outDir } = await renderPdfPages(tmp);
       pdfDir = outDir;
-      const target = pages.slice(0, AI_PDF_MAX_PAGES);
-      for (const page of target) {
-        const r = await recognizeLedgerImage({ filePath: page });
-        rows.push(...(r.rows || []));
-        scannedPages += 1;
-      }
-      if (pages.length > AI_PDF_MAX_PAGES) {
-        scannedPages = pages.length;
-      }
+      totalPages = pages.length;
+      images = pages.slice(0, AI_PDF_MAX_PAGES).map((p, i) => ({ path: p, pageNo: i + 1 }));
     } else if (AI_IMG_EXTS.includes(ext)) {
-      const r = await recognizeLedgerImage({ filePath: tmp });
-      rows = r.rows || [];
+      totalPages = 1;
+      images = [{ path: tmp, pageNo: 1 }];
     } else {
       return err(-5, 'AI 识图仅支持图片文件（PNG / JPG / BMP / WebP）或 PDF');
     }
-    const skippedPages = scannedPages > AI_PDF_MAX_PAGES ? scannedPages - AI_PDF_MAX_PAGES : 0;
+
+    let rows = [];
+    let usedMode = 'ledger';
+    let skipped = 0;
+    const skipReasons = { photo: 0, blank: 0, other: 0 };
+
+    // ---- 通道 B：签到表「填写完整性检查」 ----
+    if (mode === 'auto' || mode === 'signin') {
+      const rosterText = formatRoster(await loadTownManagers());
+      const signinRows = [];
+      for (const img of images) {
+        // eslint-disable-next-line no-await-in-loop
+        const r = await recognizeSigninSheet({
+          filePath: img.path,
+          rosterText,
+          pageNo: img.pageNo,
+        });
+        if (r.skipped) {
+          skipped += 1;
+          if (Object.prototype.hasOwnProperty.call(skipReasons, r.reason)) skipReasons[r.reason] += 1;
+          else skipReasons.other += 1;
+          continue;
+        }
+        signinRows.push(r.row);
+      }
+      if (signinRows.length > 0 || mode === 'signin') {
+        usedMode = 'signin';
+        rows = signinRows;
+      }
+    }
+
+    // ---- 通道 A：通用培训台账文字识别（auto 模式下签到表未命中才回退） ----
+    if (usedMode !== 'signin') {
+      for (const img of images) {
+        // eslint-disable-next-line no-await-in-loop
+        const r = await recognizeLedgerImage({ filePath: img.path });
+        rows.push(...(r.rows || []));
+      }
+    }
+
+    const tailPages = Math.max(0, totalPages - images.length);
+    const skipDesc = [
+      skipReasons.photo ? `照片 ${skipReasons.photo} 页` : '',
+      skipReasons.blank ? `空白 ${skipReasons.blank} 页` : '',
+      skipReasons.other ? `其它 ${skipReasons.other} 页` : '',
+    ].filter(Boolean).join('、');
+
+    if (usedMode === 'signin') {
+      return ok(
+        {
+          sourceType: 'ai_image',
+          mode: 'ai_signin',
+          columns: buildSigninColumns(rows),
+          rows,
+          message: rows.length
+            ? `AI 识别到 ${rows.length} 张签到表${skipped ? `（跳过 ${skipDesc}）` : ''}`
+            : `AI 未识别到签到表${skipped ? `（跳过 ${skipDesc}）` : ''}`,
+          sourceName: originalName,
+          meta: {
+            model: VL_MODEL,
+            channel: 'ollama-vl',
+            mode: 'signin',
+            totalPages,
+            scannedPages: images.length,
+            skippedPages: skipped,
+            skipReasons,
+            tailPages,
+          },
+        },
+        rows.length ? 'AI 识别成功，请核对「缺少签字人数 / 资料不完整」' : 'AI 识图完成，但未识别到签到表',
+      );
+    }
+
     return ok(
       {
         sourceType: 'ai_image',
@@ -333,10 +527,10 @@ async function aiRecognize(req) {
         columns: buildAiColumns(rows),
         rows,
         message: rows.length
-          ? `AI 识别到 ${rows.length} 行${skippedPages ? `（跳过 ${skippedPages} 页）` : ''}`
+          ? `AI 识别到 ${rows.length} 行${tailPages ? `（仅处理前 ${AI_PDF_MAX_PAGES} 页，跳过 ${tailPages} 页）` : ''}`
           : 'AI 未能识别到有效培训记录',
         sourceName: originalName,
-        meta: { model: VL_MODEL, channel: 'ollama-vl' },
+        meta: { model: VL_MODEL, channel: 'ollama-vl', mode: 'ledger', totalPages, tailPages },
       },
       rows.length ? 'AI 识别成功，请核对预览' : 'AI 识图完成，但未识别到有效培训记录',
     );
@@ -440,11 +634,149 @@ function normalizeDate(v) {
   return `${y}-${pad(mo)}-${pad(d)}`;
 }
 
+// ---------- 2.5 AI 签到表统计 → 月度培训台账（hse_training_ledger_monthly） ----------
+// 映射口径（与 Excel「月度培训台账」导入一致）：
+//   缺少签字人数 → missing_count（列表「缺少」）
+//   资料不完整   → incomplete_count（列表「资料不完整」）
+//   应到/实到    → expected_count / actual_count
+// 按「培训人（乡镇作业中心经理）」聚合；同月同培训人重复上传为覆盖而非累加（幂等）。
+const SIGNIN_METRIC_KEYS = ['missing_signature_count', 'incomplete_material_count', 'team_code'];
+function isSigninMetricRows(rows) {
+  return rows.some((r) => r && typeof r === 'object'
+    && SIGNIN_METRIC_KEYS.some((k) => r[k] !== undefined && r[k] !== null && r[k] !== ''));
+}
+
+/** 从来源文件名推断月份：2026年8月 / 2026-08 / 202608 / 8月 → YYYY-MM */
+function resolveMonthFromText(text) {
+  const s = String(text || '');
+  let m = s.match(/(\d{4})\s*[年\-./]?\s*(\d{1,2})\s*月/);
+  if (m) return `${m[1]}-${String(m[2]).padStart(2, '0')}`;
+  m = s.match(/(?:^|[^\d])(\d{4})(\d{2})(?:[^\d]|$)/);
+  if (m) {
+    const mm = Number(m[2]);
+    if (mm >= 1 && mm <= 12) return `${m[1]}-${String(mm).padStart(2, '0')}`;
+  }
+  m = s.match(/(\d{1,2})\s*月/);
+  if (m) {
+    const mm = Number(m[1]);
+    if (mm >= 1 && mm <= 12) return `${new Date().getFullYear()}-${String(mm).padStart(2, '0')}`;
+  }
+  return '';
+}
+
+const toInt0 = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.round(n) : 0;
+};
+
+async function confirmSigninMetrics(req, rows) {
+  try {
+    if (!isConnected()) return err(-3, '当前为内存模式，不支持入库');
+    const body = req.body || {};
+    const month = /^\d{4}-\d{2}$/.test(String(body.month || ''))
+      ? String(body.month)
+      : (resolveMonthFromText(body.sourceName || '') || computeMonthRange(null).monthLabel);
+
+    // 按培训人（经理）姓名聚合
+    const agg = new Map();
+    let noManager = 0;
+    for (const r of rows) {
+      if (!r || typeof r !== 'object') continue;
+      const name = cleanNoise(r.trainer || r.trainer_name || r.name || '');
+      if (!name) { noManager += 1; continue; }
+      const cur = agg.get(name)
+        || { name, expected: 0, actual: 0, missing: 0, incomplete: 0, newcomer: 0, sheets: 0 };
+      cur.expected += toInt0(r.expected_count);
+      cur.actual += toInt0(r.actual_count);
+      cur.missing += toInt0(r.missing_signature_count);
+      cur.incomplete += toInt0(r.incomplete_material_count);
+      cur.newcomer += toInt0(r.newcomer_count);
+      cur.sheets += 1;
+      agg.set(name, cur);
+    }
+    if (agg.size === 0) {
+      return err(-7, '未能确定「培训人（经理）」姓名，无法写入月度台账。请在预览中补全「培训人」列后重试。');
+    }
+
+    const names = [...agg.keys()];
+    const empRes = await pool.query(
+      `SELECT employee_id, name FROM v_employee_org_full
+        WHERE is_deleted = false AND is_current = true AND name = ANY($1)`,
+      [names],
+    );
+    const nameToId = new Map();
+    empRes.rows.forEach((r) => {
+      if (!nameToId.has(r.name)) nameToId.set(r.name, r.employee_id);
+    });
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      // 幂等：清掉本通道（ai-vision）同月同培训人的历史结果，重复上传即覆盖而非累加
+      await client.query(
+        `DELETE FROM hse_training_ledger_monthly
+          WHERE month = $1 AND source = 'ai-vision' AND trainer_name = ANY($2)`,
+        [month, names],
+      );
+      for (const item of agg.values()) {
+        await client.query(
+          `INSERT INTO hse_training_ledger_monthly
+             (trainer_id, trainer_name, month, expected_count, actual_count,
+              missing_count, incomplete_count, source)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'ai-vision')
+           ON CONFLICT (trainer_id, month) DO UPDATE SET
+             trainer_name = EXCLUDED.trainer_name,
+             expected_count = EXCLUDED.expected_count,
+             actual_count = EXCLUDED.actual_count,
+             missing_count = EXCLUDED.missing_count,
+             incomplete_count = EXCLUDED.incomplete_count,
+             source = 'ai-vision',
+             updated_at = CURRENT_TIMESTAMP`,
+          [
+            nameToId.get(item.name) || null,
+            item.name, month, item.expected, item.actual, item.missing, item.incomplete,
+          ],
+        );
+      }
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+
+    const values = [...agg.values()];
+    const missingTotal = values.reduce((s, x) => s + x.missing, 0);
+    const incompleteTotal = values.reduce((s, x) => s + x.incomplete, 0);
+    const unmatched = names.filter((n) => !nameToId.has(n));
+    return ok(
+      {
+        inserted: agg.size,
+        month,
+        unmatched,
+        noManager,
+        missingTotal,
+        incompleteTotal,
+        expectedTotal: values.reduce((s, x) => s + x.expected, 0),
+        actualTotal: values.reduce((s, x) => s + x.actual, 0),
+      },
+      `已写入 ${month} 月度台账 ${agg.size} 人：缺少 ${missingTotal}、资料不完整 ${incompleteTotal}`
+      + (unmatched.length ? `（${unmatched.join('、')} 未在花名册匹配到）` : '')
+      + (noManager ? `；${noManager} 张表未识别出培训人，已跳过` : ''),
+    );
+  } catch (e) {
+    return err(-1, `写入月度台账失败: ${e.message}`);
+  }
+}
+
 // ---------- 3. 确认入库 ----------
 async function confirm(req) {
   try {
     const rows = Array.isArray(req.body && req.body.rows) ? req.body.rows : [];
     if (rows.length === 0) return err(-2, '没有可入库的数据');
+    // 签到表「填写完整性」统计行：写入月度培训台账（缺少/资料不完整），而非逐人培训记录
+    if (isSigninMetricRows(rows)) return confirmSigninMetrics(req, rows);
     if (!isConnected()) {
       return err(-3, '当前为内存模式，不支持入库');
     }
