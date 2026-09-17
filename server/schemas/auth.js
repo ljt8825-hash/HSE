@@ -6,6 +6,12 @@ const loginSchema = z.object({
   password: z.string().min(1, '密码不能为空').max(128, '密码不能超过128字符')
 });
 
+// 移动端手机号+密码登录校验（H5-GRID-LOGIN-02）
+const mobileLoginSchema = z.object({
+  phone: z.string().regex(/^1\d{10}$/, '请输入正确的 11 位手机号'),
+  password: z.string().min(1, '密码不能为空').max(128, '密码不能超过128字符')
+});
+
 // 修改密码校验
 const changePasswordSchema = z.object({
   oldPassword: z.string().min(1, '旧密码不能为空').max(128),
@@ -45,6 +51,7 @@ const registerSchema = z.object({
 
 module.exports = {
   loginSchema,
+  mobileLoginSchema,
   registerSchema,
   changePasswordSchema,
   profileSchema

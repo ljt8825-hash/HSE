@@ -103,6 +103,8 @@ const PUBLIC_ROUTES = [
   { method: 'POST', path: '/auth/refresh' },
   { method: 'POST', path: '/auth/logout' },
   { method: 'GET', path: '/health' },
+  // H5-GRID-LOGIN-02: 移动端手机号+密码登录（独立入口，匿名必需；不改变 PC /auth/login 语义）
+  { method: 'POST', path: '/mobile/auth/login' },
 ];
 
 function isPublicRoute(method, path) {

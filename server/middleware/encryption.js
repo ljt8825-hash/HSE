@@ -95,6 +95,12 @@ function decryptMiddleware(...fields) {
       if (data && data.code === 0 && data.data) {
         if (Array.isArray(data.data.list)) {
           data.data.list = data.data.list.map(item => decryptFields(item, fields));
+        } else if (Array.isArray(data.data)) {
+          // 响应体 data 本身即裸数组（如 GET /employees/selector）。
+          // 若直接落入下方 object 分支，decryptFields 内的 `{...obj}`
+          // 会把数组展开成数字键对象（{"0":…}），破坏数组契约。
+          // 故此处先行拦截：逐项解密，仍返回数组。
+          data.data = data.data.map(item => decryptFields(item, fields));
         } else if (typeof data.data === 'object') {
           data.data = decryptFields(data.data, fields);
         }
