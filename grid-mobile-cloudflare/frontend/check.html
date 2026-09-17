@@ -53,6 +53,17 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
 .opt-card .opt-title{font-size:24px;font-weight:600}
 .opt-card .opt-sub{font-size:15px;color:var(--t3)}
 .opt-card.accent{border:2px solid var(--danger)}
+/* 单选卡（普通巡查结果）：必须一眼看出点了哪一个 —— 高亮边框 + 淡蓝底 + 右侧勾选标记。
+   用 box-shadow 画外圈而非加粗 border，避免选中瞬间卡片尺寸跳动。 */
+.opt-group{display:flex;flex-direction:column;gap:12px}
+.opt-card.selectable{position:relative;padding-right:76px;transition:border-color .15s,background .15s,box-shadow .15s}
+.opt-card.selectable .opt-mark{position:absolute;right:22px;top:50%;transform:translateY(-50%);width:26px;height:26px;border-radius:50%;border:2px solid var(--line);background:#fff;display:flex;align-items:center;justify-content:center;transition:border-color .15s,background .15s}
+.opt-card.selectable .opt-mark svg{opacity:0;transition:opacity .15s}
+.opt-card.selectable.selected{border-color:var(--primary);background:var(--primary-soft);box-shadow:0 0 0 1px var(--primary)}
+.opt-card.selectable.selected .opt-title{color:var(--primary)}
+.opt-card.selectable.selected .opt-sub{color:var(--primary)}
+.opt-card.selectable.selected .opt-mark{border-color:var(--primary);background:var(--primary)}
+.opt-card.selectable.selected .opt-mark svg{opacity:1}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .vio-cell{display:flex;align-items:center;justify-content:center;height:88px;border-radius:16px;background:var(--card);border:1px solid var(--line);font-size:19px;font-weight:600;cursor:pointer}
 .vio-cell:active{transform:scale(.96);border-color:var(--primary)}
@@ -136,6 +147,7 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
   .btn-primary,.btn-ghost{height:60px;font-size:20px}
   .stat-card{height:66px} .stat-card .num{font-size:22px}
   .opt-card{padding:18px} .opt-card .opt-title{font-size:21px}
+  .opt-card.selectable{padding-right:68px}
   .person-row{padding:14px} .search-bar{height:60px}
   .photo-box{min-height:150px}
 }
@@ -431,13 +443,17 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
     <div class="photo-box"><img id="patrol-photo" alt="现场照片"></div>
     <div class="field-label">这不是三违</div>
     <div class="field-sub">请选择本次巡查结果</div>
-    <div class="opt-card" data-patrol="一般问题">
-      <div class="opt-title">一般问题</div>
-      <div class="opt-sub">已通知相关人员尽快处理</div>
-    </div>
-    <div class="opt-card" data-patrol="现场正常">
-      <div class="opt-title">现场正常</div>
-      <div class="opt-sub">无异常情况，完成本次巡查</div>
+    <div class="opt-group" role="radiogroup" aria-label="本次巡查结果">
+      <div class="opt-card selectable" data-patrol="一般问题" role="radio" aria-checked="false" tabindex="0">
+        <div class="opt-title">一般问题</div>
+        <div class="opt-sub">已通知相关人员尽快处理</div>
+        <div class="opt-mark" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M5 12.5l4.5 4.5L19 7" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      </div>
+      <div class="opt-card selectable" data-patrol="现场正常" role="radio" aria-checked="false" tabindex="0">
+        <div class="opt-title">现场正常</div>
+        <div class="opt-sub">无异常情况，完成本次巡查</div>
+        <div class="opt-mark" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M5 12.5l4.5 4.5L19 7" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      </div>
     </div>
     <button class="btn-primary" id="btn-patrol-done" disabled>完成检查</button>
   </div>
@@ -859,7 +875,19 @@ function startCheck(){
   // 后台定位若在此期间成功即会自动带上，失败则该条记录定位留空（不影响记录本身）。
   draft = { scenePhoto: null, behavior: null, person: null, patrolResult: null, afterPhoto: null };
   resetScenePhotoUI();
+  renderPatrolChoice();   // 清掉上一次的选中高亮，避免「看着选过了、其实没选」
   showView("photo");
+}
+// 普通巡查结果是单选：把「草稿值」与「可见的选中态」绑成一件事，只此一处渲染。
+// 之前只改了草稿与按钮 disabled，卡片本身没有任何变化 ⇒ 用户点完看不出选了哪个。
+function renderPatrolChoice(){
+  const cards = $$("[data-patrol]");
+  cards.forEach(el => {
+    const on = el.dataset.patrol === draft.patrolResult;
+    el.classList.toggle("selected", on);
+    el.setAttribute("aria-checked", on ? "true" : "false");
+  });
+  $("#btn-patrol-done").disabled = !draft.patrolResult;
 }
 // 拍照前：显示拍照入口；拍完后：收起入口、露出「下一步」，照片本身即重拍入口
 function resetScenePhotoUI(){
@@ -1285,7 +1313,7 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#btn-photo-next").onclick = () => showView("classify");
 
   // 分类
-  $("#opt-no").onclick = () => { $("#patrol-photo").src = draft.scenePhoto; $("#btn-patrol-done").disabled = true; draft.patrolResult = null; showView("patrol"); };
+  $("#opt-no").onclick = () => { $("#patrol-photo").src = draft.scenePhoto; draft.patrolResult = null; renderPatrolChoice(); showView("patrol"); };
   $("#opt-yes").onclick = () => { session.role === "公司管理" ? showView("handle") : (renderVioGrid(), showView("vio")); };
 
   // 三违宫格 → 选人
@@ -1367,10 +1395,11 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#file-album-2").onchange = e => { if(e.target.files[0]) compressImage(e.target.files[0], setAfterPhoto); e.target.value = ""; };
   $("#btn-submit-rectify").onclick = submitRectify;
 
-  // 巡查
-  $$("[data-patrol]").forEach(el => el.onclick = () => {
-    draft.patrolResult = el.dataset.patrol;
-    $("#btn-patrol-done").disabled = false;
+  // 巡查结果（单选）：点哪个哪个高亮；键盘 Enter/Space 等价
+  $$("[data-patrol]").forEach(el => {
+    const pick = () => { draft.patrolResult = el.dataset.patrol; renderPatrolChoice(); };
+    el.onclick = pick;
+    el.onkeydown = e => { if(e.key === "Enter" || e.key === " "){ e.preventDefault(); pick(); } };
   });
   $("#btn-patrol-done").onclick = () => {
     const rec = makeRecord({ type: "巡查", patrolResult: draft.patrolResult, behavior: null, personId: null, personName: "" });
