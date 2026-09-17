@@ -26,7 +26,7 @@ export function storageConfig(env) {
       backend: 'feishu',
       fileId: env.FS_APP_TOKEN,
       identitySheetId: env.FS_IDENTITY_TABLE_ID,
-      rosterSheetId: env.FS_ROSTER_TABLE_ID, // ⚠️ 已被 rosterSource() 取代（飞书空壳表）；仅为兼容保留，勿在新代码中读
+      rosterSheetId: env.FS_ROSTER_TABLE_ID, // 员工花名册（1291 人；登录/选人/网格解析共用，2026-09）
       ledgerSheetId: env.FS_LEDGER_TABLE_ID, // 网格长信息台账（登录人员唯一来源，2026-09）
       testSheetId: env.FS_PATROL_TEST_TABLE_ID,
       prodSheetId: env.FS_PATROL_PRODUCTION_TABLE_ID,
@@ -37,7 +37,7 @@ export function storageConfig(env) {
     backend: 'wps',
     fileId: env.WPS_DBSHEET_FILE_ID,
     identitySheetId: env.WPS_DBSHEET_IDENTITY_SHEET_ID,
-    rosterSheetId: env.IDENTITY_ROSTER_SHEET_ID || '11',
+    rosterSheetId: env.WPS_DBSHEET_ROSTER_SHEET_ID || env.IDENTITY_ROSTER_SHEET_ID,
     testSheetId: env.WPS_DBSHEET_TEST_SHEET_ID,
     prodSheetId: env.MOBILE_PATROL_TARGET_SHEET_ID, // 生产巡查目标=Sheet15「生产用台账」（CF-WPS-17），非三违 Sheet3
     uploadSupported: true,
@@ -45,27 +45,17 @@ export function storageConfig(env) {
 }
 
 // ----------------------------------------------------------------------------
-// 花名册权威来源（2026-09-17 业务方明确：「花名册」在 WPS 多维表格里）
+// 花名册说明（2026-09-17 业务方明确：花名册 = 飞书多维表格里的「花名册」表）
 // ----------------------------------------------------------------------------
-// 事实：WPS 多维表格 Sheet 11「员工信息维护」= 1291 名正式员工的真实花名册，
-//   字段 员工编码/姓名/性别/年龄/所属部门/职位/用工关系状态/负责区域（在职）/直接上级。
-//   飞书侧同名表（FS_ROSTER_TABLE_ID）只是空壳（仅 1 条测试数据），无可用人员数据。
-// 结论：花名册「读」与 STORAGE_BACKEND 解耦，恒走 WPS Sheet 11；
-//   而身份/巡查记录/台账仍按 STORAGE_BACKEND（生产 = 飞书）写入，互不影响。
-// 影响面：① /api/mobile/roster（选人）② resolvePatrolGrids（巡查网格解析）——
-//   后者原先读飞书空壳表，导致真实账号网格恒为 unresolved，本改动同时修复该缺陷。
-// 应急回落：env.ROSTER_BACKEND = 'feishu' 可强制切回飞书花名册（仅测试/应急，默认不设）。
-export function rosterSource(env) {
-  if (String(env.ROSTER_BACKEND || '').toLowerCase() === 'feishu') {
-    return { backend: 'feishu', adapter: feishuAdapter, fileId: env.FS_APP_TOKEN, sheetId: env.FS_ROSTER_TABLE_ID };
-  }
-  return {
-    backend: 'wps',
-    adapter: wpsAdapter,
-    fileId: env.WPS_DBSHEET_FILE_ID,
-    sheetId: env.IDENTITY_ROSTER_SHEET_ID || '11',
-  };
-}
+// 事实：飞书 base 内存在一张独立表「花名册」（FS_ROSTER_TABLE_ID），共 1291 名正式员工，
+//   16 列：员工编码 / 姓名 / 所属部门 / 职位 / 性别 / 年龄 / 身份证号码 / 出生日期 /
+//         入职日期 / 直接上级 / 用工关系状态 / 入司日期 / 离职日期 /
+//         完整度百分比 / 负责区域（在职）/ 负责区域（离职）。
+//   · 所属部门 = 班组名（「宁城街道一班」），与登录台账口径一致 → 选人按此收敛
+//   · 负责区域（在职）= 网格串（「郑庄村」「专业队」）→ 巡查网格解析按 员工编码 精确命中
+//   注意：同 base 内另一张「H5花名册表」（tblO3A9wDnA9Lm74）只有 1 条测试数据，不是花名册。
+// 花名册「读」统一走 storageConfig(env).rosterSheetId —— 与 STORAGE_BACKEND 同源，
+//   生产 = 飞书；无需额外的后端交叉开关。
 
 // 通用幂等预查（两后端共用）：扫描目标表的 client_request_id，命中返回既有记录 id
 export async function findExistingByClientRequestId(adapter, env, fileId, sheetId, clientReqIds) {

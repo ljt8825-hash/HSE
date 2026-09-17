@@ -33,10 +33,12 @@
 // 2026-09 改版：密码改为派生规则（姓名首字母+手机号后4位）+常量时间比较，不再依赖 bcryptjs
 
 // ---- Phase B：存储后端适配层（WPS / 飞书 可切换，零行为变更）----
-import { getAdapter, storageConfig, findExistingByClientRequestId, rosterSource } from './storage/index.js';
+import { getAdapter, storageConfig, findExistingByClientRequestId } from './storage/index.js';
 import { pinyinInitials } from './pinyin-init.js'; // 姓名拼音首字母（构建期压缩表，零依赖）
 // WPS 附件上传原语（handleUploadImage 的 WPS 分支）仍直接依赖 getAppToken
 import { getAppToken } from './storage/wpsAdapter.js';
+// CF-WPS-21：离线逆地理编码（宁津县乡镇/街道边界内置，零外部依赖）
+import { regeoNingjin, validLatLng, GEO_TOWNS } from './geo-regeo.js';
 
 
 
@@ -1020,7 +1022,7 @@ async function handleOrgSubordinates(request, env) {
 
 // ---- GET /api/mobile/roster?q=&area=&limit= ----
 // 真实作业人员花名册。字段容错映射：表里有哪些列就下发哪些（业务后续加列无需改代码）
-// 数据源 = rosterSource(env) → WPS Sheet 11「员工信息维护」（1291 名正式员工，见 storage/index.js 注释）
+// 数据源 = storageConfig(env).rosterSheetId → 飞书多维表格「花名册」表（1291 名正式员工，见 storage/index.js 注释）
 const ROSTER_FIELD_ALIASES = {
   code: ['员工编码', '工号', '员工编号'],
   name: ['姓名'],
@@ -1060,18 +1062,18 @@ function rosterCacheTtl(env) {
   const n = Number(env.ROSTER_CACHE_TTL_MS || 0);
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
-async function loadRosterRows(env) {
-  const src = rosterSource(env);
-  if (!src.fileId || !src.sheetId) {
+async function loadRosterRows(env, cfg) {
+  const adapter = getAdapter(env);
+  if (!cfg.fileId || !cfg.rosterSheetId) {
     const e = new Error('roster not configured');
     e.notConfigured = true;
     throw e;
   }
   const ttl = rosterCacheTtl(env);
-  const key = `${src.backend}|${src.fileId}|${src.sheetId}`;
+  const key = `${cfg.backend}|${cfg.fileId}|${cfg.rosterSheetId}`;
   const now = Date.now();
   if (ttl > 0 && rosterCache.rows && rosterCache.key === key && now - rosterCache.at < ttl) return rosterCache.rows;
-  const rows = (await src.adapter.scanRecords(env, src.fileId, src.sheetId)).map(mapRosterRecord);
+  const rows = (await adapter.scanRecords(env, cfg.fileId, cfg.rosterSheetId)).map(mapRosterRecord);
   if (ttl > 0) rosterCache = { key, at: now, rows };
   return rows;
 }
@@ -1105,9 +1107,10 @@ async function handleRoster(request, env) {
   const scopedToSelf = !area && !q;
   if (scopedToSelf) area = meDept;
 
+  const cfg = storageConfig(env);
   let all;
   try {
-    all = await loadRosterRows(env);
+    all = await loadRosterRows(env, cfg);
   } catch (e) {
     if (e && e.notConfigured) return errRes('ROSTER_NOT_CONFIGURED', '花名册未配置', 503, corsHeaders(origin));
     return errRes('UPSTREAM_ERROR', '花名册暂不可用，请稍后再试', 502, corsHeaders(origin));
@@ -1128,9 +1131,88 @@ async function handleRoster(request, env) {
   return jsonRes({
     success: true, code: 'OK',
     total: hits.length, rosterSize: active.length, truncated: hits.length > limit,
-    source: rosterSource(env).backend,
+    source: cfg.backend,
     filters: { q, area, scopedToSelf },
     items,
+  }, 200, corsHeaders(origin));
+}
+
+// ============================================================================
+// CF-WPS-21 —— H5 定位逆地理编码（GPS 经纬度 → 乡镇/街道 地理位置）
+// ----------------------------------------------------------------------------
+// 背景：H5 首页定位行原为占位文案「当前网格辖区」。业务要求改为由经纬度反查真实位置
+//       （乡镇—村庄级），替代无意义的占位。
+// 实现（两段式，默认只跑第一段）：
+//   ① 离线判定（默认、恒可用）：内置宁津县 12 个乡镇/街道边界（GCJ-02，见 geo-ningjin-data.js），
+//      手机 GPS(WGS-84) → GCJ-02 → 点落面 → 「宁津县柴胡店镇」。
+//      为什么离线优先：乡镇上信号差，外部逆地理 API 需要 key 且断网即失败；
+//      离线判定零依赖、零延迟、可离线单测（乡镇级准确率已用 1.7 万点网格与原始边界比对验证）。
+//   ② 高德增强（可选）：env.AMAP_WEB_KEY 已配置时，由 Worker 侧再调一次高德 Web 服务逆地理编码，
+//      补全到村级/POI 级（address 更细）。**注意必须是「Web 服务」类型的 key**——
+//      vben 前端用的是 JS API key（2dbd01fb…），在 REST 端点会返回 USERKEY_PLAT_NOMATCH。
+//      失败/未配置一律静默回落 ①，绝不因外部依赖影响定位展示。
+// 安全纪律：只读、Session 鉴权、不落库、不写台账；返回体只含地理描述，不含任何凭据。
+// ============================================================================
+
+async function amapRegeo(env, gcjLng, gcjLat) {
+  const key = String(env.AMAP_WEB_KEY || '').trim();
+  if (!key) return null;
+  const url = `https://restapi.amap.com/v3/geocode/regeo?key=${encodeURIComponent(key)}`
+    + `&location=${gcjLng},${gcjLat}&radius=500&extensions=base&roadlevel=0`;
+  const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+  const timer = ctl ? setTimeout(() => ctl.abort(), 4000) : null;
+  try {
+    const res = await fetch(url, ctl ? { signal: ctl.signal } : undefined);
+    const j = await res.json();
+    if (!j || j.status !== '1' || !j.regeocode) return null;
+    const rg = j.regeocode;
+    const ac = rg.addressComponent || {};
+    return {
+      formatted: String(rg.formatted_address || '').slice(0, 120),
+      township: String(ac.township || '').slice(0, 40),
+      neighborhood: fieldText(ac.neighborhood).slice(0, 60),
+    };
+  } catch {
+    return null;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+// ---- GET /api/mobile/geo/regeo?lat=&lng= ----
+async function handleGeoRegeo(request, env) {
+  const origin = corsOrigin(request, env);
+  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
+  if (request.method !== 'GET') return errRes('METHOD_NOT_ALLOWED', '不支持的请求方法', 405, corsHeaders(origin));
+  if (!env.WORKER_SESSION_SECRET) return errRes('SESSION_NOT_CONFIGURED', '会话密钥未配置', 503, corsHeaders(origin));
+  const payload = await verifyWorkerSession(bearerToken(request), env.WORKER_SESSION_SECRET);
+  if (!payload) return errRes('UNAUTHORIZED', '未认证或登录态失效', 401, corsHeaders(origin));
+
+  const url = new URL(request.url);
+  const lat = Number(url.searchParams.get('lat'));
+  const lng = Number(url.searchParams.get('lng'));
+  if (!validLatLng(lat, lng)) return errRes('GEO_INVALID_COORD', '定位坐标不合法', 400, corsHeaders(origin));
+
+  const base = regeoNingjin(lat, lng);
+  let detail = null;
+  const enhanced = await amapRegeo(env, base.gcj[0], base.gcj[1]);
+  if (enhanced && enhanced.formatted) {
+    detail = enhanced;
+    base.address = enhanced.formatted;
+    base.source = 'amap';
+  }
+  return jsonRes({
+    success: true, code: 'OK',
+    input: { lat, lng },
+    county: base.county,
+    town: base.town,
+    inCounty: base.inCounty,
+    nearest: base.nearest,
+    distanceKm: base.distanceKm,
+    address: base.address,
+    detail,                       // 高德增强结果（未配置时为 null）
+    source: base.source,
+    towns: GEO_TOWNS,
   }, 200, corsHeaders(origin));
 }
 
@@ -1404,7 +1486,8 @@ function normalizeGridAreas(areaStr) {
     .filter((s) => s && s !== '0');
 }
 
-// ---- Sheet 11 负责区域读取（新 mapper，不改动既有 mapRosterRecord 语义）----
+// ---- 花名册「负责区域（在职）/所属部门/直接上级/手机号/职位」读取（新 mapper，不改动既有 mapRosterRecord 语义）----
+// phone/superior/job 用于重名消歧（业务口径 2026-09-17：重名 + 手机号/员工编码/所属部门/职位 共同识别）
 function mapRosterAreaRecord(rec) {
   const f = rec.fields;
   return {
@@ -1412,19 +1495,120 @@ function mapRosterAreaRecord(rec) {
     employeeCode: fieldText(f['员工编码']).trim(),
     name: fieldText(f['姓名']).trim(),
     areaOnDuty: fieldText(f['负责区域（在职）']).trim(),
+    dept: fieldText(f['所属部门']).trim(),
+    superior: fieldText(f['直接上级']).trim(),
+    job: fieldText(f['职位']).trim(),
+    phone: phoneDigits(f['手机号'] !== undefined ? f['手机号'] : f['手机号码']),
   };
 }
 
-// employee_code → 网格列表（精确匹配；多行命中/无法解析 → fail-closed 空）
-// 数据源与 /api/mobile/roster 同源（rosterSource → WPS Sheet 11），确保「选人看到的人」与
-// 「能解析出网格的人」是同一份花名册；未配置时返回空而非抛错（由调用方决定文案）。
-async function resolvePatrolGrids(env, employeeCode) {
-  const src = rosterSource(env);
-  if (!src.fileId || !src.sheetId) return { grids: [], matched: 0 };
-  const recs = await src.adapter.scanRecords(env, src.fileId, src.sheetId);
-  const matches = recs.map(mapRosterAreaRecord).filter((r) => r.employeeCode === employeeCode);
-  if (matches.length !== 1) return { grids: [], matched: matches.length };
-  return { grids: normalizeGridAreas(matches[0].areaOnDuty), matched: 1 };
+// 人员标识 → 网格列表（fail-closed：解析不出唯一人 → 空）
+// ----------------------------------------------------------------------------
+// 键优先级（2026-09-17 三次修正，业务口径：重名 + 手机号/员工编码/所属部门/职位 共同识别）：
+//   ① 手机号   —— 最稳。现行台账登录签发 sub=手机号；花名册补「手机号」列后立即生效
+//   ② 员工编码 —— 稳定工号（台账补列后由 session 透传）
+//   ③ 姓名唯一 —— 命中即用
+//   ④ 姓名重名 —— 先用「职位」收敛：业务口径「只有乡镇作业中心经理/管理员及以上才是网格长」，
+//                 同名里的非网格长（乡镇保洁员/司机等）无权占坑，剔除后唯一即命中（by='name+job'）
+//   ⑤ 姓名重名 —— 职位仍不唯一时，用「所属部门」消歧，再退到「直接上级」消歧
+//   ⑥ 以上都收敛不到唯一人 → fail-closed（matched=命中行数，by=null），绝不错挂网格
+// 值（业务口径：「负责区域」就是「所属部门」）：优先「负责区域（在职）」，为空回落「所属部门」
+// 数据源与 /api/mobile/roster 同源（storageConfig.rosterSheetId）。
+const PATROL_GRID_BY = {
+  PHONE: 'phone',
+  CODE: 'employee_code',
+  NAME_JOB: 'name+job',
+  NAME_DEPT: 'name+dept',
+  NAME_SUPERIOR: 'name+superior',
+  NAME: 'name',
+};
+
+// 「网格长」职位白名单（业务口径 2026-09-17：乡镇作业中心经理 / 管理员及以上才是网格长）
+// ⚠️ 词汇陷阱（实测 2026-09-17）：台账「分级」= 管理员/乡镇作业中心经理/公司管理；
+//    花名册「职位」是另一套枚举（人工班长 45 / 人工片区长 13 / 乡镇保洁员 1156 / 司机 43 / 中转站管理员 16 …）。
+//    两者对齐关系：台账 管理员 ↔ 花名册 人工班长；台账 乡镇作业中心经理 ↔ 花名册 人工片区长。
+//    若把「管理员|乡镇作业中心经理」字面拿去花名册职位过滤 ⇒ 68 名台账人员中 62 人 0 命中被打成 fail-closed，
+//    故这里同时收录两套词表的等值写法，且**只做精确等值匹配**——
+//    正因为精确匹配，收「管理员」也不会误放「中转站管理员」（后者≠「管理员」）。
+// 白名单可由 Worker 变量 PATROL_GRID_LEADER_JOBS 覆盖（逗号分隔；`/re/` 形式按正则），
+// 业务新增职位时改配置即可，无需改代码。未知职位一律视为「非网格长」。
+const GRID_LEADER_JOBS_DEFAULT = [
+  // 花名册「职位」实测值（台账 68 人对应行全部命中其中 6 项）
+  '人工班长', '人工片区长', '项目总经理', '安环管理部经理', '生产管理部经理', '生产作业中心副经理（人工）',
+  // 台账「分级」同义写法（业务口述用词）
+  '管理员', '乡镇作业中心经理',
+];
+function gridLeaderJobs(env) {
+  const raw = String((env && env.PATROL_GRID_LEADER_JOBS) || '').trim();
+  if (!raw) return { exact: new Set(GRID_LEADER_JOBS_DEFAULT), res: [] };
+  const exact = new Set(), res = [];
+  for (const part of raw.split(',').map((s) => s.trim()).filter(Boolean)) {
+    const m = /^\/(.*)\/$/.exec(part);
+    if (m) { try { res.push(new RegExp(m[1])); } catch { /* 非法正则忽略 */ } } else exact.add(part);
+  }
+  return { exact, res };
+}
+function isGridLeaderJob(job, wl) {
+  const j = String(job || '').trim();
+  if (!j) return false; // 职位缺失 → 保守视为非网格长
+  return wl.exact.has(j) || wl.res.some((re) => re.test(j));
+}
+
+function pickGridRow(row, by) {
+  const src = row.areaOnDuty || row.dept;
+  return { grids: normalizeGridAreas(src), matched: 1, by };
+}
+
+// 重名消歧：同名多行时先按「职位（网格长）」收敛，再依次用「所属部门」→「直接上级」降级
+function narrowDuplicateName(hits, me, env) {
+  const wl = gridLeaderJobs(env);
+  const leaders = hits.filter((r) => isGridLeaderJob(r.job, wl));
+  // 业务口径：非网格长不参与网格归属判定。只在能定案（恰 1 人）时生效；
+  // 若 0 人（职位未维护/新职位）则保留原全集继续降级，避免把已可用的人打成 fail-closed。
+  const pool = leaders.length ? leaders : hits;
+  if (leaders.length === 1) return { rows: leaders, by: PATROL_GRID_BY.NAME_JOB };
+
+  const dept = String((me && me.dept) || '').trim();
+  const superior = String((me && me.superior) || '').trim();
+  if (dept) {
+    const byDept = pool.filter((r) => r.dept && (r.dept === dept || r.dept.includes(dept) || dept.includes(r.dept)));
+    if (byDept.length === 1) return { rows: byDept, by: PATROL_GRID_BY.NAME_DEPT };
+  }
+  if (superior) {
+    const bySup = pool.filter((r) => r.superior && (r.superior === superior || r.superior.includes(superior)));
+    if (bySup.length === 1) return { rows: bySup, by: PATROL_GRID_BY.NAME_SUPERIOR };
+  }
+  return { rows: pool, by: null };
+}
+
+
+async function resolvePatrolGrids(env, ident) {
+  const code = String((ident && ident.code) || '').trim();
+  const name = String((ident && ident.name) || '').trim();
+  const cfg = storageConfig(env);
+  if (!cfg.fileId || !cfg.rosterSheetId) return { grids: [], matched: 0, by: null };
+  // 会话必须带 sub：缺失 = 非本系统正常签发的会话 → fail-closed，不走姓名兜底
+  if (!code) return { grids: [], matched: 0, by: null };
+  const me = ident || {};
+  const phone = phoneDigits(me.phone || (/^1\d{10}$/.test(code) ? code : ''));
+  const recs = (await getAdapter(env).scanRecords(env, cfg.fileId, cfg.rosterSheetId)).map(mapRosterAreaRecord);
+
+  if (phone) {
+    const byPhone = recs.filter((r) => r.phone && r.phone === phone);
+    if (byPhone.length === 1) return pickGridRow(byPhone[0], PATROL_GRID_BY.PHONE);
+  }
+  const byCode = recs.filter((r) => r.employeeCode && r.employeeCode === code);
+  if (byCode.length === 1) return pickGridRow(byCode[0], PATROL_GRID_BY.CODE);
+  if (name) {
+    const byName = recs.filter((r) => r.name && r.name === name);
+    if (byName.length === 1) return pickGridRow(byName[0], PATROL_GRID_BY.NAME);
+    if (byName.length > 1) {
+      const n = narrowDuplicateName(byName, { dept: me.dept, superior: me.superior }, env);
+      if (n.rows.length === 1) return pickGridRow(n.rows[0], n.by);
+      return { grids: [], matched: n.rows.length, by: null };
+    }
+  }
+  return { grids: [], matched: 0, by: null };
 }
 
 // ---- GET /api/mobile/patrol/meta：身份 + 网格解析 + 问题类型候选 ----
@@ -1436,10 +1620,10 @@ async function handlePatrolMeta(request, env) {
   if (!payload) return errRes('UNAUTHORIZED', '未认证或登录态失效', 401, corsHeaders(origin));
   const cfg = storageConfig(env);
 
-  let grids = [], matched = 0;
+  let grids = [], matched = 0, gridBy = null;
   try {
-    const r = await resolvePatrolGrids(env, payload.sub);
-    grids = r.grids; matched = r.matched;
+    const r = await resolvePatrolGrids(env, { code: payload.sub, name: payload.name, dept: payload.department, superior: payload.superior });
+    grids = r.grids; matched = r.matched; gridBy = r.by;
   } catch {
     return errRes('WPS_UPSTREAM_ERROR', '网格信息暂不可用，请稍后再试', 502, corsHeaders(origin));
   }
@@ -1458,6 +1642,7 @@ async function handlePatrolMeta(request, env) {
     grid_mode: resolved ? (grids.length === 1 ? 'auto' : 'select') : 'unresolved',
     grids,
     roster_matches: matched,
+    grid_resolved_by: gridBy,
     message: resolved ? '' : '当前人员无法确定巡查网格，请联系管理员',
     problem_types: patrolProblemTypes(env),
     photo_status: 'FEISHU_ATTACHMENT_READY',
@@ -1569,11 +1754,12 @@ async function handlePatrolSubmit(request, env) {
     }
 
     // 门 5：网格 fail-closed（服务端解析为准；body.grid 必须在解析结果内）
-    // 注意：resolvePatrolGrids 只接受 (env, employeeCode) —— 数据源由 rosterSource(env) 决定，
+    // 注意：resolvePatrolGrids 只接受 (env, {code, name, dept, superior}) —— 数据源由 storageConfig(env) 决定，
     // 不再由调用方传入 adapter/cfg（曾因旧签名残留导致 env 错位、网格恒 unresolved）。
+    // code=Session sub（现行=手机号，会天然走②工号不中 → ①手机号/③姓名）；dept/superior 用于重名消歧。
     let grids;
     try {
-      grids = await resolvePatrolGrids(env, employeeCode);
+      grids = await resolvePatrolGrids(env, { code: employeeCode, name: payload.name, dept: payload.department, superior: payload.superior });
     } catch {
       return errRes('WPS_UPSTREAM_ERROR', '网格信息暂不可用，请稍后再试', 502, corsHeaders(origin));
     }
@@ -1748,6 +1934,7 @@ export default {
     // CF-WPS-19：选人数据链（组织关系 + 真实花名册）
     if (p === '/api/mobile/org/subordinates') return handleOrgSubordinates(request, env);
     if (p === '/api/mobile/roster') return handleRoster(request, env);
+    if (p === '/api/mobile/geo/regeo') return handleGeoRegeo(request, env);
     // CF-WPS-13：网格长巡查文字业务链
     if (p === '/api/mobile/patrol/meta') return handlePatrolMeta(request, env);
     if (p === '/api/mobile/patrol/submit') return handlePatrolSubmit(request, env);
@@ -1784,7 +1971,6 @@ export {
   handleOrgSubordinates,
   handleRoster,
   mapRosterRecord,
-  rosterSource,
   rosterAreaHit,
   ledgerChildren,
   ledgerSubtree,
@@ -1797,6 +1983,19 @@ export {
   patrolProblemTypes,
   normalizeGridAreas,
   validatePatrolBody,
+  PATROL_GRID_BY,
+  // CF-WPS-22（离线回放/单测直接复用真实逻辑，避免测试侧复刻实现）
+  mapRosterAreaRecord,
+  narrowDuplicateName,
+  gridLeaderJobs,
+  isGridLeaderJob,
+  GRID_LEADER_JOBS_DEFAULT,
+  // CF-WPS-21
+  handleGeoRegeo,
+  amapRegeo,
+  regeoNingjin,
+  validLatLng,
+  GEO_TOWNS,
   wpsGetUploadAddress,
   wpsUploadBinary,
   wpsCompleteUpload,
