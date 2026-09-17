@@ -77,6 +77,17 @@ export async function ocrRecognize(file: File): Promise<OcrRecognizeResult> {
   return r;
 }
 
+/** AI 识图：把培训台账照片交给本地 Ollama 视觉大模型，识别为结构化行（多模态较慢，超时取 40 分钟） */
+export async function aiRecognize(file: File): Promise<OcrRecognizeResult> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const r = await requestClient.post<OcrRecognizeResult>(`${BASE}/ai-recognize`, formData, {
+    headers: { 'Content-Type': undefined as any },
+    timeout: OCR_TIME_OUT,
+  });
+  return r;
+}
+
 /** 导出 Excel（GET，rows/columns 以 base64 JSON 经 query 传入，返回文件流） */
 export async function ocrExportExcel(params: {
   rows: Record<string, any>[];

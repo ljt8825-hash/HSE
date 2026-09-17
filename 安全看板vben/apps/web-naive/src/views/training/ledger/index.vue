@@ -32,6 +32,7 @@ import {
   NSpace,
   NSpin,
   NTag,
+  NText,
 } from 'naive-ui';
 import { $t } from '#/locales';
 
@@ -305,6 +306,9 @@ const {
     ocrActive,
     ocrLoading,
     ocrAdvice,
+    aiEnabled,
+    aiLoading,
+    onAiRecognize: onImportAiRecognize,
     signinActive,
     signinPreview,
     onDownloadTemplate: onImportTemplate,
@@ -313,7 +317,7 @@ const {
     onExportOcr: onImportExportOcr,
     onImportClose: onImportDialogClose,
     bindRefresh: bindImportRefresh,
-  } = useGenericImport('training-ledger', { ocr: true });
+  } = useGenericImport('training-ledger', { ocr: true, ai: true });
 bindImportRefresh(loadSummary);
 
 // ----- 未培训名单悬浮菜单（点击缺少数） -----
@@ -403,6 +407,17 @@ async function handleMonthlyImport(e: Event) {
     monthlyImportLoading.value = false;
     input.value = '';
   }
+}
+
+// ===================== AI 识图（独立入口：本地视觉模型识别培训台账照片） =====================
+const aiImportInput = ref<HTMLInputElement | null>(null);
+
+function handleAiImage(e: Event) {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file) return;
+  onImportAiRecognize(file);
 }
 
 function onExportSummary() {
@@ -730,6 +745,35 @@ async function loadLedgerMonths() {
       @confirm="onImportConfirm"
       @export-ocr="onImportExportOcr"
       @close="onImportDialogClose"
-    />
+    >
+      <!-- AI 识图：独立入口（上传培训台账照片 → 本地视觉模型识别），结果复用下方预览/入库流 -->
+      <template #header-extra>
+        <div
+          v-if="aiEnabled"
+          class="mb-3 flex items-center justify-between gap-3 rounded border border-primary/20 bg-primary/5 px-3 py-2"
+        >
+          <NText depth="2" class="text-xs">
+            AI 识图：上传培训台账照片或 PDF，由本地视觉大模型自动识别填写，无需手动逐行录入。
+          </NText>
+          <NButton
+            secondary
+            type="primary"
+            size="small"
+            :loading="aiLoading"
+            :disabled="importConfirming"
+            @click="aiImportInput?.click()"
+          >
+            AI 识图
+          </NButton>
+          <input
+            ref="aiImportInput"
+            type="file"
+            accept=".pdf,.png,.jpg,.jpeg,.bmp,.webp"
+            style="display: none"
+            @change="handleAiImage"
+          />
+        </div>
+      </template>
+    </HseImportDialog>
   </HsePageLayout>
 </template>

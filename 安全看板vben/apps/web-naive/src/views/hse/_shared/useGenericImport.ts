@@ -23,6 +23,7 @@ import {
   type ImportUploadResult,
 } from '#/api/import';
 import {
+  aiRecognize,
   ocrConfirm,
   ocrExportExcel,
   ocrRecognize,
@@ -123,8 +124,13 @@ function formatImportErrors(errors: any[] | undefined, limit = 5): string {
   return lines.join('；') + more;
 }
 
-export function useGenericImport(module: string, opts?: { ocr?: boolean }) {
+export function useGenericImport(
+  module: string,
+  opts?: { ocr?: boolean; ai?: boolean },
+) {
   const ocrEnabled = !!opts?.ocr;
+  // AI 识图作为 OCR 之上新增的独立入口：仍复用 OCR 的预览/入库/导出状态流，但由独立按钮触发
+  const aiEnabled = !!opts?.ai;
   const importOpen = ref(false);
   const importPreviewColumns = ref<VxeTableGridColumns>([]);
   const importPreviewData = ref<any[]>([]);
@@ -150,6 +156,17 @@ export function useGenericImport(module: string, opts?: { ocr?: boolean }) {
   // OCR 识别中 / 识别后的引导建议（照片/超大归档等质量受限时提示改用 Excel 模板）
   const ocrLoading = ref(false);
   const ocrAdvice = ref<string | null>(null);
+
+  // AI 识图模式状态（独立入口，仅 UI 区分；识别结果仍写入 ocr* 状态以复用预览/入库流）
+  const aiActive = ref(false);
+  const aiLoading = ref(false);
+
+  // AI 识图接受图片与 PDF（PDF 由后端渲染为页图后识别）
+  const AI_FILE_EXTS = ['.pdf', '.png', '.jpg', '.jpeg', '.bmp', '.webp'];
+  function isAiFile(name: string): boolean {
+    const lower = (name || '').toLowerCase();
+    return AI_FILE_EXTS.some((e) => lower.endsWith(e));
+  }
 
   // 由签到表「培训日期」推断归属月份；缺省当前月（YYYY-MM）
   function resolveSigninMonth(headers: Record<string, string>): string {
@@ -286,6 +303,49 @@ export function useGenericImport(module: string, opts?: { ocr?: boolean }) {
       ocrActive.value = false;
       importPreviewError.value = `识别失败：${e?.message || '请检查文件是否为规整表格/扫描件'}`;
     } finally {
+      ocrLoading.value = false;
+    }
+  }
+
+  /**
+   * AI 识图（独立入口）：把培训台账照片交给本地视觉大模型识别。
+   * 结果复用 OCR 状态流（ocrActive/ocrRows/预览/入库/导出），与文本/PDF OCR 互不干扰。
+   */
+  async function onAiRecognize(file: File) {
+    if (!file) return;
+    if (!isAiFile(file.name)) {
+      message.error('AI 识图支持图片（PNG / JPG / BMP / WebP）和 PDF');
+      return;
+    }
+    ocrActive.value = true;
+    aiActive.value = true;
+    aiLoading.value = true;
+    ocrLoading.value = true;
+    ocrAdvice.value = null;
+    ocrRows.value = [];
+    ocrColumns.value = [];
+    ocrSourceName.value = file.name.replace(/\.[^.]+$/, '');
+    importPreviewData.value = [];
+    importPreviewColumns.value = [];
+    importPreviewError.value = null;
+    importResult.value = null;
+    signinActive.value = false;
+    signinPreview.value = null;
+    signinUntrained.value = [];
+    try {
+      const res = await aiRecognize(file);
+      ocrRows.value = res.rows ?? [];
+      ocrColumns.value = res.columns ?? [];
+      buildOcrPreview(res);
+      if (!(res.rows ?? []).length) {
+        importPreviewError.value = 'AI 未识别到有效培训记录，请更换清晰、规整的培训台账照片后重试';
+      }
+    } catch (e: any) {
+      ocrActive.value = false;
+      aiActive.value = false;
+      importPreviewError.value = `AI 识图失败：${e?.message || '请检查 Ollama 视觉模型是否已安装（ollama pull qwen2.5vl）'}`;
+    } finally {
+      aiLoading.value = false;
       ocrLoading.value = false;
     }
   }
@@ -455,6 +515,8 @@ export function useGenericImport(module: string, opts?: { ocr?: boolean }) {
     signinAttendees.value = [];
     ocrLoading.value = false;
     ocrAdvice.value = null;
+    aiActive.value = false;
+    aiLoading.value = false;
   }
 
   return {
@@ -468,6 +530,9 @@ export function useGenericImport(module: string, opts?: { ocr?: boolean }) {
     ocrActive,
     ocrLoading,
     ocrAdvice,
+    aiEnabled,
+    aiActive,
+    aiLoading,
     ocrRows,
     ocrColumns,
     ocrSourceName,
@@ -476,6 +541,7 @@ export function useGenericImport(module: string, opts?: { ocr?: boolean }) {
     signinUntrained,
     onDownloadTemplate,
     onUpload,
+    onAiRecognize,
     onConfirmImport,
     onExportOcr,
     onImportClose,
