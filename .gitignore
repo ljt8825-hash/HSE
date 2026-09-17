@@ -340,3 +340,15 @@ server/scripts/p2b1e*_dev_before_*.json
 /_*.txt
 /_*.json
 /_*.log
+
+# ===== 浏览器临时 profile / 截图 / 误创建的 shell 碎片（2026-09-17 补全） =====
+.tmp-chrome-*/
+.tmp-e2e-results.json
+.tmp-l02-e2e-results.json
+.tmp-shot*.jpg
+# 命令行引号被剥离时误创建的空文件（如 document.documentElement.clientWidth）
+document.documentElement*
+_mw_audit/
+_mw_smoke_shots/
+_cf_audit/
+.grid-mobile-cloudflare-tmp/

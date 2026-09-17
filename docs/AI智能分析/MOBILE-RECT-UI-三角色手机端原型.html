@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>HSE 安全看板 · 三角色手机端原型</title>
+<style>
+:root{
+  --bg:#F2F4F8; --card:#FFFFFF; --line:#E7EBF2;
+  --primary:#2E7AE2; --primary-deep:#1E5FBA; --primary-soft:#EAF2FD;
+  --text:#1A2233; --text-2:#5A6478; --text-3:#98A2B3;
+  --danger:#E5484D; --success:#2FA36B; --warn:#F08A0C;
+  --radius:14px;
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
+  background:#DDE3EC;display:flex;flex-direction:column;align-items:center;color:var(--text)}
+/* ===== 角色切换器（画布外层） ===== */
+.role-bar{width:100%;max-width:390px;padding:10px 12px 6px;display:flex;gap:8px}
+.role-bar button{flex:1;border:1px solid var(--line);background:#fff;color:var(--text-2);
+  font-size:13px;padding:9px 0;border-radius:10px;cursor:pointer;font-weight:500;transition:.15s}
+.role-bar button.on{background:var(--primary);border-color:var(--primary);color:#fff}
+/* ===== 手机框 ===== */
+.phone{width:100%;max-width:390px;height:min(844px,calc(100vh - 52px));background:var(--bg);
+  border-radius:28px;overflow:hidden;display:flex;flex-direction:column;position:relative;
+  box-shadow:0 12px 40px rgba(20,35,70,.18)}
+@media (max-width:420px){body{background:var(--bg)}.phone{border-radius:0;height:calc(100vh - 46px)}.role-bar{background:var(--bg)}}
+/* 顶栏 */
+.topbar{background:#fff;padding:14px 16px 12px;display:flex;align-items:center;justify-content:space-between;flex:none}
+.topbar h1{font-size:18px;font-weight:600}
+.topbar .who{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-2)}
+.avatar{width:30px;height:30px;border-radius:50%;background:var(--primary-soft);color:var(--primary);
+  display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600}
+/* 页面容器 */
+.pages{flex:1;overflow-y:auto;overscroll-behavior:contain;padding:12px 12px 90px}
+.page{display:none;animation:fade .18s ease}
+.page.show{display:block}
+@keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+/* 底部导航 */
+.tabbar{position:absolute;left:0;right:0;bottom:0;background:#fff;border-top:1px solid var(--line);
+  display:flex;padding:6px 0 max(8px,env(safe-area-inset-bottom));flex:none}
+.tabbar button{flex:1;background:none;border:none;display:flex;flex-direction:column;align-items:center;
+  gap:2px;font-size:11px;color:var(--text-3);cursor:pointer;padding:4px 0}
+.tabbar button.on{color:var(--primary)}
+.tabbar svg{width:22px;height:22px}
+.badge{position:relative}
+.badge::after{content:attr(data-n);position:absolute;top:-6px;right:-14px;background:var(--danger);
+  color:#fff;font-size:10px;min-width:15px;height:15px;border-radius:8px;line-height:15px;text-align:center;padding:0 3px}
+/* ===== 通用组件 ===== */
+.card{background:var(--card);border-radius:var(--radius);padding:16px;margin-bottom:12px}
+.hero{background:linear-gradient(135deg,#4E93EC 0%,#2E6FD4 100%);color:#fff;border-radius:16px;padding:18px;margin-bottom:12px}
+.hero .cap{font-size:12px;opacity:.85}
+.hero .name{font-size:24px;font-weight:700;margin:6px 0 10px}
+.hero .meta{font-size:13px;line-height:1.9;opacity:.95}
+.hero .meta b{font-weight:600;margin-right:6px}
+.btn{display:block;width:100%;border:none;border-radius:12px;padding:15px 0;font-size:16px;font-weight:600;
+  cursor:pointer;text-align:center;transition:.15s}
+.btn.primary{background:var(--primary);color:#fff}
+.btn.primary:active{background:var(--primary-deep)}
+.btn.ghost{background:#fff;color:var(--primary);border:1px solid #C9DCF6}
+.btn.danger-ghost{background:#fff;color:var(--danger);border:1px solid #F3C2C4}
+.btn-row{display:flex;gap:10px}
+.btn-row .btn{flex:1}
+.stat-row{display:flex;gap:10px;margin-bottom:12px}
+.stat{flex:1;background:#fff;border-radius:var(--radius);padding:14px 12px;text-align:center}
+.stat .n{font-size:22px;font-weight:700}
+.stat .l{font-size:12px;color:var(--text-3);margin-top:2px}
+.stat.warn .n{color:var(--warn)} .stat.danger .n{color:var(--danger)} .stat.ok .n{color:var(--success)} .stat.blue .n{color:var(--primary)}
+.sec{display:flex;align-items:center;gap:6px;font-size:15px;font-weight:600;margin:2px 2px 10px}
+.sec .req{font-size:12px;color:var(--danger);font-weight:400}
+.chips{display:flex;flex-wrap:wrap;gap:10px}
+.chip{border:1px solid #C9DCF6;background:#fff;color:var(--primary);font-size:13px;
+  padding:9px 16px;border-radius:20px;cursor:pointer;transition:.15s}
+.chip.on{background:var(--primary);border-color:var(--primary);color:#fff}
+.chip.gray{border-color:var(--line);color:var(--text-2)}
+.chip.gray.on{background:var(--text);border-color:var(--text);color:#fff}
+.duo{display:flex;gap:10px}
+.duo label{flex:1;border:1px solid var(--line);border-radius:10px;background:#fff;padding:11px 0;
+  text-align:center;font-size:14px;color:var(--text-2);cursor:pointer}
+.duo label.on{border-color:var(--primary);color:var(--primary);background:var(--primary-soft);font-weight:600}
+.photo-dash{border:1.5px dashed #A9C8F0;border-radius:12px;background:#F7FAFF;color:var(--primary);
+  font-size:14px;font-weight:500;text-align:center;padding:22px 0;cursor:pointer}
+.thumbs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.thumb{width:72px;height:72px;border-radius:10px;background:linear-gradient(135deg,#DCE9FA,#C6DCF7);
+  position:relative;display:flex;align-items:flex-end;justify-content:center;font-size:11px;color:var(--text-2);padding-bottom:4px}
+.thumb .up{position:absolute;left:4px;top:4px;background:var(--primary);color:#fff;font-size:10px;
+  padding:1px 6px;border-radius:4px}
+.hint{font-size:12px;color:var(--text-3);line-height:1.7;margin-top:8px}
+/* 列表卡片 */
+.rec{background:#fff;border-radius:var(--radius);padding:14px 16px;margin-bottom:10px}
+.rec .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.rec .date{font-size:15px;font-weight:600}
+.rec .kv{display:flex;font-size:13px;line-height:2}
+.rec .k{width:76px;color:var(--text-3);flex:none}
+.rec .v{color:var(--text)}
+.tag{display:inline-block;font-size:11px;padding:2px 8px;border-radius:6px;margin-top:6px}
+.tag.blue{background:var(--primary-soft);color:var(--primary)}
+.tag.green{background:#E6F5EC;color:var(--success)}
+.tag.orange{background:#FDF1E2;color:var(--warn)}
+.tag.red{background:#FCEAEA;color:var(--danger)}
+.tag.gray{background:#F0F2F6;color:var(--text-3)}
+.rec .act{display:flex;gap:8px;margin-top:10px}
+.rec .act button{flex:1;padding:9px 0;border-radius:9px;font-size:13px;font-weight:600;border:1px solid #C9DCF6;background:#fff;color:var(--primary);cursor:pointer}
+.rec .act button.solid{background:var(--primary);color:#fff;border-color:var(--primary)}
+.tabs{display:flex;gap:8px;margin-bottom:12px}
+.tabs button{flex:1;border:none;background:#E6EAF2;color:var(--text-2);font-size:13px;padding:9px 0;border-radius:20px;cursor:pointer;font-weight:500}
+.tabs button.on{background:var(--primary);color:#fff;font-weight:600}
+/* 成功页 */
+.ok-wrap{text-align:center;padding:36px 0 8px}
+.ok-ico{width:64px;height:64px;border-radius:50%;background:#E6F5EC;color:var(--success);font-size:30px;
+  display:flex;align-items:center;justify-content:center;margin:0 auto 14px}
+.ok-wrap h2{font-size:18px;margin-bottom:4px}
+.ok-wrap p{font-size:13px;color:var(--text-3)}
+/* 菜单（我的） */
+.menu{background:#fff;border-radius:var(--radius);overflow:hidden;margin-bottom:12px}
+.menu button{display:flex;width:100%;align-items:center;justify-content:space-between;background:none;
+  border:none;border-bottom:1px solid var(--line);padding:15px 16px;font-size:14px;color:var(--text);cursor:pointer}
+.menu button:last-child{border-bottom:none}
+.menu .arr{color:#C4CBD8}
+.progress{height:8px;background:#E6EAF2;border-radius:4px;overflow:hidden;margin-top:10px}
+.progress i{display:block;height:100%;background:var(--success);border-radius:4px}
+.empty{text-align:center;color:var(--text-3);font-size:13px;padding:40px 0}
+</style>
+</head>
+<body>
+
+<!-- 角色切换 -->
+<div class="role-bar" id="roleBar">
+  <button data-role="town" class="on">乡镇作业中心经理</button>
+  <button data-role="company">公司管理</button>
+  <button data-role="admin">管理员</button>
+</div>
+
+<div class="phone">
+  <div class="topbar">
+    <h1 id="appTitle">HSE 安全看板</h1>
+    <div class="who"><span id="whoName">曹周平</span><div class="avatar" id="whoAvatar">曹</div></div>
+  </div>
+  <div class="pages" id="pages"><!-- JS 渲染 --></div>
+  <div class="tabbar" id="tabbar"><!-- JS 渲染 --></div>
+</div>
+
+<script>
+/* ================= 设计规范（与画布一致） ================= */
+const T = {
+  primary:'#2E7AE2',
+  ico:{
+    home:'<path d="M4 11.2 12 4.6l8 6.6V20a1 1 0 0 1-1 1h-5v-5h-4v5H5a1 1 0 0 1-1-1z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>',
+    grid:'<g fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="4" width="6.6" height="6.6" rx="1.4"/><rect x="13.4" y="4" width="6.6" height="6.6" rx="1.4"/><rect x="4" y="13.4" width="6.6" height="6.6" rx="1.4"/><rect x="13.4" y="13.4" width="6.6" height="6.6" rx="1.4"/></g>',
+    list:'<g stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 7h14M5 12h14M5 17h9"/></g>',
+    me:'<g fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="8.4" r="3.4"/><path d="M5 20c.8-3.6 3.6-5.4 7-5.4s6.2 1.8 7 5.4" stroke-linecap="round"/></g>',
+    shield:'<path d="M12 3.6 19 6v5.4c0 4.5-2.9 7.6-7 9-4.1-1.4-7-4.5-7-9V6z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>'
+  }
+};
+const ROLES = {
+  town:{ name:'曹周平', title:'HSE 安全看板',
+    tabs:[['home','首页','home'],['report','三违上报','shield'],['tasks','整改任务','list'],['ledger','巡查台账','grid'],['me','我的','me']] },
+  company:{ name:'陈国强', title:'HSE 安全看板',
+    tabs:[['home','首页','home'],['report','三违上报','shield'],['track','任务跟踪','list'],['ledger','三违台账','grid'],['me','我的','me']] },
+  admin:{ name:'系统管理员', title:'HSE 安全看板',
+    tabs:[['home','首页','home'],['supervise','整改监督','list'],['ledger','三违台账','grid'],['std','标准库','grid'],['me','我的','me']] }
+};
+let role='town', tab='home';
+
+/* ================= 页面模板 ================= */
+function hero(role){
+  if(role==='town') return `<div class="hero"><div class="cap">乡镇作业中心经理</div>
+    <div class="name">曹周平</div><div class="meta"><div><b>员工编码</b>00307234</div><div><b>所属班组</b>东片区 · 一班</div></div></div>`;
+  if(role==='company') return `<div class="hero"><div class="cap">公司管理人员</div>
+    <div class="name">陈国强</div><div class="meta"><div><b>工号</b>CN-1028</div><div><b>管辖范围</b>全部乡镇作业中心</div></div></div>`;
+  return `<div class="hero"><div class="cap">系统管理员</div>
+    <div class="name">管理员</div><div class="meta"><div><b>角色</b>HSE 管理员</div><div><b>数据范围</b>全公司</div></div></div>`;
+}
+function photoBlock(n){
+  return `<div class="sec">三违照片 <span class="req">必拍</span></div>
+  <div class="thumbs"><div class="thumb"><span class="up">已上传</span>照片1</div>
+  <div class="thumb"><span class="up">已上传</span>照片2</div></div>
+  <div class="photo-dash">＋ 拍照（${n}/3）</div>
+  <div class="hint">至少拍摄 1 张现场照片方可提交；每张可查看、删除，失败自动重试。</div>`;
+}
+function stdChips(){ return ['未佩戴安全帽','未系安全带','违章指挥','冒险作业','野蛮施工']
+  .map((s,i)=>`<button class="chip${i===0?' on':''}">${s}</button>`).join(''); }
+function personChips(){ return ['王建国','李卫东','赵小勇'].map((s,i)=>`<button class="chip${i===0?' on':''}">${s}</button>`).join(''); }
+
+function taskCard(o){
+  return `<div class="rec"><div class="top"><span class="date">${o.title}</span><span class="tag ${o.tagCls}">${o.tag}</span></div>
+  <div class="kv"><span class="k">三违行为</span><span class="v">${o.behavior}</span></div>
+  <div class="kv"><span class="k">责 任 人</span><span class="v">${o.owner}</span></div>
+  <div class="kv"><span class="k">整改期限</span><span class="v">${o.deadline}</span></div>
+  ${o.overdue?'<div class="kv"><span class="k">超时</span><span class="v" style="color:var(--danger)">已超时 1 天，请尽快处理</span></div>':''}
+  ${o.act?`<div class="act">${o.act}</div>`:''}</div>`;
+}
+const taskActs = {
+  rectify:'<button class="solid">去整改</button>',
+  confirm:'<button class="solid">确认闭环</button><button>打回</button>',
+  none:''
+};
+
+const PAGES = {
+/* ========== 乡镇作业中心经理 ========== */
+town_home:`${hero('town')}
+  <button class="btn primary" onclick="go('report')">开始三违上报</button>
+  <div style="height:12px"></div>
+  <div class="duo"><button class="btn ghost" onclick="go('tasks')">我的整改任务<span class="badge" data-n="2"></span></button>
+  <button class="btn ghost" onclick="go('ledger')">三违台账</button></div>
+  <div style="height:12px"></div>
+  <div class="stat-row">
+    <div class="stat blue"><div class="n">6</div><div class="l">本周上报</div></div>
+    <div class="stat warn"><div class="n">2</div><div class="l">待整改</div></div>
+    <div class="stat ok"><div class="n">4</div><div class="l">已闭环</div></div>
+  </div>
+  <div class="card"><div class="sec">待办提醒</div>
+    <div class="kv" style="font-size:13px;line-height:2"><span class="v" style="color:var(--text-2)">· 李卫东 未佩戴安全帽 整改将于明天到期</span></div>
+    <div class="kv" style="font-size:13px;line-height:2"><span class="v" style="color:var(--text-2)">· 昨日上报 2 条均已完成责任解析</span></div></div>
+  <div class="hint">现场巡查记录工具：取证 → 判断 → 提交；三违后续处理由现有 HSE 系统完成。</div>`,
+
+town_report:`<div class="card">${photoBlock(2)}</div>
+  <div class="card"><div class="sec">班组人员 <span class="req">必选</span></div>
+    <div class="chips">${personChips()}</div>
+    <div class="hint">从本人班组正式员工中选择，自动带出姓名、性别、职位；不做姓名猜测。</div></div>
+  <div class="card"><div class="sec">三违行为 <span class="req">必填</span></div>
+    <div class="chips">${stdChips()}</div>
+    <div style="margin-top:12px"><div style="border:1px solid var(--line);border-radius:10px;padding:12px;font-size:14px;color:var(--text-2)">未佩戴安全帽</div></div></div>
+  <div class="card"><div class="sec">检查来源 <span class="req">必选</span></div>
+    <div class="duo"><label class="on">乡镇查处</label><label>自查自纠</label></div>
+    <div class="hint">检查来源原样提交，由服务端权威判定。</div></div>
+  <button class="btn primary" onclick="go('success')">提交三违</button>`,
+
+town_success:`<div class="ok-wrap"><div class="ok-ico">✓</div><h2>三违记录已保存</h2><p>服务端已完成责任解析与扣分</p></div>
+  <div class="card">
+    <div class="kv"><span class="k">记录编号</span><span class="v">VR-20260917-0086</span></div>
+    <div class="kv"><span class="k">三违行为</span><span class="v">未佩戴安全帽</span></div>
+    <div class="kv"><span class="k">责任人</span><span class="v">王建国（东片区·一班）</span></div>
+    <div class="kv"><span class="k">扣分</span><span class="v" style="color:var(--danger)">责任人 -5 分</span></div>
+    <div class="kv"><span class="k">检查日期</span><span class="v">2026-09-17</span></div></div>
+  <div class="btn-row">
+    <button class="btn primary" onclick="toast('已进入整改拍照：拍摄整改后照片')">立即整改</button>
+    <button class="btn ghost" onclick="toast('已生成整改任务并通知责任人')">稍后整改</button></div>
+  <div style="height:10px"></div><button class="btn ghost" onclick="go('home')">返回首页</button>`,
+
+town_tasks:`<div class="tabs"><button class="on">待我整改（2）</button><button>我发起的（3）</button></div>
+  ${taskCard({title:'2026-09-17',behavior:'未佩戴安全帽',owner:'王建国',deadline:'2026-09-18 18:00',tag:'待整改',tagCls:'blue',act:taskActs.rectify})}
+  ${taskCard({title:'2026-09-16',behavior:'野蛮施工',owner:'赵小勇',deadline:'2026-09-17 18:00',tag:'即将到期',tagCls:'orange',act:taskActs.rectify})}
+  <div class="tabs" style="margin-top:16px"><button class="on">我发起的</button></div>
+  ${taskCard({title:'2026-09-15',behavior:'未系安全带',owner:'李卫东',deadline:'已完成',tag:'待确认',tagCls:'orange',act:taskActs.confirm})}
+  ${taskCard({title:'2026-09-14',behavior:'违章指挥',owner:'王建国',deadline:'已完成',tag:'已闭环',tagCls:'green',act:taskActs.none})}`,
+
+town_ledger:`<div class="sec" style="font-size:16px">巡查台账 <span style="flex:1"></span><button class="chip on" style="border-radius:20px" onclick="go('report')">＋ 新增巡查</button></div>
+  ${['2026-09-17','2026-09-16','2026-09-15'].map((d,i)=>`<div class="rec"><div class="top"><span class="date">${d}</span></div>
+    <div class="kv"><span class="k">网格</span><span class="v">东片区 · 一班</span></div>
+    <div class="kv"><span class="k">违规人员</span><span class="v">${['王建国','—','李卫东'][i]}</span></div>
+    <div class="kv"><span class="k">问题</span><span class="v">${['未佩戴安全帽','无三违行为','未系安全带'][i]}</span></div>
+    <span class="tag blue">有照片</span></div>`).join('')}`,
+
+me(roleName,cap,extra=''){ return `${hero(roleName)}
+  <div class="menu">
+    <button>整改任务通知<span class="arr">›</span></button>
+    <button>修改密码<span class="arr">›</span></button>${extra}
+    <button>关于 HSE 安全看板<span class="arr">›</span></button></div>
+  <button class="btn danger-ghost" onclick="toast('已退出登录')">退出登录</button>` },
+
+/* ========== 公司管理 ========== */
+company_home:`${hero('company')}
+  <div class="stat-row">
+    <div class="stat blue"><div class="n">12</div><div class="l">今日三违</div></div>
+    <div class="stat warn"><div class="n">8</div><div class="l">待整改</div></div>
+    <div class="stat ok"><div class="n">5</div><div class="l">今日闭环</div></div></div>
+  <button class="btn primary" onclick="go('report')">发起三违上报</button>
+  <div style="height:12px"></div>
+  <div class="duo"><button class="btn ghost" onclick="go('track')">任务跟踪<span class="badge" data-n="3"></span></button>
+  <button class="btn ghost" onclick="go('ledger')">三违台账</button></div>
+  <div style="height:12px"></div>
+  <div class="card"><div class="sec">需要我确认的整改</div>
+    ${taskCard({title:'2026-09-17',behavior:'未佩戴安全帽',owner:'东片区 · 王建国',deadline:'今日 18:00',tag:'待确认',tagCls:'orange',act:taskActs.confirm})}</div>`,
+
+company_report:`<div class="card">${photoBlock(1)}</div>
+  <div class="card"><div class="sec">三违人员 <span class="req">必选</span></div>
+    <div class="chips">${personChips()}</div></div>
+  <div class="card"><div class="sec">三违行为 <span class="req">必填</span></div>
+    <div class="chips">${stdChips()}</div></div>
+  <div class="card"><div class="sec">检查来源 <span class="req">必选</span></div>
+    <div class="duo"><label class="on">公司查处</label><label>乡镇查处</label></div></div>
+  <div class="card"><div class="sec">指定责任 <span class="req">必选</span></div>
+    <div class="duo" style="margin-bottom:10px"><label class="on">责任乡镇</label><label>责任管理员</label></div>
+    <div class="chips">${['东片区','西片区','南片区'].map((s,i)=>`<button class="chip${i===0?' on':''}">${s}</button>`).join('')}</div>
+    <div class="hint">指定后对方将收到整改任务，整改拍照后反馈给你确认闭环。</div></div>
+  <button class="btn primary" onclick="toast('三违已保存，整改任务已下发东片区')">提交并指派</button>`,
+
+company_track:`<div class="tabs"><button class="on">待确认（3）</button><button>全部</button></div>
+  ${taskCard({title:'2026-09-17 10:26',behavior:'未佩戴安全帽',owner:'东片区 · 王建国',deadline:'已提交整改照片',tag:'待确认',tagCls:'orange',act:taskActs.confirm})}
+  ${taskCard({title:'2026-09-16 15:40',behavior:'冒险作业',owner:'西片区 · 刘志强',deadline:'明日 18:00',tag:'待整改',tagCls:'blue',act:taskActs.none})}
+  ${taskCard({title:'2026-09-16 09:12',behavior:'野蛮施工',owner:'南片区 · 周天乐',deadline:'已超时',tag:'已超时',tagCls:'red',act:'<button class="solid">催办</button><button>改派</button>'})}`,
+
+company_ledger:`<div class="tabs"><button class="on">全部</button><button>待整改</button><button>已闭环</button></div>
+  ${['2026-09-17|公司查处|未佩戴安全帽|待整改|blue','2026-09-17|乡镇查处|未系安全带|已闭环|green','2026-09-16|公司查处|违章指挥|待整改|blue','2026-09-16|自查自纠|冒险作业|已闭环|green']
+    .map(s=>{const [d,src,b,st,cls]=s.split('|');return `<div class="rec"><div class="top"><span class="date">${d}</span><span class="tag ${cls}">${st}</span></div>
+    <div class="kv"><span class="k">检查来源</span><span class="v">${src}</span></div>
+    <div class="kv"><span class="k">三违行为</span><span class="v">${b}</span></div><span class="tag blue">有照片</span></div>`}).join('')}`,
+
+/* ========== 管理员 ========== */
+admin_home:`${hero('admin')}
+  <div class="stat-row">
+    <div class="stat blue"><div class="n">12</div><div class="l">今日三违</div></div>
+    <div class="stat danger"><div class="n">3</div><div class="l">超时未整改</div></div>
+    <div class="stat ok"><div class="n">86%</div><div class="l">按时闭环率</div></div></div>
+  <div class="card"><div class="sec">闭环进度（本月）</div>
+    <div class="kv"><span class="k" style="width:90px">已闭环</span><span class="v">146 / 170</span></div>
+    <div class="progress"><i style="width:86%"></i></div></div>
+  <div class="duo"><button class="btn ghost" onclick="go('supervise')">整改监督<span class="badge" data-n="3"></span></button>
+  <button class="btn ghost" onclick="go('std')">三违标准库</button></div>
+  <div style="height:12px"></div>
+  <div class="card"><div class="sec">超时预警</div>
+    ${taskCard({title:'2026-09-15',behavior:'野蛮施工',owner:'南片区 · 周天乐',deadline:'超时 2 天',tag:'已超时',tagCls:'red',act:'<button class="solid">催办</button>'})}</div>`,
+
+admin_supervise:`<div class="tabs"><button class="on">全部</button><button>待整改</button><button>已超时</button><button>已闭环</button></div>
+  ${taskCard({title:'2026-09-17 11:02',behavior:'未佩戴安全帽',owner:'东片区 · 王建国',deadline:'今日 18:00',tag:'待整改',tagCls:'blue',act:taskActs.none})}
+  ${taskCard({title:'2026-09-16 16:20',behavior:'违章指挥',owner:'西片区 · 刘志强',deadline:'已提交待确认',tag:'待确认',tagCls:'orange',act:taskActs.confirm})}
+  ${taskCard({title:'2026-09-15 09:00',behavior:'野蛮施工',owner:'南片区 · 周天乐',deadline:'超时 2 天',tag:'已超时',tagCls:'red',act:'<button class="solid">催办</button><button>改派</button>'})}
+  ${taskCard({title:'2026-09-14 14:30',behavior:'未系安全带',owner:'东片区 · 李卫东',deadline:'按时闭环',tag:'已闭环',tagCls:'green',act:taskActs.none})}`,
+
+admin_ledger:`<div class="tabs"><button class="on">全部</button><button>公司查处</button><button>乡镇查处</button></div>
+  ${['2026-09-17|公司查处|陈国强|未佩戴安全帽','2026-09-17|乡镇查处|曹周平|未系安全带','2026-09-16|乡镇查处|曹周平|野蛮施工']
+    .map(s=>{const [d,src,insp,b]=s.split('|');return `<div class="rec"><div class="top"><span class="date">${d}</span><span class="tag blue">有照片</span></div>
+    <div class="kv"><span class="k">检查来源</span><span class="v">${src}</span></div>
+    <div class="kv"><span class="k">检查人</span><span class="v">${insp}</span></div>
+    <div class="kv"><span class="k">三违行为</span><span class="v">${b}</span></div></div>`}).join('')}`,
+
+admin_std:`<div class="card"><div class="sec">三违行为标准库</div>
+  ${[['未佩戴安全帽','公司查处/乡镇查处/自查自纠','生效'],['未系安全带','公司查处/乡镇查处','生效'],['违章指挥','公司查处','生效'],['冒险作业','公司查处/乡镇查处','生效'],['野蛮施工','公司查处/乡镇查处/自查自纠','停用']]
+    .map(([n,src,st])=>`<div class="rec" style="margin-bottom:8px;background:#F8FAFD"><div class="top"><span class="date" style="font-size:14px">${n}</span>
+    <span class="tag ${st==='生效'?'green':'gray'}">${st}</span></div>
+    <div class="kv"><span class="k">适用来源</span><span class="v" style="color:var(--text-2)">${src}</span></div></div>`).join('')}
+  <div class="hint">标准项与扣分规则由系统配置统一管理，移动端只读；新增/修改需在 PC 端完成。</div></div>`
+};
+
+/* ================= 渲染 ================= */
+const pagesEl=document.getElementById('pages'),tabbarEl=document.getElementById('tabbar');
+function render(){
+  const R=ROLES[role];
+  document.getElementById('whoName').textContent=R.name;
+  document.getElementById('whoAvatar').textContent=R.name[0];
+  let html='';
+  R.tabs.forEach(([id,label])=>{
+    if(id==='me'){
+      const extra=role==='admin'?'<button>基础数据管理<span class="arr">›</span></button>':'';
+      html+=`<section class="page${tab===id?' show':''}" data-p="${id}">${PAGES.me(role,'',extra)}</section>`;
+    } else {
+      html+=`<section class="page${tab===id?' show':''}" data-p="${id}">${PAGES[role+'_'+id]||`<div class="empty">开发中</div>`}</section>`;
+    }
+  });
+  pagesEl.innerHTML=html;
+  tabbarEl.innerHTML=R.tabs.map(([id,label,icon])=>{
+    const badgeN=((role==='town'&&id==='tasks')?2:0)||((role==='company'&&id==='track')?3:0)||((role==='admin'&&id==='supervise')?3:0);
+    return `<button class="${tab===id?'on':''}" data-t="${id}">
+      <svg viewBox="0 0 24 24"${badgeN?` class="badge" data-n="${badgeN}"`:''}>${T.ico[icon]}</svg>${label}</button>`;
+  }).join('');
+  tabbarEl.querySelectorAll('button').forEach(b=>b.onclick=()=>go(b.dataset.t));
+  pagesEl.scrollTop=0;
+  // chip 交互
+  pagesEl.querySelectorAll('.chips,.duo,.tabs').forEach(g=>{
+    g.addEventListener('click',e=>{
+      const c=e.target.closest('.chip,label,button');if(!c||g.classList.contains('tabs'))return;
+      g.querySelectorAll('.chip,label').forEach(x=>x.classList.remove('on'));c.classList.add('on');
+    });
+  });
+}
+function go(p){tab=p;render()}
+function toast(msg){
+  const d=document.createElement('div');
+  d.textContent=msg;d.style.cssText='position:fixed;left:50%;bottom:110px;transform:translateX(-50%);background:rgba(20,30,50,.85);color:#fff;font-size:13px;padding:10px 18px;border-radius:20px;z-index:99;max-width:80%;text-align:center';
+  document.body.appendChild(d);setTimeout(()=>d.remove(),1800);
+}
+document.getElementById('roleBar').querySelectorAll('button').forEach(b=>{
+  b.onclick=()=>{role=b.dataset.role;tab='home';
+    document.getElementById('roleBar').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));
+    render();};
+});
+render();
+</script>
+</body>
+</html>

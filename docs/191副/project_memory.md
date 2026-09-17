@@ -22,6 +22,41 @@
 - 驾驶员日常三违传导规则 DRIVER004：每起1分，传导仅乡镇作业中心经理（不含管理员）→ 计入「三违管理」（经理上限15）
 - 考核/规则/评分权威口径（2026-09-13 冻结）：唯一权威 = assessment 域 routes/controllers/services + `hse_assessment_rule` 相关表与服务；7 个历史平行项目（rule-engine-*、open-assessment-system、assessment-rule-library/score-design、monthly-assessment-chain-report、grid-inspection-deduction-diagnosis）已冻结归档至 `_archive/parallel-projects/`（只读），禁止再启用或分叉。详细见 `docs/架构决策-考核规则口径.md`
 - 双栈归档（2026-09-13）：运行时唯一真源为 CommonJS `server/app.js`；旧 TS `server/src` + `server/tsconfig.json` 已迁 `_archive/legacy-ts/`。`server/jest.config.js` 与 `jest.integration.config.js` 为活跃测试配置，禁止移动
+- AI 统一 API 必须通过 AI Gateway 路由，禁止 Route→Provider 直连
+- v2 统一 SSE 信封协议必须包含 start→chunk→end/error 完整生命周期，Provider 不可用时客户端仍需收到完整事件流
+- 双轨制实现中必须剥离 compliance_status/checked_by/checked_at/manual_remark 人工轨字段，禁止 AI 写入人工结果
+- 模型列表和健康状态必须如实返回 NOT_CONFIGURED/UNREACHABLE，禁止伪造可用状态或模型信息
+- AI 数据库迁移脚本执行前必须获得用户显式授权，禁止擅自执行
+- AI 智能分析中心 PC 端必须复用既有路由 `/overview/ai-analysis`，禁止新增或重命名一级菜单
+- 前端页面必须先展示确定性统计结果，再展示 AI 分析内容，禁止颠倒顺序
+- 前端轮询必须使用 2500ms 单 timer，仅在存在活跃任务时启动，组件卸载后必须清理
+- 禁止在 AI 分析结果中增加责任人、违规认定、扣分建议等越权字段
+- 任务取消功能必须如实显示状态，PENDING 可取消，RUNNING 仅记录取消请求，禁止显示虚假的「已取消」状态
+- 测试任务必须按 ID 自建自清，确保生产环境零残留
+- 生产库执行数据库迁移或 AI worker 部署必须获得独立授权
+- 前端必须完整展示后端返回的证据信息，禁止编造依据
+- AI 不可用时必须降级展示统计结果，禁止整页报错或伪装分析完成
+- 页面仅允许展示 request/statistics/ai/evidence/status/error/metadata 字段，禁止请求全部业务 records
+- 测试阶段不得越界修复项目既有类型错误
+- AI 智能分析中心菜单 authority 调整为 ['admin','safety_manager']，与后端写权限一致；其余子页保持 ['admin'] 不扩大
+- analysisTypes 必须影响统计计算重点、Prompt 上下文和 AI 输出内容，保持 AI-06 固定八段协议兼容
+- 分析结果必须返回 dataScope={totalAvailable, analyzedRecords, limit, truncated}，前端仅在 truncated=true 时显示明确警告
+- AI 服务 provider 选路必须以显式参数优先，缺省回退全局配置
+- 领域扩展通过 analysisDataAdapter.DOMAINS 注册表实现，三违/WPS 继续只读
+- 管理建议固定协议（AI-10 冻结）：六字段 JSON（overall_assessment≤100字 + priority_issues 2~5条 + management_actions 2~5条 + monitoring_points 1~4条 + follow_up_suggestions 1~4条 + limitations 1~4条，每条≤60字）；服务端 fail-closed 校验（缺字段/类型错/超长→AI_STRUCTURED_OUTPUT_INVALID，空数组合法）；禁止无限生成
+- 管理建议人机边界（AI-10 冻结，fail-closed）：AI 仅输出建议性内容；六类越权表述（责任认定/扣分罚款/处罚处分/整改指令/风险等级变更/考核结果变更）命中即 AI_BOUNDARY_VIOLATION 拒绝采用；数字必须直接引用统计快照禁自算；AI 建议不得写入考核/扣分/隐患整改/三违处罚/风险等级/人员责任任何业务最终字段；层次固定：事实→统计→证据→AI解释→AI建议→人工决定
+- 管理建议持久化（AI-10 冻结）：复用 ai_generation_records（type='analysis'、sub_type='management_suggestion'、title='管理建议:任务#{taskId}' 关联键），零新表零 migration；Evidence 复用 aiEvidenceService，区分统计分析依据（business_record）与制度/知识依据（knowledge_base），不得把 aggregate 级业务证据描述成逐条业务记录证据
+- AI-11 实施需新增数据库结构（migration），必须获得用户确认后方可继续编码
+- AI-11 人工审核权限沿用 'admin' 和 'safety_manager' 角色，审核人信息取自 req.user.id
+- AI-11 人工审核状态包括 PENDING_REVIEW, APPROVED, REJECTED, MODIFIED，且 APPROVED 不等于自动执行，MODIFIED 不等于自动写入业务最终字段
+- AI-11 实施必须确保 AI 原始建议不可被人工审核覆盖，需明确区分 AI 原始建议与人工审核意见
+- AI-11 实施不得修改 Workbuddy 相关代码和生产环境配置
+- AI-12 完成后立即停止，不自行开始 AI-13 及后续任务
+- 生产放行项（Worker 计划任务 / AI Provider 切换 / 生产库迁移 / Ollama 服务化 / Nginx 托管）均需用户独立授权
+- 开发栈停止可用 `scripts\stop-hse-ai.ps1`
+- 生产 5876 端口未触碰，归 HSE-Backend 计划任务（SYSTEM）管理，AI 工具禁止启停/重启 5876
+- 分批提交纪律（2026-09-17 立规）：积压改动一律**按域分批提交**，每批显式 `git add <路径>`，**禁用 `git add -A`**；提交前必跑 `git diff --cached --name-only | grep -iE "\.env|\.pem|\.key|credential|secret|token|uploads/"`（须为空）；提交后用 `git show --name-only --format="" <sha> | grep -iE ...` 复核；**只本地提交，push 需独立授权**
+- `.gitignore` 正式运行脚本例外清单（2026-09-17）：`_*.ps1/_*.js/_*.txt` 等宽泛规则会误伤正式脚本，故显式保留反向例外 `!scripts/hse-ai-health.ps1`、`!scripts/stop-hse-ai.ps1`、`!scripts/pdf_render_png.py`、`!start-hse-ai.ps1`、`!start-hse-ai.bat`、`!server/scripts/ai12_runtime_probe.cjs`。**新增正式脚本落在被 `_*` 规则覆盖的路径下时，必须同步补例外**，否则会被静默忽略而不入库
 
 ## Engineering Conventions
 - '安全文化建设'台账页面在切换到尚无台账的月份时，自动以上一个有台账的月份为基准复制生成台账数据
@@ -31,9 +66,32 @@
 - service 返回 `{ row, error, message }` 业务码约定；controller 负责映射 `error(code,msg)` / `success(...)`
 - 员工风险画像域 hse-risk-profile（Phase B 第22单，2026-09-13 拆分完成）：原 fat router 已三层化（routes/hse-risk-profile.js 聚合入口 + main.js 绑定 + hseRiskProfileController + hseRiskProfileService）。**评分循环有两套且方法不同，严禁合并**：单员工 `/:employeeId/score` 循环用 `rule && rule.ranges`（无 ranges 走 `Math.max(0, max_score - rawValue*10)` 兜底）、`dimensionDetails` 含 `indicator` 字段；批量 `POST /calculate-all` 用 `rule?.ranges`（无 ranges score 恒 0，无兜底）、`dimensionDetails` 不含 `indicator`。详情 head 注释的 `GET /dimension/:type` 原代码不存在，禁止新增假端点。
 - 员工风险画像域既有路由遮蔽：`GET /:employeeId` 早于 `GET /score-config` 注册，后者被遮蔽不可达（命中详情→bigint 转换错误）；拆分保序保遮蔽，断言此故障照旧，不得提前注册修复。
+- HseDataGrid 宽表不复用 `auto-width`（2026-09-14）：`auto-width` 在 HseDataGrid 内部会设置 `scrollX:{enabled:false}`（禁用横向滚动、强制列宽填充容器）。列数多的宽表（如「扣分规则库」12 列）复用会导致列被压缩截断且无法滚动查看=「单元格显示不全」。宽表应保持默认（fit + 横向滚动兜底）并靠 `showOverflow:'tooltip'` 悬停展示完整长文本。**进一步根治**：vxe 单元格默认 `white-space:nowrap`，仅 `showOverflow:false` 不足以保证换行；关键长文本列应用自定义 slot + 样式强制换行（`white-space:pre-wrap; word-break:break-word; line-height:待定`），实现单元格内多行完整显示、行高自适应，「扣分规则库·考核内容」列即以此方式处理。
+- AI 统一 API 收口路径为 `/api/hse/ai/v2`，包含 health/providers/models/generate/stream/analyze 端点
+- Legacy AI API 分类：ai.js 包含 risk-predict/classify/anomaly-detect（统计规则，LEGACY）和 qa（MOCK）；ai-enhanced 包含 generate-report/root-cause/records/records/:id/DELETE/provider-status（CURRENT）
+- 前端 AI API 层位于 `安全看板vben/apps/web-naive/src/api/hse/ai.ts`，包含 getHealth/getProviders/getModels/generate/stream/analyze 等方法
+- AI 分析任务状态机：PENDING/RUNNING/COMPLETED/FAILED/CANCELLED/RETRYING，仅允许显式状态转换
+- AI 分析任务并发控制：默认并发数=1，同一时间 RUNNING DATA_ANALYSIS 任务≤1
+- AI 分析任务幂等性：通过 request_hash 识别重复请求，活跃任务直接复用
+- AI 智能分析中心页面结构：HsePageLayout + 创建区 + 任务列表 + 详情抽屉，使用 Naive UI 2.44.1
+- 证据展示分类：数据依据（business_record）和知识依据（knowledge_base），未使用知识库时需明确提示
+- analysisTypes 实现三处改造：统计层 deriveFocus 生成 focus 标记、Prompt 层 ANALYSIS_TYPE_FOCUS 生成 focusBlock、AI 输出侧重
+- 截断统计实现：先 COUNT(*) 再 LIMIT 拉取，dataScope 随 statisticsSnapshot 落库
+- 端口契约（AI-12 冻结）：开发栈 Backend=5888 / Frontend=5173（可 HSE_BACKEND_PORT / HSE_FRONTEND_PORT 环境变量覆盖）
+- Worker 独立进程策略（AI-12 冻结）：`server/scripts/ai07_worker.cjs` 不挂载 app.js，由启动器独立进程拉起；重复执行检测命令行含 `scripts\ai07_worker.cjs` 即复用（不产生多实例）；并发≤1 由 PostgreSQL advisory lock 保证，多实例空转不重复执行
+- AI 变量进程级注入（AI-12 冻结）：开发栈以进程级 `AI_PROVIDER=ollama` / `AI_TIMEOUT_MS=300000` 覆盖，**不修改 serverenv**；cmd `set` 赋值必须带引号（`set "VAR=value"`），裸赋值会产生尾部空格导致 Provider 匹配失败（activeProvider=null）
+- AI 识图（2026-09-17 冻结）：培训记录导入新增独立「AI 识图」入口（POST /api/training-ocr/ai-recognize，requireRole admin/safety_manager），支持**图片与 PDF**；后端 PDF 走 `scripts/pdf_render_png.py`（PyMuPDF 2x 渲染，候选解释器 PDF_RENDER_PYTHON → PATH python → .env PYTHON_PATH）逐页交给 Ollama `qwen2.5vl:7b` 识别后合并 rows，最多 8 页；图片走原路
+- visionService 视觉参数（2026-09-17 冻结）：超时优先级 `OLLAMA_VL_TIMEOUT_MS` > `AI_TIMEOUT_MS` > 默认 300s（CPU 冷加载 5.6GB VL 模型可超 180s）；`num_ctx` 默认 8192（A4@2x 视觉 token 约 2.5k，qwen2.5vl 默认 4096 会超限报 exceed_context_size_error）；渲染 3x 会超 4096 上下文，**禁用 3x**
+- 开发栈 vite 代理（2026-09-17 冻结）：`web-naive/vite.config.ts` `/api` 默认 target=5882（无服务）、`/uploads` 默认 5876（生产！）；**手动起 vite 必须注入** `VITE_PROXY_TARGET` 与 `VITE_UPLOADS_PROXY_TARGET=http://127.0.0.1:5888`（start-hse-ai.ps1 标准注入），否则页面 API 全部 ERR_CONNECTION_ABORTED 且上传可能误触生产 5876
+- PowerShell env 边界（2026-09-17）：每条 Shell 命令独立进程，`$env:PORT` 等设置**不跨命令持久**；启动后端/前端必须「同一命令内先 set env 再 node」；拆分两步会导致 node 用默认端口（如 5666）启动且无 AI env
+- 老 OCR 环境不可用（2026-09-17 现状）：传统 /recognize（ocr_ledger.py Tesseract + PyMuPDF）在 `.workbuddy` python 3.13.12（server/.env PYTHON_PATH）缺 fitz/tesseract 全链路失败；`.env` 属生产配置禁改 → 培训台账导入请走 AI 识图
+- 生产 5876 常驻（PID 实测 Program Files nodejs app.js）：多次端口排查确认 5876 由生产进程持有，AI 开发端仅用 5888/5173
 
 ## Lessons Learned
 - koa-connect wrapper caused subtle ctx.state data loss; native Koa rewrite is required instead of wrapping Express middleware
 - Backend modifications may not take effect if old processes are not completely terminated before restarting
 - 身份证打码功能使用纯数字正则 `/({6}){8}({4})/` 导致含X的身份证号无法匹配，造成明码显示；需使用通用正则 `^(.{6}).*(.{4})$` 兼容18位含X与15位老证
 - Custom NInput slot (`trainingDate-edit`) + formatter for inline editing in vxe-table caused unreliable value write-back to `row.trainingDate` on blur, resulting in saving old values; native input editor is required instead
+- AI-01 报告中声称存在的 `ai_generation_records` 表经实际数据库检查不存在，需以实际数据库状态为准
+- Ollama 路由缺陷：aiService.chat/chatStream 原按全局 config.provider 选端点，导致显式 provider='ollama' 调用打到远程 Grok 地址；修复为尊重 options.provider，Provider 实现显式传 provider: this.name
+- CPU 大模型超时口径：qwen2.5:7b 冷启动/生成约 60~125s，worker AI_TIMEOUT_MS=60000 偏紧；需进程级覆盖验证，配置默认值待治理

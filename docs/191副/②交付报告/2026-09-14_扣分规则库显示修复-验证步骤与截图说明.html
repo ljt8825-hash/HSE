@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>扣分规则库列表显示修复 · 验证步骤与截图说明</title>
+<style>
+  :root{
+    --primary:#1f6feb; --primary-soft:#e7f0ff; --ok:#168a3e; --ok-soft:#e6f6ec;
+    --warn:#b96a00; --warn-soft:#fff4e0; --border:#dfe4ee; --bg:#f6f8fc;
+    --text:#1f2430; --muted:#6b7180; --code:#0b3d6e;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;color:var(--text);background:var(--bg);line-height:1.65}
+  .wrap{max-width:1080px;margin:32px auto;padding:0 20px}
+  .sheet{background:#fff;border:1px solid var(--border);border-radius:14px;overflow:hidden}
+  header{background:linear-gradient(135deg,#0a4da8,#1f6feb);color:#fff;padding:28px 32px}
+  header h1{margin:0 0 6px;font-size:22px}
+  header p{margin:0;opacity:.92;font-size:14px}
+  .badges{margin-top:12px;display:flex;gap:8px;flex-wrap:wrap}
+  .badge{background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.35);padding:3px 10px;border-radius:20px;font-size:12px}
+  section{padding:22px 32px;border-top:1px solid var(--border)}
+  h2{font-size:17px;margin:0 0 14px;display:flex;align-items:center;gap:8px}
+  h2 .tag{font-size:12px;color:#fff;background:var(--primary);border-radius:6px;padding:1px 8px;font-weight:600}
+  h3{font-size:14px;margin:18px 0 8px;color:#0b2b50}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;margin:10px 0}
+  th,td{border:1px solid var(--border);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:#f0f4fb;font-weight:600;white-space:nowrap}
+  tr:nth-child(even) td{background:#fafbff}
+  code{background:#eef3fb;border:1px solid #d7e2f4;color:var(--code);padding:1px 6px;border-radius:4px;font-size:12.5px}
+  .pill{display:inline-block;font-size:12px;padding:1px 9px;border-radius:12px;font-weight:600;white-space:nowrap}
+  .pill-ok{background:var(--ok-soft);color:var(--ok);border:1px solid #bfe6cc}
+  .pill-warn{background:var(--warn-soft);color:var(--warn);border:1px solid #f2d29a}
+  .stepnum{display:inline-flex;width:24px;height:24px;border-radius:50%;background:var(--primary);color:#fff;font-size:13px;align-items:center;justify-content:center;font-weight:700}
+  ul{margin:6px 0;padding-left:20px}
+  li{margin:3px 0}
+  .note{background:#fff8e6;border:1px solid #f0dcae;border-left:4px solid var(--warn);border-radius:8px;padding:10px 14px;font-size:13.5px;margin:12px 0}
+  .okbar{background:var(--ok-soft);border:1px solid #cdeeda;border-left:4px solid var(--ok);border-radius:8px;padding:10px 14px;font-size:13.5px;margin:12px 0}
+  .shot-frame{background:repeating-linear-gradient(45deg,#f6f8fc,#f6f8fc 12px,#eef2f9 12px,#eef2f9 24px);border:1.5px dashed #b9c6dd;border-radius:8px;padding:10px 12px;font-size:12.5px;color:var(--muted);margin:8px 0}
+  .shot-frame b{color:var(--code)}
+  figure{margin:14px 0}
+  figcaption{font-size:12.5px;color:var(--muted);text-align:center;margin-top:6px}
+  .scope{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:12px}
+  @media(max-width:760px){.scope{grid-template-columns:1fr}}
+  .scope .card{border:1px solid var(--border);border-radius:10px;padding:12px 14px}
+  .scope .card h4{margin:0 0 8px;font-size:14px}
+  footer{padding:16px 32px;color:var(--muted);font-size:12.5px;border-top:1px solid var(--border)}
+  .sgv-box{width:100%;height:auto;display:block}
+  .reward{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .reward label{display:flex;align-items:center;gap:8px;border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:13.5px}
+  .sq{font-family:ui-monospace,Consolas,monospace;font-size:12.5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="sheet">
+  <header>
+    <h1>扣分规则库列表「单元格显示不全」修复 · 验证步骤与截图说明</h1>
+    <p>二级菜单 <b>扣分规则库</b> → 右侧规则列表 · web-naive 前端 · G:\hse-dashboard</p>
+    <div class="badges">
+      <span class="badge">日期 2026-09-14</span>
+      <span class="badge">改动文件：apps/web-naive/src/views/hse/assessment-rule/index.vue</span>
+      <span class="badge">类别：验证 / 测试验收</span>
+    </div>
+  </header>
+
+  <section>
+    <h2><span class="tag">前置准备</span> 开始验证前请确认</h2>
+    <table>
+      <tr><th>项目</th><th>要求</th><th>是否就绪</th></tr>
+      <tr><td>代码生效</td><td>本地已运行最新前端（npm/pnpm dev，端口 5173），或已构建部署包含本次改动（移除 <code>auto-width</code> + 列宽调整）。<br><b>要点：</b>本次改动只动前端，后端 5876/5881 与数据库无需变更。</td><td>☐</td></tr>
+      <tr><td>角色/权限</td><td>使用能查看「扣分规则库」的账号登录（如管理员/经理类角色）。</td><td>☐</td></tr>
+      <tr><td>两条视窗</td><td style="white-space:nowrap">1920 宽屏 + 1366/1440 窄屏（可用浏览器开发者工具切换设备宽度模拟）</td><td>☐</td></tr>
+      <tr><td>截图工具</td><td>浏览器整窗或整页截图（F12 → 三个点 → 捕获全尺寸截图）</td><td>☐</td></tr>
+    </table>
+    <div class="note">说明：以下每一步都标注了“应截图的内容与角度”。请在浏览器中按步骤操作并截图，把截图贴在对应条目下方（或按文件名归档），即可完成验证归档。</div>
+  </section>
+
+  <section>
+    <h2><span class="tag">预期结论</span> 本次修复的目标效果</h2>
+    <div class="scope">
+      <div class="card"><h4 style="color:var(--ok)">修复前（问题态）</h4><ul>
+        <li>12 列被强制填满容器、无横向滚动。</li>
+        <li>窄屏下「考核内容」等长文本列被压缩截断，无法滚动查看。</li>
+      </ul></div>
+      <div class="card"><h4 style="color:var(--primary)">修复后（预期态）</h4><ul>
+        <li>宽屏：列表仍占满可视宽度，观感不变。</li>
+        <li>窄屏：出现<b>横向滚动条</b>，可滚动查看每一列完整内容。</li>
+        <li>「考核内容」加宽至 250px，长文本更少省略；悬停仍显示完整内容（tooltip）。</li>
+      </ul></div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="tag">示意图</span> 前后对比（内嵌示意图，非实拍）</h2>
+    <figure>
+      <svg class="sgv-box" viewBox="0 0 760 168" role="img" aria-label="修复前后对比示意">
+        <rect x="0" y="0" width="760" height="168" rx="10" fill="#f6f8fc"/>
+        <text x="20" y="30" font-size="14" font-weight="700" fill="#b96a00">修复前：列被压缩，长文本截断</text>
+        <g font-size="10">
+          <rect x="20" y="42" width="70"  height="34" fill="#fff" stroke="#c9d4e8"/><text x="28" y="63" fill="#6b7180">编码</text>
+          <rect x="94" y="42" width="80"  height="34" fill="#fff" stroke="#c9d4e8"/><text x="102" y="63" fill="#6b7180">类别</text>
+          <rect x="178" y="42" width="150" height="34" fill="#fff" stroke="#e0a649"/><text x="186" y="57" fill="#b96a00">未对转运站进行检查，标识牌…</text><text x="186" y="70" fill="#d8a03c">（内容被截断，看不全）</text>
+          <rect x="332" y="42" width="120" height="34" fill="#fff" stroke="#c9d4e8"/><text x="340" y="63" fill="#6b7180">数据来源</text>
+        </g>
+        <line x1="16" y1="95" x2="744" y2="95" stroke="#d6dfee" stroke-dasharray="4 3"/>
+        <text x="20" y="120" font-size="14" font-weight="700" fill="#168a3e">修复后：可横向滚动，完整查看</text>
+        <g font-size="10">
+          <rect x="20" y="132" width="70"  height="34" fill="#fff" stroke="#c9d4e8"/><text x="28" y="153" fill="#6b7180">编码</text>
+          <rect x="94" y="132" width="250" height="34" fill="#fff" stroke="#3a8c5a"/><text x="102" y="153" fill="#168a3e">未对转运站进行检查，检查记录标识缺失、破损的按要求整改并复核</text>
+          <rect x="348" y="132" width="120" height="34" fill="#fff" stroke="#c9d4e8"/><text x="356" y="153" fill="#6b7180">数据来源…➜</text>
+        </g>
+      </svg>
+      <figcaption>注：示意用图形，说明列宽与滚动表现；真实效果以浏览器截图为准。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2><span class="tag">验证步骤</span> 共 6 步（含 4 个必截图节点）</h2>
+    <p style="margin:0 0 6px;font-size:13.5px">按顺序执行；每步给出「操作」→「预期」→「判定」→「截图说明」。全部通过且截图齐全即完成验收。</p>
+
+    <table>
+      <thead><tr><th style="width:44px">步骤</th><th style="width:24%">操作</th><th style="width:26%">预期效果</th><th style="width:22%">判定标准</th><th>截图说明（必截 ⭐）</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><span class="stepnum">1</span></td>
+          <td>登录系统，进入「分析页 → 我的待办 → … → 扣分规则库」二级菜单，打开规则列表。</td>
+          <td>列表正常加载，无报错、无空白行，「规则总数」统计卡正常。</td>
+          <td><span class="pill pill-ok">通过</span>／<span class="pill pill-warn">不通过</span></td>
+          <td><b>⭐ 整页截图</b>：完整页面，能看清左侧菜单选中「扣分规则库」及右侧列表。</td>
+        </tr>
+        <tr>
+          <td><span class="stepnum">2</span></td>
+          <td>切换到 <b>1920 宽视窗</b>（或当前最大屏），观察表格。</td>
+          <td>表格列宽约占满内容区，基本无横向滚动条，外观与修复前一致。</td>
+          <td><span class="pill pill-ok">通过</span>／<span class="pill pill-warn">不通过</span></td>
+          <td><b>⭐ 整页截图</b>：验证宽屏下列宽填满、不出现大段空白。</td>
+        </tr>
+        <tr>
+          <td><span class="stepnum">3</span></td>
+          <td>用浏览器开发者工具将视窗切换到 <b>1366（或 1440）窄屏宽度</b>，重看列表底部。</td>
+          <td>表格底部出现<b>横向滚动条</b>；列不再被强制挤压截断，可左右拖动查看。</td>
+          <td>「横向滚动条是否出现」为<b>核心判定</b><br><span class="pill pill-ok">通过</span>／<span class="pill pill-warn">不通过</span></td>
+          <td><b>⭐ 整页截图</b>：需能看到表格下方横向滚动条（红色圈出）。</td>
+        </tr>
+        <tr>
+          <td><span class="stepnum">4</span></td>
+          <td>在窄屏下<b>拖动横向滚动条到最右</b>，检查「操作」列（应用/编辑/删除）。</td>
+          <td>滚动到右侧后「操作」列完整可见、三个按钮可用。</td>
+          <td><span class="pill pill-ok">通过</span>／<span class="pill pill-warn">不通过</span></td>
+          <td><b>⭐ 截图</b>：右侧「操作」列区域，三个按钮清晰可见。</td>
+        </tr>
+        <tr>
+          <td><span class="stepnum">5</span></td>
+          <td>将鼠标<b>悬停</b>在「考核内容」列任一被截断的单元格上（如“未对转运站检查…/信息不完整”）。</td>
+          <td>鼠标悬停后浮出 <b>tooltip 气泡</b>，显示该单元格完整文本。</td>
+          <td><span class="pill pill-ok">通过</span>／<span class="pill pill-warn">不通过</span></td>
+          <td><b>⭐ 截图</b>：悬停状态，tooltip 浮层 + 完整文本。<br><span class="sq">（Float 布局）</span></td>
+        </tr>
+        <tr>
+          <td><span class="stepnum">6</span></td>
+          <td>回归：对任意一行点击「应用 / 编辑 / 删除（取消）」，并切换页面「扣分规则 / 子项」标签。</td>
+          <td>操作与标签切换行为与修复前一致，无新增功能回归。</td>
+          <td><span class="pill pill-ok">通过</span>／<span class="pill pill-warn">不通过</span></td>
+          <td>可选截图（记录左上角“使用说明/刷新”操作区）。</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2><span class="tag">关键判定速查</span> 一眼确认是否修好</h2>
+    <div class="okbar"><b>✅ 判定为修复成功，需同时满足：</b></div>
+    <ul>
+      <li>窄屏（≤1440）下列表出现<b>横向滚动条</b>，可滚动查看完整内容（步骤 3）。</li>
+      <li>「考核内容」列明显比修复前宽（≥250px），长文本省略减少（步骤 2/5）。</li>
+      <li>悬停长文本可显示完整 **tooltip**（步骤 5）。</li>
+      <li>宽屏下列宽正常填满，操作列可用（步骤 2/4），无功能回归（步骤 6）。</li>
+    </ul>
+    <div class="note"><b>若结果为“不通过/无滚动条”：</b>多因浏览器仍加载旧代码（未刷新/未重启 dev）。请硬刷新（Ctrl+F5）或重启前端 dev 后重试步骤 3。若仍异常，记录浏览器版本 + 视窗宽度后回传。</div>
+  </section>
+
+  <section>
+    <h2><span class="tag">验收记录</span> 填写并归档</h2>
+    <table>
+      <tr><th>步骤</th><th>结果（勾选）</th><th>备注 / 截图文件路径</th></tr>
+      <tr><td>1 页面加载</td><td>☐ 通过　☐ 不通过</td><td></td></tr>
+      <tr><td>2 宽屏列宽填充</td><td>☐ 通过　☐ 不通过</td><td></td></tr>
+      <tr><td>3 窄屏横向滚动</td><td>☐ 通过　☐ 不通过</td><td>（核心项）</td></tr>
+      <tr><td>4 操作列可用</td><td>☐ 通过　☐ 不通过</td><td></td></tr>
+      <tr><td>5 长文本 tooltip</td><td>☐ 通过　☐ 不通过</td><td></td></tr>
+      <tr><td>6 功能回归</td><td>☐ 通过　☐ 不通过</td><td></td></tr>
+      <tr><td colspan="3">验收人 / 日期：＿＿＿＿＿＿＿＿　　＿＿＿＿＿＿</td></tr>
+    </table>
+  </section>
+
+  <footer>
+    本说明针对本次改动：<code>assessment-rule/index.vue</code> 移除 <code>auto-width</code>（HseDataGrid 内部 <code>scrollX:{enabled:false}</code>）+ 列宽分配调整（考核内容 150→250 等）。
+    <br>关联交付报告见归档：<code>docs\191副\②交付报告\2026-09-14_扣分规则库列表单元格显示不全修复.md</code>
+  </footer>
+</div>
+</div>
+</body>
+</html>
