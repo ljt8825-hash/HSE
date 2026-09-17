@@ -26,7 +26,7 @@
   </style>
 </head>
 <body>
-  <div class="bar"><a class="back" href="javascript:history.back()">‹</a>巡查详情</div>
+  <div class="bar"><a class="back" href="./records.html">‹</a>巡查详情</div>
   <div class="wrap">
     <div id="detail" class="banner info">加载中…</div>
   </div>
@@ -34,7 +34,7 @@
   <script src="./app.js"></script>
   <script>
     (async () => {
-      if (sessionExpiredLocally()) { clearSession(); location.href = './login.html'; return; }
+      if (sessionExpiredLocally()) { clearSession(); redirectToLogin(); return; }
       const id = new URLSearchParams(location.search).get('id') || '';
       const box = document.getElementById('detail');
       const r = await mobileApi('/api/mobile/patrol/records?id=' + encodeURIComponent(id));

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>网格长巡查</title>
+<!-- CF-WPS-24：本页只是「入口分流」，不是业务页。
+     · 有会话，或勾过「记住我」（本机存有凭据）→ 首页 /check（check.html 的 view-home 就是首页）
+     · 都没有 → 登录页
+     一律 location.replace：分流页不占历史栈，所以从首页按返回键不会再退回这里。
+     说明：/home 已彻底废弃（见 _redirects → /check），旧书签/旧二维码 302 直接进首页。
+     注意：这里**不要**再用 <meta http-equiv="refresh">——它会产生一条独立历史记录，
+     而且会和下面的脚本重复导航，是「返回键回到分流页」的根因之一。 -->
+<script>
+(function () {
+  var hasSession = null, hasCreds = null;
+  try {
+    hasSession = localStorage.getItem('h5_session_token') || sessionStorage.getItem('h5_session_token');
+    hasCreds = localStorage.getItem('hse_login_creds_v1');
+  } catch (e) { /* 隐私模式/存储被禁：按未登录处理 */ }
+  location.replace((hasSession || hasCreds) ? './check.html' : './login.html');
+})();
+</script>
+</head>
+<body style="font-family:system-ui,-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;padding:24px;color:#111827;">
+正在进入网格巡查系统…（若未自动跳转，请 <a href="./login.html">点此前往登录</a>）
+</body>
+</html>

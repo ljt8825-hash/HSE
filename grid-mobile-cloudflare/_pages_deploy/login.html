@@ -11,10 +11,13 @@
     h1 { font-size: 20px; color: #1f2d3d; text-align: center; margin-bottom: 6px; }
     .sub { font-size: 12px; color: #909399; text-align: center; margin-bottom: 24px; }
     label { display: block; font-size: 13px; color: #606266; margin: 14px 0 6px; }
-    input { width: 100%; height: 44px; border: 1px solid #dcdfe6; border-radius: 8px; padding: 0 12px; font-size: 16px; outline: none; }
-    input:focus { border-color: #409eff; }
+    input[type=tel], input[type=password] { width: 100%; height: 44px; border: 1px solid #dcdfe6; border-radius: 8px; padding: 0 12px; font-size: 16px; outline: none; }
+    input[type=tel]:focus, input[type=password]:focus { border-color: #409eff; }
     button { width: 100%; height: 44px; margin-top: 24px; border: none; border-radius: 8px; background: #2563eb; color: #fff; font-size: 16px; cursor: pointer; }
     button:disabled { background: #a0cfff; }
+    .remember { display: flex; align-items: center; gap: 8px; margin-top: 16px; font-size: 13px; color: #606266; user-select: none; }
+    .remember input { width: 16px; height: 16px; accent-color: #2563eb; margin: 0; }
+    .remember .hint { color: #a8abb2; font-size: 12px; }
     .err { margin-top: 14px; font-size: 13px; color: #f56c6c; text-align: center; min-height: 18px; }
   </style>
 </head>
@@ -26,6 +29,10 @@
     <input id="phone" type="tel" inputmode="numeric" maxlength="11" autocomplete="username" placeholder="请输入 11 位手机号" />
     <label for="password">密码</label>
     <input id="password" type="password" maxlength="72" autocomplete="current-password" placeholder="请输入密码" />
+    <div class="remember">
+      <input type="checkbox" id="remember" checked />
+      <label for="remember" style="margin:0;cursor:pointer">记住我（下次打开自动登录）</label>
+    </div>
     <button id="btn">登 录</button>
     <div class="err" id="err"></div>
   </div>
@@ -34,19 +41,38 @@
   <script>
     const btn = document.getElementById('btn');
     const err = document.getElementById('err');
-    btn.addEventListener('click', async () => {
+    const phoneEl = document.getElementById('phone');
+    const pwdEl = document.getElementById('password');
+    const rememberEl = document.getElementById('remember');
+    const HOME = './check.html';   // CF-WPS-23：登录后直达检查页，不再经过工作台
+
+    // 进入本页即尝试免登录：①本地会话仍有效 ②有「记住我」凭据 → 静默重登
+    (async () => {
+      const hadCreds = !!loadLoginCreds();
+      if (sessionExpiredLocally() && !hadCreds) return;   // 无会话也无凭据 → 直接展示表单
+      const c = loadLoginCreds();
+      if (c) { phoneEl.value = c.phone; pwdEl.value = c.password; }
+      btn.disabled = true; btn.textContent = '自动登录中…';
+      const ok = await ensureSession();
+      if (ok) { location.replace(HOME); return; }
+      btn.disabled = false; btn.textContent = '登 录';
+      if (hadCreds) err.textContent = '自动登录已失效，请重新登录';
+      else { pwdEl.value = ''; }
+    })();
+
+    async function doLogin() {
       err.textContent = '';
-      const phone = document.getElementById('phone').value.trim();
-      const password = document.getElementById('password').value;
+      const phone = phoneEl.value.trim();
+      const password = pwdEl.value;
       if (!/^1\d{10}$/.test(phone)) { err.textContent = '请输入正确的 11 位手机号'; return; }
       if (!password) { err.textContent = '请输入密码'; return; }
       btn.disabled = true; btn.textContent = '登录中…';
       try {
         const r = await mobileApi('/api/mobile/auth/login', { phone, password });
         if (r.status === 200 && r.body.success) {
-          sessionStorage.setItem('h5_session_token', r.body.token);
-          sessionStorage.setItem('h5_session_exp', String(Date.now() + (r.body.expiresIn || 7200) * 1000));
-          location.href = './home.html';
+          setSession(r.body.token, r.body.expiresIn);
+          if (rememberEl.checked) saveLoginCreds(phone, password); else clearLoginCreds();
+          location.replace(HOME);
         } else {
           err.textContent = r.body.message || '登录失败';
         }
@@ -55,7 +81,11 @@
       } finally {
         btn.disabled = false; btn.textContent = '登 录';
       }
-    });
+    }
+    btn.addEventListener('click', doLogin);
+    [phoneEl, pwdEl].forEach(el => el.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); doLogin(); }
+    }));
   </script>
 </body>
 </html>

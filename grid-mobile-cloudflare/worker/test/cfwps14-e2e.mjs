@@ -1,4 +1,15 @@
 /* CF-WPS-14 REAL-BROWSER E2E (local stand-in for Cloudflare Pages+Worker).
+ *
+ * ⚠️ 已废弃（2026-09-17 / CF-WPS-24 起）——**不要直接跑**，它会被跳过或给出无效结论。
+ * 原因：本脚本断言「登录 → 跳转工作台 home.html → 读 #code 回显 employee_code → 点 #logout」，
+ * 而该工作台页 CF-WPS-23 起已并入 check.html 的首页视图，CF-WPS-24 起 /home 连页面都不存在
+ * （_redirects: /home → /check 302）。所以脚本内所有 `**/home.html` 与 `#code` / `#logout`
+ * 步骤自 CF-WPS-23 起即不成立（属既存失效，非 CF-WPS-24 回归）。
+ * 现行等价覆盖（均为只读、零写入）：
+ *   - test/cfwps23-browser-e2e.mjs（登录/免登录/路由/拍照流程，33 断言）
+ *   - test/cfwps24-browser-e2e.mjs（/home 移除、入口分流、返回键历史栈，23 断言）
+ *   - test/cfwps21-browser-e2e.mjs（三视口布局与定位，99 断言）
+ *
  * 纪律：
  *  - 运行真实 Worker handler（index.js export default.fetch）于同域 Node 静态服务器，
  *    前端 API_BASE='' → 同源 /api（等价于生产 Pages Functions 反代架构）。

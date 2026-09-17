@@ -24,7 +24,7 @@
   </style>
 </head>
 <body>
-  <div class="bar"><a class="back" href="./home.html">‹</a>我的巡查记录</div>
+  <div class="bar"><a class="back" href="./check.html">‹</a>我的巡查记录</div>
   <div class="wrap">
     <div id="list" class="banner info">加载中…</div>
   </div>
@@ -32,7 +32,7 @@
   <script src="./app.js"></script>
   <script>
     (async () => {
-      if (sessionExpiredLocally()) { clearSession(); location.href = './login.html'; return; }
+      if (sessionExpiredLocally()) { clearSession(); redirectToLogin(); return; }
       const box = document.getElementById('list');
       const r = await mobileApi('/api/mobile/patrol/records');
       if (r.status !== 200 || !r.body.success) {

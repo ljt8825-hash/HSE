@@ -38,7 +38,7 @@
   </style>
 </head>
 <body>
-  <div class="bar"><a class="back" href="./home.html">‹</a>开始巡查</div>
+  <div class="bar"><a class="back" href="./check.html">‹</a>开始巡查</div>
   <div class="wrap" id="form-view">
     <div id="load-banner" class="banner info">正在获取身份与网格信息…</div>
     <div id="form-body" class="hidden">
@@ -130,12 +130,13 @@
     document.getElementById('to-records').addEventListener('click', () => location.href = './records.html');
 
     (async () => {
-      if (sessionExpiredLocally()) { clearSession(); location.href = './login.html'; return; }
+      if (sessionExpiredLocally()) { clearSession(); redirectToLogin(); return; }
       const r = await mobileApi('/api/mobile/patrol/meta');
       const banner = document.getElementById('load-banner');
       if (r.status !== 200 || !r.body.success) { banner.className = 'banner err'; banner.textContent = r.body.message || '加载失败，请返回重试'; return; }
       meta = r.body;
-      document.getElementById('inspector').value = (meta.employee.name || '') + '（' + meta.employee.employee_code + '）';
+      // 巡查人显示「姓名（网格长等级）」：台账「网格长等级」列（一级/二级/三级网格长），不再显示工号
+      document.getElementById('inspector').value = (meta.employee.name || '') + '（' + (meta.employee.grid_level || '—') + '）';
       document.getElementById('inspect-time').value = nowLocal();
       const sel = document.getElementById('problem-type');
       meta.problem_types.forEach((t) => { const o = document.createElement('option'); o.value = t; o.textContent = t; sel.appendChild(o); });
