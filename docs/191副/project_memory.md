@@ -57,6 +57,7 @@
 - 生产 5876 端口未触碰，归 HSE-Backend 计划任务（SYSTEM）管理，AI 工具禁止启停/重启 5876
 - 分批提交纪律（2026-09-17 立规）：积压改动一律**按域分批提交**，每批显式 `git add <路径>`，**禁用 `git add -A`**；提交前必跑 `git diff --cached --name-only | grep -iE "\.env|\.pem|\.key|credential|secret|token|uploads/"`（须为空）；提交后用 `git show --name-only --format="" <sha> | grep -iE ...` 复核；**只本地提交，push 需独立授权**
 - `.gitignore` 正式运行脚本例外清单（2026-09-17）：`_*.ps1/_*.js/_*.txt` 等宽泛规则会误伤正式脚本，故显式保留反向例外 `!scripts/hse-ai-health.ps1`、`!scripts/stop-hse-ai.ps1`、`!scripts/pdf_render_png.py`、`!start-hse-ai.ps1`、`!start-hse-ai.bat`、`!server/scripts/ai12_runtime_probe.cjs`。**新增正式脚本落在被 `_*` 规则覆盖的路径下时，必须同步补例外**，否则会被静默忽略而不入库
+- 提交完整性铁律（2026-09-17 教训）：**提交 route（含 require）时必须连带提交其 controller/service**。分批提交曾产生「能 commit 但不能运行」的中间态——`routes/hse-dashboard.js` 等已在 HEAD 中 require 目标模块，但目标文件未跟踪，导致 HEAD 检出后 module not found。判定手段：`git cat-file -e "HEAD:<path>"` 权威确认；或提交后用依赖扫描脚本核对已跟踪文件所 require 的本地模块是否齐全
 
 ## Engineering Conventions
 - '安全文化建设'台账页面在切换到尚无台账的月份时，自动以上一个有台账的月份为基准复制生成台账数据
