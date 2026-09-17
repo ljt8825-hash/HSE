@@ -146,6 +146,33 @@ _*.cjs
 *.xlsx
 !docs/**/*.xlsx
 
+# ===== 一次性调试脚本与探针输出（2026-09-17 补全） =====
+# 说明：`_*.cjs` 只覆盖 .cjs；`_*.ps1` / `_*.txt` / `_*.js` 此前未被忽略，
+# 导致 scripts/_ai12_token_dbg.ps1、scripts/_ai12_tdbg_out.txt 等落入未跟踪候选。
+_*.ps1
+_*.js
+_*.txt
+server/_*.txt
+server/ai0*.txt
+server/ai1*.txt
+server/_*.json
+server/*_out.txt
+server/*_err.txt
+server/*.tmp.txt
+server/preflight_*.tmp.cjs
+server/typecheck_out.txt
+安全看板vben/typecheck_out.txt
+# 拆分期间的原文备份残留（__orig_* 为三层化改造时的临时副本）
+**/__orig_*.js
+
+# ===== 例外：受版本控制的正式运行脚本（禁止被上面的 _* 规则吞掉） =====
+!scripts/hse-ai-health.ps1
+!scripts/stop-hse-ai.ps1
+!scripts/pdf_render_png.py
+!start-hse-ai.ps1
+!start-hse-ai.bat
+!server/scripts/ai12_runtime_probe.cjs
+
 # ===== 上传与导出 =====
 uploads/
 server/uploads/
@@ -302,6 +329,12 @@ scripts/_sample_*
 
 # server/scripts 下的运行输出/诊断
 server/scripts/output/
+# AI/重构期一次性校验脚本的产物（状态快照 + 类型检查输出），非源码
+server/scripts/*_vuetsc_output.txt
+安全看板vben/apps/*/ai*_vuetsc_output.txt
+**/ai*_vuetsc_output.txt
+server/scripts/_e09_dev_e2e_*.json
+server/scripts/p2b1e*_dev_before_*.json
 
 # 根级探针输出单文件
 /_*.txt
