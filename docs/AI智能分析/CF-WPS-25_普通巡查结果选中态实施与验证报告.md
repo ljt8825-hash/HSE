@@ -4,7 +4,7 @@
 - **页面**：`/check` → 开始检查 → 现场拍照 → 「不是三违」 → **普通巡查**（`#view-patrol`）
 - **用户诉求（原话）**：「@image#1 在点击"一般问题"或"现场正常"时，没有标记到底是点的哪个」
 - **结论**：已修复并上线。Pages 部署 `ba608582.grid-mobile-cloudflare.pages.dev`（生产别名 `grid-mobile-cloudflare.pages.dev`）；**未动 Worker**。
-- **验证**：本地 41 PASS / 0 FAIL；**生产 41 PASS / 0 FAIL**；同页回归 cfwps23 33/33、路由回归 cfwps24 22/22。
+- **验证**：本地 60 PASS / 0 FAIL；**生产 60 PASS / 0 FAIL**；同页回归 cfwps23 33/33、路由回归 cfwps24 22/22。
 
 ---
 
@@ -64,11 +64,11 @@ function renderPatrolChoice(){
 
 ## 三、验证（CF-WPS-25 浏览器 E2E，`worker/test/cfwps25-browser-e2e.mjs`）
 
-分两层，共 **41 条断言**。
+分两层，共 **60 条断言**。
 
 **一、静态层（源码，14 条）**：卡数与结构、唯一渲染函数及其三项职责、复用点（4 处）、旧「无视觉反馈」写法已消失、CSS 规则存在且用 box-shadow。
 
-**二、浏览器层（决定性，27 条）** —— 关键在**不只断言 class，而是断言 computedStyle 的真实差异**（只看 class 会漏掉「加了 class 但 CSS 没生效」的假绿）：
+**二、浏览器层（决定性，46 条）** —— 关键在**不只断言 class，而是断言 computedStyle 的真实差异**（只看 class 会漏掉「加了 class 但 CSS 没生效」的假绿）：
 
 | 断言 | 生产实测值 |
 |---|---|
@@ -83,7 +83,16 @@ function renderPatrolChoice(){
 | B5 任意时刻选中数恒为 1（互斥），反复切换仍为 1 | ✓ |
 | B6 返回分类页重进 → 高亮清空、按钮回禁用 | ✓ |
 | B7 首页重新发起检查（`startCheck`）→ 无残留 | ✓ |
+| B8 矮屏几何（3 机型：360×640 / 375×667 / 390×844）—— 勾选标记不压标题、不压副标题、完整落在卡片内、卡片无横向溢出、右侧留白取到预期分支（矮屏 68px / 常规 76px）、文字可用宽度 ≥200px | 见下表 |
 | 无 JS 运行时错误 / 无 4xx 资源 | ✓ |
+
+B8 实测几何（防「矮屏媒体查询被高特异性规则反压」——只跑 390×844 测不到这条分支）：
+
+| 视口 | 触发矮屏分支 | 实测 `padding-right` | 标题右缘 → 标记左缘 | 文字可用宽度 |
+|---|---|---|---|---|
+| 360×640（安卓小屏） | 是 | **68px** | 275.0 → 295.0（不重叠） | 260px |
+| 375×667（iPhone SE） | 是 | **68px** | 290.0 → 310.0（不重叠） | 275px |
+| 390×844（常规） | 否 | **76px** | 297.0 → 325.0（不重叠） | 282px |
 
 **纪律**：脚本走到 `view-patrol` 即止，**绝不点「完成检查」** ⇒ 不产生任何巡查记录。
 
@@ -95,7 +104,7 @@ function renderPatrolChoice(){
 | `cfwps24-browser-e2e.mjs`（`/home` 移除与历史栈治理） | 22 PASS / 0 FAIL |
 | Worker 离线回归 | **未跑**：`git status` 证明本轮 `worker/` 零改动（源码逐字节未变），跑它只会报一份与本次改动无关的绿 |
 
-截图（本地留存，`.gitignore` 已排除 `_*_shots/`）：`worker/test/_cfwps25_shots/01-none-selected.png`、`02-selected-general.png`、`03-selected-normal.png`、`04-reenter-cleared.png`、`05-new-check-clean.png`。
+截图（本地留存，`.gitignore` 已排除 `_*_shots/`）：`worker/test/_cfwps25_shots/01-none-selected.png`、`02-selected-general.png`、`03-selected-normal.png`、`04-reenter-cleared.png`、`05-new-check-clean.png`、`06-shortscreen-selected.png`。
 
 ## 四、上线与生产探针
 

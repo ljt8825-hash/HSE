@@ -258,6 +258,42 @@ let s1 = null, s2 = null;
   await shot('05-new-check-clean');
 }
 
+/* B8 矮屏（≤700px 高）实测：本次新增的 padding-right 覆盖必须让勾选标记不压到文字
+ * —— 媒体查询里的规则是「同一属性、更高特异性」，容易写成被 .opt-card{padding:18px} 反压，
+ *    只跑 390×844 是测不到的。这里用 3 个真实机型高度实测几何关系。 */
+for (const [w, h, label] of [[360, 640, '安卓小屏 360×640'], [375, 667, 'iPhone SE 375×667'], [390, 844, '常规 390×844']]) {
+  await page.setViewportSize({ width: w, height: h });
+  await page.waitForTimeout(260);
+  const geo = await page.evaluate(() => {
+    const card = document.querySelector('#view-patrol [data-patrol="现场正常"]');
+    const title = card.querySelector('.opt-title'), sub = card.querySelector('.opt-sub'), mark = card.querySelector('.opt-mark');
+    const r = (el) => { const b = el.getBoundingClientRect(); return { l: b.left, r: b.right, t: b.top, b: b.bottom, w: b.width }; };
+    return {
+      card: r(card), title: r(title), sub: r(sub), mark: r(mark), markBox: mark.getBoundingClientRect().width,
+      padRight: parseFloat(getComputedStyle(card).paddingRight),
+      overflowX: card.scrollWidth - card.clientWidth,
+    };
+  });
+  const overlap = (a, b) => Math.min(a.r, b.r) - Math.max(a.l, b.l) > 0 && Math.min(a.b, b.b) - Math.max(a.t, b.t) > 0;
+  const short = h <= 700;
+  assert(overlap(geo.title, geo.mark) === false, `B8 ${label}：勾选标记不压标题`,
+    `title.right=${geo.title.r.toFixed(1)} mark.left=${geo.mark.l.toFixed(1)}`);
+  assert(overlap(geo.sub, geo.mark) === false, `B8 ${label}：勾选标记不压副标题`,
+    `sub.right=${geo.sub.r.toFixed(1)} mark.left=${geo.mark.l.toFixed(1)}`);
+  assert(geo.mark.l >= geo.card.l && geo.mark.r <= geo.card.r,
+    `B8 ${label}：勾选标记完整落在卡片内`);
+  assert(geo.overflowX <= 0, `B8 ${label}：卡片无横向溢出`, `溢出 ${geo.overflowX}px`);
+  assert(geo.padRight === (short ? 68 : 76), `B8 ${label}：右侧留白取到预期分支（矮屏 68 / 常规 76）`, `实测 ${geo.padRight}px`);
+  // 文字仍要有可用宽度（矮屏下有 360px 宽，留白 68 + 内左 18 后仍应 > 200px）
+  assert(geo.card.w - geo.padRight >= 200, `B8 ${label}：文字可用宽度足够`, `${(geo.card.w - geo.padRight).toFixed(0)}px`);
+}
+await page.setViewportSize({ width: 390, height: 640 });
+await page.waitForTimeout(260);
+await page.click('#view-patrol [data-patrol="一般问题"]');
+await page.waitForTimeout(320);
+assert(await selectedCount() === 1, 'B8 矮屏下点选仍生效（选中数 1）');
+await shot('06-shortscreen-selected');
+
 assert(errors.length === 0, '无 JS 运行时错误 / 无 4xx 资源', errors.slice(0, 3).join(' | '));
 
 await ctx.close();
