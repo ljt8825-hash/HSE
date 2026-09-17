@@ -437,6 +437,20 @@ function sendStreamRequest(url, body, headers, timeout, onChunk, onDone, onError
             // 非 JSON 数据，作为普通文本处理
             onChunk(jsonStr);
           }
+        } else if (trimmed.startsWith('{')) {
+          // Ollama /api/chat 流：纯 NDJSON 行（无 data: 前缀）
+          try {
+            const parsed = JSON.parse(trimmed);
+            if (parsed.message && parsed.message.content) {
+              onChunk(parsed.message.content);
+            }
+            if (parsed.done === true) {
+              onDone();
+              return;
+            }
+          } catch (e) {
+            /* 忽略非 JSON 行 */
+          }
         }
       }
     });
@@ -458,6 +472,13 @@ function sendStreamRequest(url, body, headers, timeout, onChunk, onDone, onError
               }
             } catch (e) { /* 忽略 */ }
           }
+        } else if (trimmed.startsWith('{')) {
+          try {
+            const parsed = JSON.parse(trimmed);
+            if (parsed.message && parsed.message.content) {
+              onChunk(parsed.message.content);
+            }
+          } catch (e) { /* 忽略 */ }
         }
       }
       onDone();
@@ -638,7 +659,10 @@ async function isAvailable() {
  */
 async function chat(prompt, options = {}) {
   const startTime = Date.now();
-  const buildFn = config.provider === 'grok' ? buildGrokRequest : buildOllamaRequest;
+  // AI-09：允许调用方显式指定 provider（OllamaProvider/GrokProvider 经 Gateway 路由时传自身 name），
+  // 缺省回退全局 config.provider（既有调用方行为不变）
+  const provider = options.provider || config.provider;
+  const buildFn = provider === 'grok' ? buildGrokRequest : buildOllamaRequest;
   const requestParams = buildFn(prompt, options);
 
   let lastError = null;
@@ -666,7 +690,7 @@ async function chat(prompt, options = {}) {
       let inputTokens = 0;
       let outputTokens = 0;
 
-      if (config.provider === 'grok') {
+      if (provider === 'grok') {
         // Grok 响应格式: { choices: [{ message: { content } }], usage: { prompt_tokens, completion_tokens } }
         if (response.choices && response.choices[0]) {
           content = response.choices[0].message?.content || '';
@@ -713,23 +737,30 @@ async function chat(prompt, options = {}) {
  * @param {string} prompt - 用户 prompt
  * @param {Object} res - Express 响应对象
  * @param {Object} options - 可选参数
+ *   - skipHeaders（AI-03 v2）：由调用方（AI Gateway /v2/stream）先行设置 SSE 头，此处跳过重复 setHeader/flushHeaders
+ *   - skipEnd（AI-03 v2）：由调用方在写完整 event:end 后自行 res.end()，此处不结束响应
  * @returns {Promise<{totalContent: string, model: string, durationMs: number}>}
  */
 async function chatStream(prompt, res, options = {}) {
   const startTime = Date.now();
 
-  // 设置 SSE 响应头
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no'); // 禁用 Nginx 缓冲
-  res.flushHeaders();
+  // AI-03：v2 统一 SSE 信封由 Gateway 先行写头与 event:start，故此处支持跳过（默认行为不变）
+  if (!options.skipHeaders) {
+    // 设置 SSE 响应头
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no'); // 禁用 Nginx 缓冲
+    res.flushHeaders();
+  }
 
-  const buildFn = config.provider === 'grok' ? buildGrokRequest : buildOllamaRequest;
+  const provider = options.provider || config.provider;
+  const buildFn = provider === 'grok' ? buildGrokRequest : buildOllamaRequest;
   const streamOptions = { ...options, stream: true };
   const requestParams = buildFn(prompt, streamOptions);
 
   let totalContent = '';
+  let settled = false; // 流已正常完成/出错后，不再由 close 抢先结束响应（保证 Gateway 能写入 event:end/error）
 
   return new Promise((resolve, reject) => {
     const req = sendStreamRequest(
@@ -745,10 +776,13 @@ async function chatStream(prompt, res, options = {}) {
       },
       // onDone: 完成
       () => {
+        settled = true;
         const durationMs = Date.now() - startTime;
         // 发送结束标记
         res.write(`data: [DONE]\n\n`);
-        res.end();
+        if (!options.skipEnd) {
+          res.end();
+        }
         resolve({
           totalContent,
           model: requestParams.body.model,
@@ -757,17 +791,20 @@ async function chatStream(prompt, res, options = {}) {
       },
       // onError: 错误
       (err) => {
+        settled = true;
         const durationMs = Date.now() - startTime;
         // 发送错误信息
         res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
-        res.end();
+        if (!options.skipEnd) {
+          res.end();
+        }
         reject(err);
       }
     );
 
-    // 监听客户端断开连接
+    // 上游连接关闭（未正常完成时）结束响应；正常完成后由 Gateway 写 event:end 再收尾
     req.on('close', () => {
-      if (!res.writableEnded) {
+      if (!settled && !res.writableEnded) {
         res.end();
       }
     });
