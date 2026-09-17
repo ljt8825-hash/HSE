@@ -137,6 +137,9 @@ _03a_*/
 _backup*/
 _backs/
 backs/
+# AI 识图（培训签到表）逐页渲染的预览图：由渲染步骤生成的工作产物，无代码引用；
+# 内容为真实签到表影印（含姓名/签字）⇒ 属个人信息，禁止入库。
+_signin_preview/
 scripts/adhoc/
 server/scripts/adhoc/
 
