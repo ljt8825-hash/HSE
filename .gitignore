@@ -357,6 +357,7 @@ _cf_audit/
 # ===== grid-mobile-cloudflare 子项目产物（Cloudflare Worker / Pages） =====
 grid-mobile-cloudflare/**/.wrangler/
 grid-mobile-cloudflare/**/_*_tmp.mjs
+grid-mobile-cloudflare/**/_*_tmp/
 grid-mobile-cloudflare/**/_*.log
 grid-mobile-cloudflare/**/test/_*_shots/
 grid-mobile-cloudflare/**/node_modules/
@@ -380,3 +381,8 @@ server/ai06_debug*.cjs
 server/ai06_quick.cjs
 server/ai06_route_test.cjs
 /ai06_*.txt
+
+# ===== E2E 测试账号凭据（禁止入库） =====
+# 真实账号一律不写进源码：脚本走 test/e2e-account.mjs（环境变量 → 本机此文件 → 报错）
+grid-mobile-cloudflare/**/test/_e2e-creds.local.json
+**/_e2e-creds.local.json

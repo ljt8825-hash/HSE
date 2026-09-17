@@ -15,10 +15,11 @@
  */
 import path from 'node:path';
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { e2eAccount } from './e2e-account.mjs';
 
 const BASE = process.env.LOCAL_PAGES || 'http://127.0.0.1:5899';
-const PHONE = process.env.E2E_PHONE || '13905440679';
-const PASSWORD = process.env.E2E_PASSWORD || 'zwh0679';
+// 账号只从环境变量 / 本机未跟踪的 _e2e-creds.local.json 解析（源码内不落真实凭据）
+const { phone: PHONE, password: PASSWORD } = e2eAccount();
 
 const PW_DIR = 'G:/hse-dashboard/安全看板vben/node_modules/.pnpm/playwright-core@1.61.1/node_modules/playwright-core';
 const CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';

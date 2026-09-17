@@ -10,9 +10,11 @@
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { mkdirSync } from 'node:fs';
+import { e2eAccount } from './e2e-account.mjs';
 
 const PAGES = process.env.PAGES_ORIGIN || 'https://grid-mobile-cloudflare.pages.dev';
-const PHONE = '13905440679', PASSWORD = 'zwh0679';
+// 账号只从环境变量 / 本机未跟踪的 _e2e-creds.local.json 解析（源码内不落真实凭据）
+const { phone: PHONE, password: PASSWORD } = e2eAccount();
 // 柴胡店镇政府（WGS-84，手机 GPS 原始值）
 const GEO = { latitude: 37.6303258, longitude: 116.9219013 };
 const SHOTS = path.resolve(import.meta.dirname, '_cfwps21_shots');
