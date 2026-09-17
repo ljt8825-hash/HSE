@@ -1,0 +1,16 @@
+{
+  "name": "grid-mobile-cloudflare-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "WPS OAuth POC-03-A Cloudflare Worker: official interface alignment (scope=kso.user_base.read, /v7/users/current forced Bearer+KSO-1) + offline verification (POC only, not wired to production HSE login)",
+  "scripts": {
+    "test": "node test/oauth-flow.test.mjs"
+  },
+  "dependencies": {
+    "bcryptjs": "2.4.3"
+  },
+  "devDependencies": {
+    "wrangler": "^3.114.17"
+  }
+}

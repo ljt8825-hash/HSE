@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>开始巡查</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f5f7fa; min-height: 100vh; padding-bottom: 40px; }
+    .bar { background: #2563eb; color: #fff; padding: 14px 16px; font-size: 17px; font-weight: 600; display: flex; align-items: center; }
+    .bar .back { margin-right: 10px; font-size: 20px; color: #fff; text-decoration: none; }
+    .wrap { width: 92%; max-width: 420px; margin: 0 auto; }
+    .card { background: #fff; border-radius: 12px; padding: 16px; box-shadow: 0 2px 12px rgba(0,0,0,.08); margin-top: 14px; }
+    .label { font-size: 14px; color: #606266; margin: 12px 0 6px; }
+    .label:first-child { margin-top: 0; }
+    .label .req { color: #ef4444; margin-left: 2px; }
+    input[type="text"], input[type="datetime-local"], textarea, select {
+      width: 100%; font-size: 16px; padding: 12px; border: 1px solid #dcdfe6; border-radius: 8px; background: #fff; color: #1f2d3d;
+    }
+    textarea { min-height: 96px; resize: vertical; }
+    .gridchip { display: inline-block; padding: 12px 16px; margin: 4px 8px 4px 0; border: 1.5px solid #dcdfe6; border-radius: 10px;
+      font-size: 15px; color: #1f2d3d; cursor: pointer; user-select: none; }
+    .gridchip.on { border-color: #2563eb; color: #2563eb; font-weight: 600; background: #eff6ff; }
+    .radio-row { display: flex; gap: 10px; }
+    .radio-row .gridchip { flex: 1; text-align: center; margin: 0; }
+    .banner { font-size: 14px; border-radius: 10px; padding: 12px; margin-top: 14px; line-height: 1.6; }
+    .banner.err { color: #b91c1c; background: #fee2e2; }
+    .banner.info { color: #1d4ed8; background: #dbeafe; }
+    .bigbtn { display: block; width: 100%; height: 56px; margin-top: 20px; border: none; border-radius: 12px;
+      background: #2563eb; color: #fff; font-size: 18px; font-weight: 600; cursor: pointer; }
+    .bigbtn:disabled { background: #93c5fd; cursor: not-allowed; }
+    .hidden { display: none; }
+    .photo-note { font-size: 12px; color: #b45309; background: #fef3c7; border-radius: 8px; padding: 8px 10px; margin-top: 8px; line-height: 1.5; }
+    .result { text-align: center; padding: 30px 10px; }
+    .result .icon { font-size: 52px; }
+    .result .title { font-size: 20px; font-weight: 600; margin-top: 10px; }
+    .result .detail { font-size: 13px; color: #606266; margin-top: 10px; line-height: 1.7; word-break: break-all; }
+  </style>
+</head>
+<body>
+  <div class="bar"><a class="back" href="./home.html">‹</a>开始巡查</div>
+  <div class="wrap" id="form-view">
+    <div id="load-banner" class="banner info">正在获取身份与网格信息…</div>
+    <div id="form-body" class="hidden">
+      <div class="card">
+        <div class="label">巡查人</div>
+        <input type="text" id="inspector" disabled value="" style="background:#f5f7fa;color:#909399;" />
+        <div class="label">巡查时间<span class="req">*</span></div>
+        <input type="datetime-local" id="inspect-time" />
+        <div class="label">巡查网格<span class="req">*</span></div>
+        <div id="grid-area"></div>
+        <div class="label">问题类型<span class="req">*</span></div>
+        <select id="problem-type"></select>
+        <div class="label">问题描述<span class="req">*</span></div>
+        <textarea id="description" maxlength="500" placeholder="简要描述发现的问题（500 字以内）"></textarea>
+        <div class="label">是否存在三违<span class="req">*</span></div>
+        <div class="radio-row">
+          <div class="gridchip" id="v-no" data-v="否">否</div>
+          <div class="gridchip" id="v-yes" data-v="是">是</div>
+        </div>
+        <div id="violation-block" class="hidden">
+          <div class="label">三违行为描述<span class="req">*</span></div>
+          <textarea id="violation-desc" maxlength="300" placeholder="描述三违行为（300 字以内）"></textarea>
+          <div class="label">涉及人员<span class="req">*</span></div>
+          <input type="text" id="violation-people" maxlength="200" placeholder="如：张三（10012345）" />
+        </div>
+        <div class="label">现场照片（可选）</div>
+        <input type="file" id="photo" accept="image/jpeg,image/png" capture="environment"
+          style="width:100%;font-size:13px;padding:6px 0;" />
+        <div class="photo-note">照片将真实上传至飞书多维表格「三违照片」附件列（≤5MB，JPEG/PNG），随巡查记录一并保存。</div>
+        <div id="photo-msg" style="font-size:13px;color:#606266;margin-top:6px;min-height:18px;"></div>
+      </div>
+      <button class="bigbtn" id="submit" disabled>提交巡查记录</button>
+      <div id="submit-msg" style="font-size:13px;color:#606266;text-align:center;margin-top:10px;min-height:18px;"></div>
+    </div>
+  </div>
+  <div class="wrap hidden" id="result-view">
+    <div class="card result" id="result-card"></div>
+    <button class="bigbtn" id="again">再记一条</button>
+    <button class="bigbtn secondary" id="to-records">查看我的巡查记录</button>
+  </div>
+  <script src="./config.js"></script>
+  <script src="./app.js"></script>
+  <script>
+    const state = { grids: [], grid: '', isViolation: '否', photoTaken: false, photoCid: '', problemTypes: [] };
+    let meta = null;
+
+    function gridChips(container, list, multi) {
+      container.innerHTML = '';
+      list.forEach((g) => {
+        const d = document.createElement('div');
+        d.className = 'gridchip'; d.textContent = g;
+        d.addEventListener('click', () => {
+          if (multi) {
+            container.querySelectorAll('.gridchip').forEach((x) => x.classList.remove('on'));
+            d.classList.add('on'); state.grid = g;
+          } else { state.grid = g; }
+          checkReady();
+        });
+        container.appendChild(d);
+      });
+    }
+    function checkReady() {
+      const t = document.getElementById('inspect-time').value;
+      document.getElementById('submit').disabled = !(t && state.grid);
+    }
+    function showResult(icon, title, detail, isErr) {
+      document.getElementById('form-view').classList.add('hidden');
+      document.getElementById('result-view').classList.remove('hidden');
+      document.getElementById('result-card').innerHTML =
+        `<div class="icon">${icon}</div><div class="title" style="color:${isErr ? '#b91c1c' : '#15803d'}">${title}</div><div class="detail">${detail}</div>`;
+    }
+    function nowLocal() {
+      const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+      return d.toISOString().slice(0, 16);
+    }
+    document.getElementById('v-no').addEventListener('click', () => {
+      state.isViolation = '否';
+      document.getElementById('v-no').classList.add('on'); document.getElementById('v-yes').classList.remove('on');
+      document.getElementById('violation-block').classList.add('hidden'); checkReady();
+    });
+    document.getElementById('v-yes').addEventListener('click', () => {
+      state.isViolation = '是';
+      document.getElementById('v-yes').classList.add('on'); document.getElementById('v-no').classList.remove('on');
+      document.getElementById('violation-block').classList.remove('hidden'); checkReady();
+    });
+    document.getElementById('inspect-time').addEventListener('change', checkReady);
+    document.getElementById('photo').addEventListener('change', () => { /* 提交时统一处理 */ document.getElementById('photo-msg').textContent = ''; });
+    document.getElementById('again').addEventListener('click', () => location.href = './patrol.html');
+    document.getElementById('to-records').addEventListener('click', () => location.href = './records.html');
+
+    (async () => {
+      if (sessionExpiredLocally()) { clearSession(); location.href = './login.html'; return; }
+      const r = await mobileApi('/api/mobile/patrol/meta');
+      const banner = document.getElementById('load-banner');
+      if (r.status !== 200 || !r.body.success) { banner.className = 'banner err'; banner.textContent = r.body.message || '加载失败，请返回重试'; return; }
+      meta = r.body;
+      document.getElementById('inspector').value = (meta.employee.name || '') + '（' + meta.employee.employee_code + '）';
+      document.getElementById('inspect-time').value = nowLocal();
+      const sel = document.getElementById('problem-type');
+      meta.problem_types.forEach((t) => { const o = document.createElement('option'); o.value = t; o.textContent = t; sel.appendChild(o); });
+      state.problemTypes = meta.problem_types;
+      document.getElementById('v-no').classList.add('on');
+
+      if (!meta.grid_resolved) {
+        banner.className = 'banner err'; banner.textContent = meta.message || '当前人员无法确定巡查网格，请联系管理员';
+        return; // 表单不展示（§十一：不得猜测网格）
+      }
+      banner.remove();
+      state.grids = meta.grids;
+      if (meta.grid_mode === 'auto') {
+        state.grid = meta.grids[0];
+        document.getElementById('grid-area').innerHTML = `<input type="text" disabled value="${meta.grids[0]}" style="background:#f5f7fa;color:#1f2d3d;" />`;
+      } else {
+        gridChips(document.getElementById('grid-area'), meta.grids, true);
+      }
+      document.getElementById('form-body').classList.remove('hidden');
+      checkReady();
+    })();
+
+    document.getElementById('submit').addEventListener('click', async () => {
+      const msg = document.getElementById('submit-msg');
+      const btn = document.getElementById('submit');
+      msg.textContent = '';
+      // 三违必填前置
+      if (state.isViolation === '是' && (!document.getElementById('violation-desc').value.trim() || !document.getElementById('violation-people').value.trim())) {
+        msg.textContent = '请填写三违行为描述与涉及人员'; return;
+      }
+      // 照片（可选）：先上传字节（既有通道），失败不阻塞（可清除重选）
+      let photoTaken = false;
+      const pf = document.getElementById('photo').files && document.getElementById('photo').files[0];
+      if (pf) {
+        if (pf.size > 5 * 1024 * 1024) { msg.textContent = '照片超过 5MB 上限，请重新选择'; return; }
+        msg.textContent = '照片上传中…';
+        const cid = 'H5P-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+        const up = await mobileUpload(pf, cid);
+        if (up.status === 200 && up.body.success) {
+          photoTaken = true; state.photoCid = cid; state.photoToken = up.body.file_token || '';
+          msg.textContent = '';
+        } else {
+          msg.textContent = '照片上传失败：' + (up.body.message || '可清除照片后仅提交文字'); return;
+        }
+      }
+      const desc = document.getElementById('description').value.trim();
+      if (!desc) { msg.textContent = '请填写问题描述'; return; }
+      if (desc.length > 500) { msg.textContent = '问题描述超过 500 字'; return; }
+      const body = {
+        inspection_time: document.getElementById('inspect-time').value.replace('T', ' ').slice(0, 16),
+        grid: state.grid,
+        problem_type: document.getElementById('problem-type').value,
+        description: desc,
+        is_violation: state.isViolation,
+        violation_desc: state.isViolation === '是' ? document.getElementById('violation-desc').value.trim() : '',
+        violation_people: state.isViolation === '是' ? document.getElementById('violation-people').value.trim() : '',
+        photo_taken: photoTaken ? 'true' : 'false',
+        photo_tokens: (photoTaken && state.photoToken) ? [state.photoToken] : [],
+        client_request_id: 'H5S-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+      };
+      btn.disabled = true; msg.textContent = '提交中…';
+      try {
+        const r = await mobileApi('/api/mobile/patrol/submit', body);
+        if (r.status === 200 && r.body.success) {
+          const rid = (r.body.recordIds && r.body.recordIds[0]) || '—';
+          showResult('✅', r.body.deduplicated ? '无需重复提交' : '提交成功',
+            `记录编号：${rid}<br>巡查网格：${body.grid}<br>记录已写入飞书台账${body.photo_taken === 'true' ? '<br>照片：已上传至「三违照片」附件列' : ''}`);
+        } else {
+          btn.disabled = false; msg.textContent = '';
+          showResult('❌', '提交失败', (r.body.message || '未知错误') + '<br>记录未提交成功，请重试', true);
+        }
+      } catch {
+        btn.disabled = false; msg.textContent = '';
+        showResult('❌', '网络异常', '提交未完成，请检查网络后重试', true);
+      }
+    });
+  </script>
+</body>
+</html>

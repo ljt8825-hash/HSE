@@ -353,3 +353,10 @@ _mw_audit/
 _mw_smoke_shots/
 _cf_audit/
 .grid-mobile-cloudflare-tmp/
+
+# ===== grid-mobile-cloudflare 子项目产物（Cloudflare Worker / Pages） =====
+grid-mobile-cloudflare/**/.wrangler/
+grid-mobile-cloudflare/**/_*_tmp.mjs
+grid-mobile-cloudflare/**/_*.log
+grid-mobile-cloudflare/**/test/_*_shots/
+grid-mobile-cloudflare/**/node_modules/

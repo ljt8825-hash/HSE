@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>网格长巡查 · 工作台</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f5f7fa; min-height: 100vh; padding-bottom: 32px; }
+    .top { background: #2563eb; color: #fff; padding: 24px 18px 20px; }
+    .top .name { font-size: 22px; font-weight: 600; }
+    .top .code { font-size: 13px; opacity: .85; margin-top: 4px; }
+    .wrap { width: 92%; max-width: 420px; margin: 0 auto; }
+    .card { background: #fff; border-radius: 12px; padding: 16px; box-shadow: 0 2px 12px rgba(0,0,0,.08); margin-top: 16px; }
+    .row { display: flex; justify-content: space-between; font-size: 14px; padding: 7px 0; }
+    .row .k { color: #909399; }
+    .row .v { color: #1f2d3d; text-align: right; }
+    .bigbtn { display: block; width: 100%; height: 56px; margin-top: 14px; border: none; border-radius: 12px;
+      background: #2563eb; color: #fff; font-size: 18px; font-weight: 600; cursor: pointer; }
+    .bigbtn.secondary { background: #fff; color: #2563eb; border: 1.5px solid #2563eb; }
+    .bigbtn:active { opacity: .85; }
+    .notice { font-size: 12px; color: #b45309; background: #fef3c7; border-radius: 8px; padding: 8px 10px; margin-top: 12px; line-height: 1.5; }
+    .mini { font-size: 13px; color: #606266; text-align: center; margin-top: 10px; min-height: 18px; }
+    .logout { display: block; width: 100%; height: 42px; margin-top: 16px; border: 1px solid #dcdfe6; border-radius: 8px;
+      background: #fff; color: #606266; font-size: 15px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <div class="name" id="name">…</div>
+    <div class="code" id="code"></div>
+  </div>
+  <div class="wrap">
+    <div class="card">
+      <div class="row"><span class="k">部门</span><span class="v" id="department">—</span></div>
+      <div class="row"><span class="k">职位</span><span class="v" id="position">—</span></div>
+      <div class="row"><span class="k">网格长等级</span><span class="v" id="grid_level">—</span></div>
+    </div>
+    <button class="bigbtn" id="go-patrol" style="margin-top:20px;">开始巡查</button>
+    <button class="bigbtn" id="go-check" style="margin-top:10px;background:#16a34a;">安全检查 · 三违上报</button>
+    <button class="bigbtn secondary" id="go-records">我的巡查记录</button>
+    <div class="card">
+      <div class="row" style="border:none;padding-bottom:0"><span class="k">现场照片通道</span><span class="v" style="color:#b45309;">PENDING_EXTERNAL</span></div>
+      <div class="notice">WPS 附件页面预览能力未开放（CF-WPS-12B 官方确认中）。照片可拍摄上传（写入测试通道），但页面暂无法预览；不影响本次文字巡查提交。</div>
+      <input id="photo" type="file" accept="image/jpeg,image/png" capture="environment"
+        style="width:100%;font-size:13px;padding:8px 0 4px;" />
+      <button class="logout" id="upload" style="background:#2563eb;color:#fff;border:none;">上传照片（通道验证）</button>
+      <div class="mini" id="upmsg"></div>
+    </div>
+    <button class="logout" id="logout">退出登录</button>
+  </div>
+  <script src="./config.js"></script>
+  <script src="./app.js"></script>
+  <script>
+    (async () => {
+      if (sessionExpiredLocally()) { clearSession(); location.href = './login.html'; return; }
+      const r = await mobileApi('/api/mobile/me');
+      if (r.status !== 200 || !r.body.success) return;
+      const e = r.body.employee || {};
+      document.getElementById('name').textContent = e.name || '未知';
+      document.getElementById('code').textContent = '工号 ' + (e.employee_code || '—');
+      document.getElementById('department').textContent = e.department || '—';
+      document.getElementById('position').textContent = e.position || '—';
+      document.getElementById('grid_level').textContent = e.grid_level || '—';
+    })();
+    document.getElementById('go-patrol').addEventListener('click', () => { location.href = './patrol.html'; });
+    document.getElementById('go-check').addEventListener('click', () => { location.href = './check.html'; });
+    document.getElementById('go-records').addEventListener('click', () => { location.href = './records.html'; });
+    document.getElementById('logout').addEventListener('click', async () => {
+      try { await mobileApi('/api/mobile/auth/logout'); } catch { /* ignore */ }
+      clearSession();
+      location.href = './login.html';
+    });
+    document.getElementById('upload').addEventListener('click', async () => {
+      const msg = document.getElementById('upmsg');
+      const f = document.getElementById('photo').files && document.getElementById('photo').files[0];
+      msg.textContent = '';
+      if (!f) { msg.textContent = '请先选择照片'; return; }
+      if (f.size > 5 * 1024 * 1024) { msg.textContent = '图片超过 5MB 上限'; return; }
+      msg.textContent = '上传中…';
+      try {
+        const cid = 'H5-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+        const r = await mobileUpload(f, cid);
+        if (r.status === 200 && r.body.success) {
+          msg.textContent = r.body.deduplicated ? '已上传过（幂等命中）· 页面预览 PENDING_EXTERNAL' : '上传成功（测试通道）· 页面预览 PENDING_EXTERNAL';
+        } else {
+          msg.textContent = r.body.message || '上传失败，可重试';
+        }
+      } catch { msg.textContent = '网络异常，请稍后再试'; }
+    });
+  </script>
+</body>
+</html>

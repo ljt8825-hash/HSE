@@ -1,0 +1,1369 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>HSE 安全看板 · 现场巡查</title>
+<style>
+:root{
+  --bg:#F5F4F1; --card:#FFFFFF; --line:#E5E7EB;
+  --primary:#1D4ED8; --primary-soft:#EEF2FF; --primary-light:#BFDBFE;
+  --danger:#DC2626; --danger-soft:#FEE2E2;
+  --success:#16A34A; --success-soft:#DCFCE7; --success-tint:#F0FDF4;
+  --warn:#D97706; --warn-soft:#FEF3C7; --warn-tint:#FFFBEB;
+  --t1:#1A1A1A; --t2:#374151; --t3:#6B7280; --t4:#9CA3AF;
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;background:#DDD;color:var(--t1)}
+#app{max-width:480px;margin:0 auto;min-height:100dvh;background:var(--bg);position:relative;display:flex;flex-direction:column}
+.view{display:none;flex-direction:column;min-height:100dvh}
+.view.active{display:flex}
+.statusbar{height:28px;background:transparent;flex:none}
+.navbar{height:56px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;flex:none}
+.navbar .nav-title{font-size:18px;font-weight:600}
+.icon-btn{width:40px;height:40px;border-radius:20px;background:var(--card);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;cursor:pointer}
+.page{flex:1;display:flex;flex-direction:column;padding:16px;gap:12px;overflow-y:auto}
+.page.center{align-items:stretch}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px}
+.btn-primary{display:flex;align-items:center;justify-content:center;height:72px;border-radius:18px;background:var(--primary);color:#fff;font-size:22px;font-weight:600;border:none;cursor:pointer;gap:10px;box-shadow:0 6px 16px -2px rgba(29,78,216,.25)}
+.btn-primary:active{transform:scale(.98)}
+.btn-primary:disabled{background:#B6C4E8;box-shadow:none;cursor:not-allowed}
+.btn-ghost{display:flex;align-items:center;justify-content:center;height:72px;border-radius:18px;background:var(--card);border:1px solid var(--line);font-size:22px;font-weight:600;color:var(--t1);cursor:pointer;gap:10px}
+.btn-ghost:active{transform:scale(.98)}
+.big-cta{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;height:190px;border-radius:24px;background:var(--primary);color:#fff;cursor:pointer;border:none;box-shadow:0 10px 24px -4px rgba(29,78,216,.3)}
+.big-cta:active{transform:scale(.985)}
+.big-cta:disabled{background:#B6C4E8;box-shadow:none}
+.big-cta .cta-title{font-size:30px;font-weight:700}
+.big-cta .cta-sub{font-size:15px;color:var(--primary-light)}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;font-size:13px;font-weight:600}
+.chip .dot{width:8px;height:8px;border-radius:4px}
+.chip.red{background:var(--danger-soft);color:var(--danger)} .chip.red .dot{background:var(--danger)}
+.chip.green{background:var(--success-soft);color:var(--success)} .chip.green .dot{background:var(--success)}
+.chip.yellow{background:var(--warn-soft);color:var(--warn)} .chip.yellow .dot{background:var(--warn)}
+.chip.blue{background:var(--primary-soft);color:var(--primary)}
+.gps-line{font-size:12px;line-height:1.7;color:#BFDBFE}
+.gps-line.warn{color:#FECACA}
+.gps-line a{color:#fff;text-decoration:underline}
+.opt-card{display:flex;flex-direction:column;gap:6px;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:24px;cursor:pointer}
+.opt-card:active{transform:scale(.98)}
+.opt-card .opt-title{font-size:24px;font-weight:600}
+.opt-card .opt-sub{font-size:15px;color:var(--t3)}
+.opt-card.accent{border:2px solid var(--danger)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.vio-cell{display:flex;align-items:center;justify-content:center;height:88px;border-radius:16px;background:var(--card);border:1px solid var(--line);font-size:19px;font-weight:600;cursor:pointer}
+.vio-cell:active{transform:scale(.96);border-color:var(--primary)}
+.person-row{display:flex;align-items:center;gap:16px;padding:18px;background:var(--card);border:1px solid var(--line);border-radius:16px;cursor:pointer}
+.person-row:active{transform:scale(.98);border-color:var(--primary)}
+.avatar{width:56px;height:56px;border-radius:28px;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:600;flex:none}
+.avatar.sm{width:44px;height:44px;border-radius:22px;font-size:18px}
+.av-blue{background:var(--primary-soft);color:var(--primary)}
+.av-amber{background:#FEF3C7;color:var(--warn)}
+.av-green{background:var(--success-soft);color:var(--success)}
+.search-bar{display:flex;align-items:center;gap:12px;height:72px;padding:0 20px;border-radius:18px;background:var(--card);border:2px solid var(--primary)}
+.search-bar input{flex:1;border:none;outline:none;font-size:19px;font-weight:600;font-family:inherit;color:var(--t1);background:transparent}
+.search-bar input::placeholder{color:var(--primary);opacity:.75}
+.tabbar{height:64px;background:var(--card);border-radius:16px;display:flex;align-items:stretch;justify-content:space-evenly;padding:0 32px;flex:none}
+.tab-item{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:11px;color:var(--t4);cursor:pointer;border:none;background:none;font-family:inherit}
+.tab-item.active{color:var(--primary);font-weight:600}
+.tab-item svg{width:20px;height:20px}
+.info-line{font-size:16px;font-weight:500;color:var(--t2);line-height:1.9}
+.muted{font-size:12px;color:var(--t4);line-height:1.6}
+.section-label{font-size:14px;font-weight:500;color:var(--t4)}
+.photo-box{width:100%;border-radius:16px;overflow:hidden;background:#E8E6E0;display:flex;align-items:center;justify-content:center;min-height:180px}
+.photo-box img{width:100%;display:block}
+.photo-thumb{width:72px;height:72px;border-radius:12px;object-fit:cover;flex:none}
+.stat-row{display:flex;gap:12px}
+.stat-card{flex:1;height:78px;border-radius:16px;background:var(--card);border:1px solid var(--line);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px}
+.stat-card .num{font-size:26px;font-weight:700}
+.stat-card .lab{font-size:13px;color:var(--t3)}
+.entry-row{display:flex;gap:12px}
+.entry-card{flex:1;height:76px;border-radius:16px;background:var(--card);border:1px solid var(--line);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;font-size:15px;font-weight:600;cursor:pointer;position:relative}
+.entry-card:active{transform:scale(.97)}
+.entry-card .badge{position:absolute;top:8px;right:10px;min-width:22px;height:22px;border-radius:11px;background:var(--danger);color:#fff;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;padding:0 6px}
+.blue-idcard{border-radius:20px;padding:16px;display:flex;flex-direction:column;gap:6px;background:linear-gradient(180deg,#3B82F6 0%,#1D4ED8 100%);color:#fff}
+.blue-idcard .role-tag{font-size:13px;color:var(--primary-light)}
+.blue-idcard .name{font-size:30px;font-weight:700}
+.blue-idcard .meta{font-size:14px;font-weight:500;line-height:1.8}
+.record-card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:8px;cursor:pointer}
+.record-card:active{transform:scale(.985)}
+.record-card.unfinished{border:1.5px solid #FCA5A5}
+.record-card .r-top{display:flex;align-items:center;justify-content:space-between}
+.record-card .r-title{font-size:22px;font-weight:600}
+.record-card .r-sub{font-size:14px;color:var(--t3)}
+.record-card .r-go{display:flex;align-items:center;justify-content:space-between;color:var(--primary);font-size:16px;font-weight:600}
+.crumbs{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.crumb{padding:6px 10px;border-radius:999px;font-size:13px;font-weight:600}
+.back-link{display:flex;align-items:center;justify-content:center;gap:8px;height:56px;color:var(--primary);font-size:16px;font-weight:600;cursor:pointer;border:none;background:none;font-family:inherit}
+.topbar-home{display:flex;align-items:center;justify-content:space-between;height:48px}
+.topbar-home .app-name{font-size:20px;font-weight:700}
+.topbar-home .me-avatar{width:38px;height:38px;border-radius:19px;background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:600}
+.tel-btn{display:flex;align-items:center;justify-content:center;gap:12px;height:64px;border-radius:16px;background:var(--success);color:#fff;font-size:20px;font-weight:600;text-decoration:none}
+.tel-btn:active{transform:scale(.98)}
+.check-line{display:flex;justify-content:space-between;font-size:15px;color:var(--t2);line-height:2}
+.check-line b{font-weight:600}
+.field-label{font-size:26px;font-weight:700}
+.field-sub{font-size:15px;color:var(--t3)}
+.divider{height:1px;background:var(--line)}
+.empty-tip{text-align:center;color:var(--t4);font-size:14px;padding:32px 0}
+.login-wrap{flex:1;display:flex;flex-direction:column;padding:32px 24px;gap:16px;justify-content:center}
+.login-logo{display:flex;flex-direction:column;align-items:center;gap:10px;margin-bottom:8px}
+.login-logo .lg{width:64px;height:64px;border-radius:18px;background:var(--primary);display:flex;align-items:center;justify-content:center}
+.login-input{display:flex;flex-direction:column;gap:6px}
+.login-input label{font-size:15px;font-weight:500;color:var(--t2)}
+.login-input input{height:60px;border-radius:14px;border:1.5px solid var(--line);background:var(--card);padding:0 18px;font-size:19px;font-family:inherit;outline:none}
+.login-input input:focus{border-color:var(--primary)}
+.demo-chips{display:flex;gap:8px;flex-wrap:wrap}
+.demo-chip{padding:8px 12px;border-radius:999px;background:var(--primary-soft);color:var(--primary);font-size:13px;font-weight:600;border:none;cursor:pointer;font-family:inherit}
+.login-err{color:var(--danger);font-size:14px;min-height:20px}
+.seg{display:flex;height:52px;padding:4px;gap:4px;border-radius:26px;background:#E8EAED}
+.seg .seg-item{flex:1;display:flex;align-items:center;justify-content:center;border-radius:22px;font-size:16px;font-weight:500;color:var(--t3);cursor:pointer;border:none;background:none;font-family:inherit}
+.seg .seg-item.active{background:var(--primary);color:#fff;font-weight:600}
+.ro-tag{background:#F3F4F6;color:var(--t3);font-size:12px;font-weight:400;padding:5px 10px;border-radius:999px}
+.hidden{display:none!important}
+</style>
+</head>
+<body>
+<div id="app">
+
+<!-- ============ 启动校验（身份来自网格长巡查登录会话） ============ -->
+<section class="view active" id="view-boot">
+  <div class="statusbar"></div>
+  <div class="login-wrap">
+    <div class="login-logo">
+      <div class="lg">
+        <svg width="34" height="34" viewBox="0 0 24 24" fill="none"><path d="M12 2l8 3v6c0 5-3.5 9.5-8 11-4.5-1.5-8-6-8-11V5l8-3z" stroke="#fff" stroke-width="1.8" stroke-linejoin="round"/><path d="M8.5 12l2.5 2.5 4.5-4.5" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div style="font-size:26px;font-weight:700">HSE 安全看板</div>
+      <div class="muted" id="boot-msg">正在验证登录状态…</div>
+    </div>
+    <button class="btn-primary hidden" id="btn-boot-login" style="margin-top:20px">去登录</button>
+  </div>
+</section>
+
+<!-- ============ 首页 ============ -->
+<section class="view" id="view-home">
+  <div class="statusbar"></div>
+  <div class="page" style="padding-bottom:8px">
+    <div class="topbar-home">
+      <div class="app-name">HSE 安全看板</div>
+      <div class="me-avatar" id="home-avatar">张</div>
+    </div>
+    <div class="blue-idcard">
+      <div class="role-tag" id="idc-role">乡镇作业中心经理</div>
+      <div class="name" id="idc-name">曹周平</div>
+      <div class="meta" id="idc-meta">员工编号　00307234<br>所属班组　宁城一班</div>
+      <div class="gps-line" id="gps-bar" style="margin-top:2px"><span id="gps-addr">正在定位…</span><span id="gps-note">（GPS 自动获取 · 经纬度仅后台保存，页面不显示）</span></div>
+    </div>
+    <button class="big-cta" id="btn-start" disabled>
+      <svg width="52" height="52" viewBox="0 0 24 24" fill="none"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.5" stroke="#fff" stroke-width="1.6"/></svg>
+      <div class="cta-title">开始检查</div>
+      <div class="cta-sub" id="cta-sub">定位成功后才能开始检查</div>
+    </button>
+    <div class="stat-row">
+      <div class="stat-card"><div class="num" style="color:var(--primary)" id="stat-week">0</div><div class="lab">本周上报</div></div>
+      <div class="stat-card"><div class="num" style="color:var(--warn)" id="stat-pending">0</div><div class="lab">待整改</div></div>
+      <div class="stat-card"><div class="num" style="color:var(--success)" id="stat-done">0</div><div class="lab">已闭环</div></div>
+    </div>
+    <div class="card" id="todo-card">
+      <div style="font-size:16px;font-weight:600;margin-bottom:6px">待办提醒</div>
+      <div id="todo-list" style="font-size:14px;color:var(--t2);line-height:1.9"></div>
+    </div>
+    <div style="flex:1"></div>
+  </div>
+  <div style="padding:8px 16px 16px">
+    <div class="tabbar" id="tabbar">
+      <button class="tab-item active" data-tab="home">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M3 10.5L12 3l9 7.5V21a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1v-10.5z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>首页
+      </button>
+      <button class="tab-item" data-tab="my-rectify" id="tab-rectify">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="tab-rectify-label">整改任务</span>
+      </button>
+      <button class="tab-item" data-tab="my-checks">
+        <svg viewBox="0 0 24 24" fill="none"><rect x="3.5" y="3.5" width="6.5" height="6.5" rx="1" stroke="currentColor" stroke-width="1.8"/><rect x="14" y="3.5" width="6.5" height="6.5" rx="1" stroke="currentColor" stroke-width="1.8"/><rect x="3.5" y="14" width="6.5" height="6.5" rx="1" stroke="currentColor" stroke-width="1.8"/><rect x="14" y="14" width="6.5" height="6.5" rx="1" stroke="currentColor" stroke-width="1.8"/></svg>巡查台账
+      </button>
+      <button class="tab-item" data-tab="me">
+        <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.8"/><path d="M4 21c1.5-3.5 4.5-5 8-5s6.5 1.5 8 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>我的
+      </button>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 拍现场照片 ============ -->
+<section class="view" id="view-photo">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" data-back="home"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">开始检查</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <div class="field-label">拍现场照片</div>
+    <div class="field-sub">照片是检查记录的第一手证据</div>
+    <div class="photo-box" id="scene-photo-box" style="min-height:200px;color:var(--t4);font-size:14px">尚未拍摄</div>
+    <button class="big-cta" style="height:150px" id="btn-capture">
+      <svg width="44" height="44" viewBox="0 0 24 24" fill="none"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.5" stroke="#fff" stroke-width="1.6"/></svg>
+      <div class="cta-title" style="font-size:24px">拍现场照片</div>
+      <div class="cta-sub">调用手机摄像头</div>
+    </button>
+    <button class="btn-ghost" id="btn-album">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="3" stroke="#1A1A1A" stroke-width="1.8"/><circle cx="9" cy="9" r="2" stroke="#1A1A1A" stroke-width="1.8"/><path d="M3.5 17l5-5 4 4 3.5-3.5 4.5 4.5" stroke="#1A1A1A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      从相册上传
+    </button>
+    <button class="btn-primary hidden" id="btn-photo-next">下一步</button>
+    <div class="muted" style="text-align:center">照片将自动保存到本条检查记录</div>
+    <input type="file" accept="image/*" capture="environment" class="hidden" id="file-camera">
+    <input type="file" accept="image/*" class="hidden" id="file-album">
+  </div>
+</section>
+
+<!-- ============ 问题分类 ============ -->
+<section class="view" id="view-classify">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" data-back="photo"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">这是什么问题？</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <div class="photo-box"><img id="classify-photo" alt="现场照片"></div>
+    <div class="opt-card" id="opt-no">
+      <div class="opt-title">不是三违</div>
+      <div class="opt-sub">普通巡查 / 其他问题，记录日常巡查情况</div>
+    </div>
+    <div class="opt-card accent" id="opt-yes">
+      <div class="opt-title">是三违</div>
+      <div class="opt-sub">三违问题处理，需选择行为与人员</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 选择三违 ============ -->
+<section class="view" id="view-vio">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" data-back="classify"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">选择三违</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <div class="field-label">属于哪种三违行为？</div>
+    <div class="field-sub">点击对应的违规行为即可</div>
+    <div class="grid2" id="vio-grid"></div>
+    <div class="muted">选项自动同步自 WPS《三违行为标准库》，后台新增或停用即实时生效</div>
+  </div>
+</section>
+
+<!-- ============ 经理：先选管理员 ============ -->
+<section class="view" id="view-pick-admin">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" data-back="vio"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">请选择违章人员</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <span class="chip blue" style="align-self:flex-start">乡镇作业中心经理 · 两步选择</span>
+    <div class="field-label">第一步：选择管理员</div>
+    <div class="field-sub">点击管理员姓名，查看他班组的人员</div>
+    <div id="admin-list" style="display:flex;flex-direction:column;gap:12px"></div>
+    <button class="btn-ghost" id="btn-find-any">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="#1D4ED8" stroke-width="2"/><path d="M16.5 16.5L21 21" stroke="#1D4ED8" stroke-width="2" stroke-linecap="round"/></svg>
+      找人 · 跨班组直接搜姓名
+    </button>
+    <div class="muted">管理员名单来自网格长信息台账「直接上级」列，台账调整后自动同步</div>
+  </div>
+</section>
+
+<!-- ============ 经理：选班组人员 / 管理员：直接选人 ============ -->
+<section class="view" id="view-pick-person">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" id="pp-back"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title" id="pp-title">选择人员</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <div class="crumbs hidden" id="pp-crumbs">
+      <span class="crumb" style="background:var(--primary-soft);color:var(--primary)" id="crumb-admin">管理员A</span>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M9 5l7 7-7 7" stroke="#9CA3AF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span class="crumb" style="background:var(--primary);color:#fff">班组人员</span>
+    </div>
+    <div class="field-label" id="pp-head">请选择违章人员</div>
+    <div class="field-sub" id="pp-sub">您权限范围内的全部人员 · 来自 WPS 花名册</div>
+    <div id="person-list" style="display:flex;flex-direction:column;gap:12px"></div>
+    <button class="back-link hidden" id="btn-repick-admin">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1D4ED8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      返回重新选管理员
+    </button>
+    <div class="muted">人员信息保存花名册记录 ID，姓名班组等从飞书花名册自动带出</div>
+  </div>
+</section>
+
+<!-- ============ 公司管理：处理方式 ============ -->
+<section class="view" id="view-handle">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" data-back="vio"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">处理方式</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <div class="card">
+      <div style="font-size:18px;font-weight:600" id="handle-title">未戴安全帽</div>
+      <div class="muted" style="margin-top:4px">公司管理人员现场检查发现</div>
+    </div>
+    <div class="field-label">怎么处理？</div>
+    <div class="opt-card" id="opt-self">
+      <div class="opt-title">自己处理</div>
+      <div class="opt-sub">确认人员后，现场拍照整改</div>
+    </div>
+    <div class="opt-card" id="opt-transfer" style="border:2px solid var(--primary)">
+      <div class="opt-title">转给责任乡镇</div>
+      <div class="opt-sub">指定乡镇与管理员，发送整改任务</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 公司管理：转责任乡镇 ============ -->
+<section class="view" id="view-transfer">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" data-back="handle"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">转给责任乡镇</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <div class="field-label" id="tf-head">指定责任乡镇</div>
+    <div class="field-sub" id="tf-sub">选择问题所在的责任乡镇作业中心</div>
+    <div id="tf-list" style="display:flex;flex-direction:column;gap:12px"></div>
+  </div>
+</section>
+
+<!-- ============ 公司管理：自己处理选人 ============ -->
+<section class="view" id="view-co-search">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" data-back="handle"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">自己处理 · 选择人员</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <div class="field-label">谁来整改？</div>
+    <div class="field-sub">违章人员不在您的班组，请搜索花名册确认人员</div>
+    <div class="search-bar">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" style="flex:none"><circle cx="11" cy="11" r="7" stroke="#1D4ED8" stroke-width="2"/><path d="M16.5 16.5L21 21" stroke="#1D4ED8" stroke-width="2" stroke-linecap="round"/></svg>
+      <input id="co-search-input" placeholder="输入姓名，搜索全公司花名册">
+    </div>
+    <div class="section-label" id="co-search-label">最近选择</div>
+    <div id="co-person-list" style="display:flex;flex-direction:column;gap:12px"></div>
+  </div>
+</section>
+
+<!-- ============ 人员信息确认 ============ -->
+<section class="view" id="view-confirm">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" id="cf-back"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">确认违章信息</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <span style="font-size:18px;font-weight:600">违章人员信息</span>
+        <span class="ro-tag">只读 · 来自花名册</span>
+      </div>
+      <div class="info-line" id="cf-info"></div>
+    </div>
+    <a class="tel-btn" id="cf-tel" href="#">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.08 4.18 2 2 0 0 1 4.06 2h3a2 2 0 0 1 2 1.72c.127.96.362 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span id="cf-tel-text">138****0000　点击拨打</span>
+    </a>
+    <div class="field-label" style="text-align:center;margin-top:8px">现在整改吗？</div>
+    <button class="btn-primary" id="btn-now">现在整改</button>
+    <button class="btn-ghost" id="btn-later">稍后整改</button>
+  </div>
+</section>
+
+<!-- ============ 拍整改后照片 ============ -->
+<section class="view" id="view-rectify">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" id="rf-back"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">整改</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <div class="card" style="display:flex;align-items:center;gap:12px">
+      <span class="chip red" id="rf-chip"><span class="dot"></span>未完成</span>
+      <span style="font-size:16px;font-weight:600" id="rf-summary">未戴安全帽 · 张三</span>
+    </div>
+    <div class="photo-box" id="after-photo-box" style="min-height:170px;color:var(--t4);font-size:14px">尚未拍摄</div>
+    <button class="big-cta" style="height:140px" id="btn-rf-capture">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.5" stroke="#fff" stroke-width="1.6"/></svg>
+      <div class="cta-title" style="font-size:24px">拍整改后照片</div>
+      <div class="cta-sub">整改完成后，拍一张现场照片</div>
+    </button>
+    <button class="btn-ghost" id="btn-rf-album">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="3" stroke="#1A1A1A" stroke-width="1.8"/><circle cx="9" cy="9" r="2" stroke="#1A1A1A" stroke-width="1.8"/><path d="M3.5 17l5-5 4 4 3.5-3.5 4.5 4.5" stroke="#1A1A1A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      从相册上传
+    </button>
+    <button class="btn-primary" id="btn-submit-rectify" disabled>提交</button>
+    <input type="file" accept="image/*" capture="environment" class="hidden" id="file-camera-2">
+    <input type="file" accept="image/*" class="hidden" id="file-album-2">
+  </div>
+</section>
+
+<!-- ============ 完成 ============ -->
+<section class="view" id="view-done">
+  <div class="statusbar"></div>
+  <div class="page" style="padding:48px;padding-top:80px;gap:20px">
+    <div style="width:96px;height:96px;border-radius:48px;background:var(--success-soft);display:flex;align-items:center;justify-content:center;align-self:center">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none"><path d="M4 12.5l5 5L20 6.5" stroke="#16A34A" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </div>
+    <div style="font-size:32px;font-weight:700;text-align:center" id="done-title">整改完成</div>
+    <div class="card" style="display:flex;flex-direction:column;gap:6px" id="done-card"></div>
+    <button class="btn-primary" id="btn-done-home">返回首页</button>
+  </div>
+</section>
+
+<!-- ============ 普通巡查 ============ -->
+<section class="view" id="view-patrol">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" data-back="classify"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">普通巡查</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <div class="photo-box"><img id="patrol-photo" alt="现场照片"></div>
+    <div class="field-label">这不是三违</div>
+    <div class="field-sub">请选择本次巡查结果</div>
+    <div class="opt-card" data-patrol="一般问题">
+      <div class="opt-title">一般问题</div>
+      <div class="opt-sub">已通知相关人员尽快处理</div>
+    </div>
+    <div class="opt-card" data-patrol="现场正常">
+      <div class="opt-title">现场正常</div>
+      <div class="opt-sub">无异常情况，完成本次巡查</div>
+    </div>
+    <button class="btn-primary" id="btn-patrol-done" disabled>完成检查</button>
+  </div>
+</section>
+
+<!-- ============ 我的检查 ============ -->
+<section class="view" id="view-my-checks">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" data-back="home"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">巡查台账</div><div style="width:40px"></div>
+  </div>
+  <div class="page" id="my-checks-list"></div>
+</section>
+
+<!-- ============ 我的整改 ============ -->
+<section class="view" id="view-my-rectify">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" data-back="home"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">我的整改</div><div style="width:40px"></div>
+  </div>
+  <div class="page" id="my-rectify-list"></div>
+</section>
+
+<!-- ============ 我的复查 ============ -->
+<section class="view" id="view-my-review">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" data-back="home"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">我的复查</div><div style="width:40px"></div>
+  </div>
+  <div class="page" id="my-review-list"></div>
+</section>
+
+<!-- ============ 下属检查 ============ -->
+<section class="view" id="view-sub-checks">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" data-back="home"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">检查记录</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <div class="seg">
+      <button class="seg-item" data-seg="mine">我的检查</button>
+      <button class="seg-item active" data-seg="sub">下属检查</button>
+    </div>
+    <div id="sub-list"></div>
+    <div class="muted">查看范围由台账组织关系 + 花名册动态决定，组织调整无需改程序</div>
+  </div>
+</section>
+
+<!-- ============ 三违详情 ============ -->
+<section class="view" id="view-detail">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" id="dt-back"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">三违详情</div><div style="width:40px"></div>
+  </div>
+  <div class="page" id="detail-body"></div>
+</section>
+
+<!-- ============ 我的（个人） ============ -->
+<section class="view" id="view-me">
+  <div class="statusbar"></div>
+  <div class="navbar"><div style="width:40px"></div><div class="nav-title">我的</div><div style="width:40px"></div></div>
+  <div class="page">
+    <div class="blue-idcard">
+      <div class="role-tag" id="me-role"></div>
+      <div class="name" id="me-name"></div>
+      <div class="meta" id="me-meta"></div>
+    </div>
+    <div class="card" style="cursor:pointer;display:none" id="btn-me-sub">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div style="font-size:17px;font-weight:600">下属检查</div>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 5l7 7-7 7" stroke="#9CA3AF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div style="font-size:13px;color:var(--t3);margin-top:2px">查看下属网格员的检查记录与闭环进度</div>
+    </div>
+    <div class="card">
+      <div class="info-line" id="me-info"></div>
+    </div>
+    <div class="card" style="cursor:pointer" id="btn-logout">
+      <div style="font-size:17px;font-weight:600;color:var(--danger);text-align:center">退出登录</div>
+    </div>
+    <div class="muted">身份信息来自网格长信息台账 · 检查记录暂存本机</div>
+  </div>
+</section>
+
+<!-- ============ 无权限降级页 ============ -->
+<section class="view" id="view-noperm">
+  <div class="statusbar"></div>
+  <div class="page center" style="justify-content:center;align-items:center;gap:16px">
+    <div style="width:80px;height:80px;border-radius:40px;background:var(--warn-soft);display:flex;align-items:center;justify-content:center">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none"><path d="M12 9v4M12 17h.01" stroke="#D97706" stroke-width="2" stroke-linecap="round"/><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" stroke="#D97706" stroke-width="1.8" stroke-linejoin="round"/></svg>
+    </div>
+    <div style="font-size:24px;font-weight:700">暂无巡查权限</div>
+    <div class="muted" style="text-align:center;max-width:280px">当前账号未在网格长信息台账登记或「分级」未配置，请联系管理员在台账中维护。</div>
+    <button class="btn-ghost" id="btn-noperm-logout" style="width:200px;height:56px;font-size:18px">退出登录</button>
+  </div>
+</section>
+
+</div>
+<script src="./config.js"></script>
+<script src="./app.js"></script>
+<script>
+"use strict";
+/* ================= 数据层 =================
+   选人数据全部来自后端只读接口，本页不再内置任何演示人员：
+     ① 组织关系 ← 网格长信息台账「直接上级」列   GET /api/mobile/org/subordinates
+     ② 花名册   ← 飞书「H5花名册表」              GET /api/mobile/roster
+   接口不可用或数据为空时给出明确提示，绝不静默回退假数据。
+   检查记录按登录账号隔离存 localStorage（后端记录接口就绪后替换）。 */
+let STORE_KEY = "hse_check_v1_default";
+const VIO_LIB = ["未戴安全帽","未穿反光服","未设置警示","违规作业","车辆违规","其他三违"]; // 待接真实三违标准库
+
+let orgCache = {};            // under 姓名 -> 下级组织；"__me__" = 本人
+let rosterCache = new Map();  // "area|q|limit" -> 花名册结果
+let lastApiError = "";        // 供空态提示使用的失败原因
+
+async function apiGet(path){
+  try {
+    const r = await mobileApi(path, null, "GET");
+    if(r.status === 200 && r.body && r.body.success) return r.body;
+    lastApiError = (r.body && (r.body.message || r.body.code)) || ("HTTP " + r.status);
+    return null;
+  } catch(e){ lastApiError = "网络异常，请检查网络后重试"; return null; }
+}
+async function loadSubordinates(under){
+  const key = under || "__me__";
+  if(orgCache[key]) return orgCache[key];
+  const body = await apiGet("/api/mobile/org/subordinates" + (under ? "?under=" + encodeURIComponent(under) : ""));
+  if(body) orgCache[key] = body;
+  return body;
+}
+async function loadRoster(opt){
+  const o = opt || {};
+  const key = (o.area || "") + "|" + (o.q || "") + "|" + (o.limit || "");
+  if(rosterCache.has(key)) return rosterCache.get(key);
+  const p = new URLSearchParams();
+  if(o.area) p.set("area", o.area);
+  if(o.q) p.set("q", o.q);
+  if(o.limit) p.set("limit", String(o.limit));
+  const body = await apiGet("/api/mobile/roster?" + p.toString());
+  if(body) rosterCache.set(key, body);
+  return body;
+}
+function clearPickCache(){ orgCache = {}; rosterCache = new Map(); lastApiError = ""; }
+function emptyTip(msg){ return '<div class="empty-tip">' + esc(msg) + '</div>'; }
+// 花名册记录 → 选人卡片数据（字段缺失时容错，不臆造）
+// dept = 所属部门（班组/部门，WPS Sheet 11「所属部门」，如「宁城街道一班」）
+// area = 负责区域（在职）（网格责任区，如「八里堂村+惠宁」）——两者语义不同，卡片主显示班组
+function rosterToPerson(it){
+  return {
+    id: it.recordId || it.code || it.name,
+    name: it.name || "",
+    job: it.job || "",
+    team: it.dept || it.area || "",
+    area: it.area || "",
+    sex: it.sex || "",
+    age: it.age || "",
+    tel: it.phone || ""
+  };
+}
+
+let db = null;
+function loadDB(){
+  try { db = JSON.parse(localStorage.getItem(STORE_KEY)) || null; } catch(e){ db = null; }
+  if(!db || !db.records){ db = { seq: 1, records: [] }; }
+}
+function saveDB(){ localStorage.setItem(STORE_KEY, JSON.stringify(db)); }
+function nextNo(){
+  const d = new Date();
+  const ds = "" + d.getFullYear() + String(d.getMonth()+1).padStart(2,"0") + String(d.getDate()).padStart(2,"0");
+  return "SW" + ds + String(db.seq++).padStart(3,"0");
+}
+
+/* ================= 会话与角色路由 ================= */
+// 身份来自 H5 登录会话（/api/mobile/me，网格长信息台账）。
+// 角色按职位自动判定（用户已确认映射）：
+//   职位含"经理"且部门为作业中心/片区/街道 → 乡镇作业中心经理（两步选人 + 下属检查）
+//   职位含"管理员"且部门为作业中心/片区/街道 → 管理员（直选本班组）
+//   部门或职位含"公司" → 公司管理人员（搜全公司花名册 + 自己处理/转责任乡镇）
+//   其余 → fail-closed 降级页（不给权限）
+let session = null;   // 当前登录用户对象
+let gps = null;       // {lat,lng,addr}（不可命名 location：顶层 let location 会因 window.location 不可配置而 SyntaxError，整段脚本失效）
+let draft = {};       // 进行中的检查草稿
+
+function buildSession(e){
+  const dept = String(e.department || "");
+  const pos = String(e.position || "");
+  const orgField = dept + pos;
+  // 角色优先取后端下发的分级映射（网格长信息台账「分级」列：
+  //   公司管理→公司管理 / 乡镇作业中心经理→经理 / 管理员→管理员）。
+  // 旧职位正则仅作历史会话兜底；两者都拿不到 → fail-closed 拒绝进入。
+  let role = null, roleTag = pos || "未配置职位";
+  const backendRole = String(e.role || "");
+  if(["公司管理","经理","管理员"].includes(backendRole)) role = backendRole;
+  else if(/作业中心|片区|街道/.test(dept) && /经理/.test(pos)) role = "经理";
+  else if(/管理员|网格长/.test(pos)) role = "管理员";
+  else if(/公司/.test(orgField)) role = "公司管理";
+  if(!role) return null; // fail-closed
+  if(role === "公司管理") roleTag = "公司管理人员";
+  return {
+    id: String(e.employee_code || e.id || e.name || "unknown"),
+    no: String(e.employee_code || "—"),
+    name: String(e.name || "未知"),
+    role, roleTag,
+    dept: dept || "—",
+    team: e.team || dept || "—", // 台账「所属部门」兼作班组显示（管理员=班组名）
+    grid: e.grid_level || "—",
+    superior: String(e.superior || ""),
+    phone: e.phone || null
+  };
+}
+
+const $ = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+const selPersonMode = u => u.role === "经理" ? "two-step" : (u.role === "管理员" ? "direct" : "search");
+
+function showView(name){
+  $$(".view").forEach(v => v.classList.remove("active"));
+  $("#view-" + name).classList.add("active");
+  window.scrollTo(0,0);
+}
+
+/* ================= 启动：复用网格长巡查登录会话 ================= */
+async function boot(){
+  if(!sessionStorage.getItem("h5_session_token") || sessionExpiredLocally()){
+    clearSession(); window.location.href = "./login.html"; return;
+  }
+  $("#boot-msg").textContent = "正在获取身份信息…";
+  const r = await mobileApi("/api/mobile/me");
+  if(r.status !== 200 || !r.body.success){
+    clearSession(); window.location.href = "./login.html"; return;
+  }
+  session = buildSession(r.body.employee || {});
+  if(!session){
+    $("#boot-msg").textContent = "当前账号不在网格长信息台账或分级未配置，请联系管理员在台账中维护（手机号+分级）。";
+    $("#btn-boot-login").textContent = "退出登录";
+    $("#btn-boot-login").classList.remove("hidden");
+    $("#btn-boot-login").onclick = () => { clearSession(); window.location.href = "./login.html"; };
+    showView("boot");
+    return;
+  }
+  STORE_KEY = "hse_check_v1_" + session.id; // 记录按登录账号隔离
+  loadDB();
+  clearPickCache();
+  // 预加载组织关系（台账「直接上级」）；失败不阻断进入首页，选人页会再给明确提示
+  if(session.role !== "管理员") loadSubordinates();
+  enterHome();
+}
+
+/* ================= GPS 自动定位（真实 GPS，不模拟；未定位禁开始检查） ================= */
+function initGPS(){
+  const bar = $("#gps-bar"), addr = $("#gps-addr"), note = $("#gps-note");
+  bar.classList.remove("warn");
+  gps = null;
+  $("#btn-start").disabled = true;
+  $("#cta-sub").textContent = "定位成功后才能开始检查";
+  addr.textContent = "正在定位…";
+  note.textContent = "（GPS 自动获取 · 经纬度仅后台保存，页面不显示）";
+  if(!navigator.geolocation){
+    bar.classList.add("warn");
+    addr.textContent = "定位失败：当前浏览器不支持定位";
+    note.innerHTML = " · <a href=\"#\" id=\"gps-retry\">重试定位</a>";
+    const r = document.getElementById("gps-retry");
+    if(r) r.onclick = e => { e.preventDefault(); initGPS(); };
+    return;
+  }
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      gps = { lat: pos.coords.latitude, lng: pos.coords.longitude, addr: reverseAddr(pos.coords) };
+      bar.classList.remove("warn");
+      addr.textContent = "已自动定位：" + gps.addr;
+      note.textContent = "（GPS 自动获取 · 经纬度仅后台保存，页面不显示）";
+      $("#btn-start").disabled = false;
+      $("#cta-sub").textContent = "定位成功 · 可开始检查";
+    },
+    () => {
+      bar.classList.add("warn");
+      addr.textContent = "定位失败：未获得定位授权或信号弱";
+      note.innerHTML = " · <a href=\"#\" id=\"gps-retry\">重试定位</a>";
+      const r = document.getElementById("gps-retry");
+      if(r) r.onclick = e => { e.preventDefault(); initGPS(); };
+    },
+    { timeout: 8000, maximumAge: 30000, enableHighAccuracy: true }
+  );
+}
+// 页面只显示地址，不显示经纬度（经纬度随记录仅后台/本地保存，供防假巡查核验）
+function reverseAddr(){
+  return "当前网格辖区";
+}
+
+/* ================= 首页 ================= */
+function enterHome(){
+  // 角色渲染
+  $("#idc-role").textContent = session.roleTag;
+  $("#idc-name").textContent = session.name;
+  $("#idc-meta").innerHTML = "员工编号　" + session.no + "<br>所属班组　" + session.team;
+  $("#home-avatar").textContent = session.name[0];
+  // 经理：下属检查入口在「我的」页；公司管理人员整改任务 Tab 显示"任务反馈"
+  $("#btn-me-sub").style.display = session.role === "经理" ? "" : "none";
+  $("#tab-rectify-label").textContent = session.role === "公司管理" ? "任务反馈" : "整改任务";
+  renderGPSBar();
+  refreshHomeStats();
+  initGPS();
+  showView("home");
+}
+function renderGPSBar(){
+  const bar = $("#gps-bar"), addr = $("#gps-addr");
+  bar.classList.remove("warn");
+  if(gps){
+    addr.textContent = "已自动定位：" + gps.addr;
+  } else {
+    addr.textContent = "定位中…";
+  }
+}
+
+/* ================= 首页统计 ================= */
+function myChecks(){ return db.records.filter(r => r.checkerId === session.id && r.type === "三违"); }
+function refreshHomeStats(){
+  const mine = myChecks();
+  const week = mine.filter(r => Date.now() - r.time < 7*864e5);
+  const pending = db.records.filter(r => r.status !== "done" && r.status !== "reviewed" && (r.rectifierId === session.id || r.transferAdminName === session.name));
+  const done = mine.filter(r => r.status === "done" || r.status === "reviewed");
+  $("#stat-week").textContent = week.length;
+  $("#stat-pending").textContent = pending.length;
+  $("#stat-done").textContent = done.length;
+  const unfinished = mine.filter(r => r.status === "unfinished");
+  setBadge("badge-checks", unfinished.length);
+  setBadge("badge-rectify", pending.length);
+  const toReview = db.records.filter(r => (r.status === "done") && (r.checkerId === session.id || (session.role==="经理" && isMySubordinateRec(r))));
+  setBadge("badge-review", toReview.length);
+  const todo = $("#todo-list");
+  const lines = [];
+  unfinished.slice(0,2).forEach(r => lines.push("· " + r.personName + " " + r.behavior + "，尚未完成整改"));
+  pending.filter(r => r.transferAdminId === session.id).slice(0,2).forEach(r => lines.push("· 收到转派任务：" + r.behavior + "（来自 " + r.checkerName + "）"));
+  todo.innerHTML = lines.length ? lines.map(l => "<div>" + esc(l) + "</div>").join("") : "<div>· 暂无待办，一切正常</div>";
+}
+function setBadge(id, n){ const el = document.getElementById(id); if(!el) return; el.classList.toggle("hidden", !n); el.textContent = n; }
+// 我的下级姓名（台账「直接上级」解析结果，boot 时预加载）。
+// 说明：检查记录目前按账号隔离存在各自手机上，跨账号查看需后端记录接口；
+// 此处用于「本机记录是否属于我下级」的判断。
+function mySubordinateNames(){
+  const o = orgCache["__me__"];
+  if(!o) return [];
+  return [].concat(o.admins || [], o.managers || [], o.others || []).map(x => x.name);
+}
+function isMySubordinateRec(rec){
+  return !!rec && mySubordinateNames().includes(String(rec.checkerName || ""));
+}
+function esc(s){ return String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+/* ================= 检查流程 ================= */
+function startCheck(){
+  if(!gps){ return; }
+  draft = { scenePhoto: null, behavior: null, person: null, patrolResult: null, afterPhoto: null };
+  $("#scene-photo-box").innerHTML = "尚未拍摄";
+  $("#btn-photo-next").classList.add("hidden");
+  showView("photo");
+}
+function compressImage(file, cb){
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      const max = 800, scale = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      cb(c.toDataURL("image/jpeg", 0.7));
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+function setScenePhoto(dataUrl){
+  draft.scenePhoto = dataUrl;
+  $("#scene-photo-box").innerHTML = '<img alt="现场照片" src="' + dataUrl + '">';
+  $("#btn-photo-next").classList.remove("hidden");
+}
+
+/* ---- 三违宫格 ---- */
+function renderVioGrid(){
+  const g = $("#vio-grid"); g.innerHTML = "";
+  VIO_LIB.forEach(name => {
+    const d = document.createElement("div");
+    d.className = "vio-cell"; d.textContent = name;
+    d.onclick = () => { draft.behavior = name; goPersonSelect(); };
+    g.appendChild(d);
+  });
+}
+/* ---- 选人（数据源：台账「直接上级」组织关系 + 花名册[WPS 多维表格 Sheet 11「员工信息维护」]） ---- */
+function personRow(p, onpick){
+  const row = document.createElement("div");
+  row.className = "person-row";
+  const color = ["av-blue","av-amber","av-green"][p.name.charCodeAt(0) % 3];
+  const sub = [p.job, p.team].filter(Boolean).join(" · ") || "花名册人员";
+  row.innerHTML = '<div class="avatar ' + color + '">' + p.name[0] + '</div>' +
+    '<div style="flex:1;min-width:0"><div style="font-size:21px;font-weight:600">' + esc(p.name) + '</div>' +
+    '<div style="font-size:13px;color:var(--t3)">' + esc(sub) + '</div></div>' +
+    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 5l7 7-7 7" stroke="#9CA3AF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  row.onclick = () => onpick(p);
+  return row;
+}
+// 组织节点行（台账人员：经理选管理员 / 公司管理选片区）
+function orgRow(node, sub, onpick){
+  const row = document.createElement("div");
+  row.className = "person-row";
+  const color = ["av-blue","av-amber","av-green"][node.name.charCodeAt(0) % 3];
+  row.innerHTML = '<div class="avatar ' + color + '">' + node.name[0] + '</div>' +
+    '<div style="flex:1;min-width:0"><div style="font-size:21px;font-weight:600">' + esc(node.name) + '</div>' +
+    '<div style="font-size:13px;color:var(--t3)">' + esc(sub) + '</div></div>' +
+    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 5l7 7-7 7" stroke="#9CA3AF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  row.onclick = () => onpick();
+  return row;
+}
+function appendSearchAll(list){
+  const b = document.createElement("button");
+  b.className = "back-link";
+  b.textContent = "搜索全部人员";
+  b.onclick = () => { $("#co-search-input").value = ""; renderCoSearch(""); showView("co-search"); };
+  list.appendChild(b);
+}
+function renderPersonList(list, body, ctx){
+  ctx = ctx || {};
+  list.innerHTML = "";
+  if(!body){ list.innerHTML = emptyTip("花名册读取失败：" + (lastApiError || "请稍后重试")); return; }
+  if(!body.items.length){
+    if(!body.rosterSize){
+      list.innerHTML = emptyTip("花名册暂无在职人员，请联系管理员核对「花名册」表");
+    } else if(ctx.area){
+      list.innerHTML = emptyTip("「" + esc(ctx.area) + "」暂无可选人员（花名册「所属部门」需与本班组名称一致）");
+    } else {
+      list.innerHTML = emptyTip("未找到匹配人员");
+    }
+    if(ctx.area || ctx.adminName) appendSearchAll(list);
+    return;
+  }
+  body.items.forEach(it => list.appendChild(personRow(rosterToPerson(it), pickPerson)));
+  if(body.truncated){
+    const tip = document.createElement("div");
+    tip.className = "muted";
+    tip.textContent = "仅显示前 " + body.items.length + " 人，请输入姓名精确搜索";
+    list.appendChild(tip);
+  }
+}
+async function goPersonSelect(){
+  const mode = selPersonMode(session);
+  if(mode === "direct"){
+    $("#pp-title").textContent = "请选择违章人员";
+    $("#pp-head").textContent = "请选择违章人员";
+    $("#pp-sub").textContent = "本班组人员 · 来自花名册";
+    $("#pp-crumbs").classList.add("hidden");
+    $("#btn-repick-admin").classList.add("hidden");
+    $("#pp-back").dataset.back = "vio";
+    const list = $("#person-list"); list.innerHTML = emptyTip("正在读取花名册…");
+    showView("pick-person");
+    const body = await loadRoster({ area: session.dept });
+    renderPersonList(list, body, { area: session.dept });
+  } else if(mode === "two-step"){
+    await renderAdminPick();
+  } else {
+    // 公司管理：搜索全公司花名册
+    $("#co-search-input").value = "";
+    renderCoSearch("");
+    showView("co-search");
+  }
+}
+// 经理第一步：我的下级（台账「直接上级」）。
+// 若直接下级是片区经理（二级网格长）而非管理员，点它继续下钻一层。
+async function renderAdminPick(under, listEl){
+  const list = listEl || $("#admin-list");
+  list.innerHTML = emptyTip("正在读取下级管理员…");
+  if(!listEl) showView("pick-admin");
+  const body = await loadSubordinates(under);
+  list.innerHTML = "";
+  if(!body){ list.innerHTML = emptyTip("组织信息读取失败：" + (lastApiError || "请稍后重试")); return; }
+  if(body.code === "AMBIGUOUS_SELF"){
+    list.innerHTML = emptyTip(body.message || "台账中你的姓名不唯一，请联系管理员规范台账");
+    return;
+  }
+  const admins = body.admins || [], managers = body.managers || [];
+  if(!admins.length && !managers.length){
+    list.innerHTML = emptyTip("台账中未配置你的下级，请联系管理员在「网格长信息台账」补充「直接上级」");
+    appendSearchAll(list);
+    return;
+  }
+  admins.forEach(a => list.appendChild(
+    orgRow(a, [a.department, a.gridLevel || "管理员"].filter(Boolean).join(" · "), () => showCrewOf(a))));
+  managers.forEach(m => list.appendChild(
+    orgRow(m, [m.department, "点击查看其管理员"].filter(Boolean).join(" · "), () => renderAdminPick(m.name, list))));
+  if(!listEl) appendSearchAll(list);
+}
+async function showCrewOf(admin){
+  $("#pp-title").textContent = "选择人员";
+  $("#pp-head").textContent = "第二步：选择违章人员";
+  $("#pp-sub").textContent = admin.name + " · " + (admin.department || "—") + " 的人员";
+  $("#crumb-admin").textContent = admin.name;
+  $("#pp-crumbs").classList.remove("hidden");
+  $("#btn-repick-admin").classList.remove("hidden");
+  $("#pp-back").onclick = () => renderAdminPick();
+  const list = $("#person-list"); list.innerHTML = emptyTip("正在读取花名册…");
+  showView("pick-person");
+  const body = await loadRoster({ area: admin.department });
+  renderPersonList(list, body, { area: admin.department, adminName: admin.name });
+}
+let coTimer = null, coSeq = 0;
+function renderCoSearch(q){
+  clearTimeout(coTimer);
+  const list = $("#co-person-list");
+  if(!q){
+    $("#co-search-label").textContent = "全公司花名册";
+    list.innerHTML = emptyTip("输入姓名或工号，搜索全公司花名册");
+    return;
+  }
+  $("#co-search-label").textContent = "搜索中…";
+  list.innerHTML = emptyTip("正在搜索…");
+  coTimer = setTimeout(async () => {
+    const seq = ++coSeq;
+    const body = await loadRoster({ q: q, limit: 30 });
+    if(seq !== coSeq) return; // 只渲染最后一次输入的结果
+    list.innerHTML = "";
+    if(!body){ list.innerHTML = emptyTip("搜索失败：" + (lastApiError || "请稍后重试")); return; }
+    $("#co-search-label").textContent = "搜索结果 · " + body.total + " 人";
+    if(!body.items.length){
+      list.innerHTML = !body.rosterSize
+        ? emptyTip("花名册暂无在职人员，请联系管理员核对「花名册」表")
+        : emptyTip("未找到「" + q + "」，请确认姓名");
+      return;
+    }
+    body.items.forEach(it => list.appendChild(personRow(rosterToPerson(it), pickPerson)));
+  }, 250);
+}
+function pickPerson(p){
+  draft.person = p;
+  const lines = ["姓名：" + esc(p.name)];
+  const meta = [p.sex, p.age ? p.age + "岁" : "", p.job].filter(Boolean).join("　");
+  if(meta) lines.push(esc(meta));
+  if(p.team) lines.push("所属部门：" + esc(p.team));
+  if(p.area && p.area !== p.team) lines.push("负责区域：" + esc(p.area));
+  if(p.tel) lines.push("手机：" + esc(maskTel(p.tel)));
+  $("#cf-info").innerHTML = lines.join("<br>");
+  const telBtn = $("#cf-tel");
+  if(p.tel){
+    telBtn.classList.remove("hidden");
+    telBtn.href = "tel:" + p.tel;
+    $("#cf-tel-text").textContent = maskTel(p.tel) + "　点击拨打";
+  } else {
+    telBtn.classList.add("hidden"); // 花名册未配手机号 → 不显示拨打入口（不臆造号码）
+  }
+  // 返回逻辑
+  const mode = selPersonMode(session);
+  $("#cf-back").onclick = () => { mode === "two-step" ? showView("pick-person") : (mode === "search" ? showView("co-search") : showView("pick-person")); };
+  showView("confirm");
+}
+function maskTel(t){ const s = String(t || ""); return s.length >= 8 ? s.slice(0,3) + "****" + s.slice(-4) : s; }
+
+/* ---- 创建记录 ---- */
+function makeRecord(extra){
+  const rec = Object.assign({
+    id: "r" + Date.now() + Math.floor(Math.random()*999),
+    no: nextNo(),
+    type: "三违",
+    behavior: draft.behavior,
+    personId: draft.person ? draft.person.id : null,
+    personName: draft.person ? draft.person.name : "",
+    personJob: draft.person ? draft.person.job : "",
+    personTeam: draft.person ? draft.person.team : "",
+    personArea: draft.person ? (draft.person.area || "") : "",
+    personTel: draft.person ? draft.person.tel : "",
+    personSex: draft.person ? draft.person.sex : "",
+    personAge: draft.person ? draft.person.age : "",
+    scenePhoto: draft.scenePhoto,
+    afterPhoto: null,
+    checkerId: session.id, checkerName: session.name, checkerRole: session.roleTag,
+    time: Date.now(),
+    status: "unfinished",
+    rectifyMode: null, rectifyTime: null,
+    transferTown: null, transferAdminId: null, transferAdminName: null,
+    location: gps ? { lat: gps.lat, lng: gps.lng, addr: gps.addr, simulated: !!gps.simulated } : null
+  }, extra || {});
+  db.records.unshift(rec);
+  saveDB();
+  return rec;
+}
+function showDone(rec, title){
+  $("#done-title").textContent = title || "整改完成";
+  const c = $("#done-card");
+  const rows = [];
+  rows.push('<div style="font-size:16px;font-weight:600;color:var(--primary)">记录编号　' + rec.no + "</div>");
+  if(rec.type === "三违"){
+    rows.push('<div class="info-line">违章人员：' + esc(rec.personName) + "</div>");
+    rows.push('<div class="info-line">三违行为：' + esc(rec.behavior) + "</div>");
+  } else {
+    rows.push('<div class="info-line">巡查结果：' + esc(rec.patrolResult) + "</div>");
+  }
+  rows.push(lineKV("现场照片", rec.scenePhoto ? "已拍摄" : "—"));
+  if(rec.type === "三违") rows.push(lineKV("整改照片", rec.afterPhoto ? "已拍摄" : "—"));
+  if(rec.rectifyMode === "transfer") rows.push('<div class="info-line">已转责任乡镇：' + esc(rec.transferTown) + " · " + esc(rec.transferAdminName) + "</div>");
+  c.innerHTML = rows.join("");
+  $("#btn-done-home").onclick = () => { enterHome(); };
+  showView("done");
+}
+function lineKV(k, v){
+  return '<div style="display:flex;justify-content:space-between;font-size:16px;color:var(--t2)"><span>' + k + '</span><span style="font-weight:600;color:var(--success)">' + v + "</span></div>";
+}
+
+/* ================= 列表渲染 ================= */
+function statusChip(rec){
+  if(rec.status === "unfinished") return '<span class="chip red"><span class="dot"></span>未完成</span>';
+  if(rec.status === "transferred") return '<span class="chip yellow"><span class="dot"></span>已转整改</span>';
+  if(rec.status === "reviewed") return '<span class="chip blue">已复查</span>';
+  return '<span class="chip green"><span class="dot"></span>已完成</span>';
+}
+function fmtTime(t){ const d = new Date(t); return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0") + " " + String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0"); }
+function recordCard(rec, opts){
+  opts = opts || {};
+  const card = document.createElement("div");
+  card.className = "record-card" + (rec.status === "unfinished" ? " unfinished" : "");
+  const goLine = opts.goLine || (rec.status === "unfinished" && rec.checkerId === session.id ? "点击继续整改" : null);
+  card.innerHTML =
+    '<div class="r-top">' + statusChip(rec) + '<span style="font-size:13px;color:var(--t4)">' + fmtTime(rec.time).slice(11) + "</span></div>" +
+    '<div class="r-title">' + esc(rec.type === "三违" ? rec.behavior : "普通巡查 · " + rec.patrolResult) + "</div>" +
+    '<div class="r-sub">' + (rec.personName ? esc(rec.personName) + " · " + esc(rec.personJob) + "　" : "") + esc(rec.no) + "</div>";
+  if(rec.scenePhoto){
+    const img = document.createElement("img");
+    img.className = "photo-thumb"; img.src = rec.scenePhoto; img.alt = "现场照片";
+    card.appendChild(img);
+  }
+  if(goLine){
+    const go = document.createElement("div");
+    go.className = "r-go";
+    go.innerHTML = "<span>" + goLine + "</span><svg width='18' height='18' viewBox='0 0 24 24' fill='none'><path d='M9 5l7 7-7 7' stroke='#1D4ED8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg>";
+    card.appendChild(go);
+  }
+  card.onclick = () => openRecord(rec, opts);
+  return card;
+}
+function openRecord(rec, opts){
+  opts = opts || {};
+  // 未完成 & 本人检查 & 三违 → 直接进入继续整改
+  if(rec.type === "三违" && rec.status === "unfinished" && (rec.checkerId === session.id || rec.transferAdminId === session.id)){
+    openRectify(rec, rec.checkerId === session.id ? "my-checks" : "my-rectify");
+    return;
+  }
+  renderDetail(rec, opts.from);
+}
+function renderListInto(elId, records, opts){
+  const el = document.getElementById(elId);
+  el.innerHTML = "";
+  if(!records.length){ el.innerHTML = '<div class="empty-tip">暂无记录</div>'; return; }
+  // 按日期分组
+  const groups = {};
+  records.forEach(r => { const k = fmtTime(r.time).slice(0,10); (groups[k] = groups[k] || []).push(r); });
+  Object.keys(groups).sort().reverse().forEach(day => {
+    const lab = document.createElement("div");
+    lab.className = "section-label"; lab.textContent = day;
+    el.appendChild(lab);
+    groups[day].forEach(r => el.appendChild(recordCard(r, opts)));
+  });
+}
+function renderDetail(rec, from){
+  const b = $("#detail-body"); b.innerHTML = "";
+  const mk = html => { const d = document.createElement("div"); d.innerHTML = html; return d.firstElementChild; };
+  b.appendChild(mk('<div class="card" style="display:flex;flex-direction:column;gap:8px">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:15px;font-weight:600;color:var(--primary)">' + esc(rec.no) + "</span>" + statusChip(rec) + "</div>" +
+    '<div style="font-size:24px;font-weight:700">' + esc(rec.type === "三违" ? rec.behavior : "普通巡查 · " + rec.patrolResult) + "</div>" +
+    (rec.personName ? '<div style="font-size:14px;color:var(--t3)">' + esc(rec.personName) + " · " + esc(rec.personJob) + " · " + esc(rec.personTeam) + "</div>" : "") +
+    '<div style="font-size:15px;color:var(--t2);line-height:1.9">检查人：' + esc(rec.checkerName) + "<br>检查时间：" + fmtTime(rec.time) + "<br>定位：" + esc(rec.location ? rec.location.addr : "—") + "</div></div>"));
+  if(rec.personName){
+    // 违章人员信息取记录快照（选人时从花名册写入），不依赖演示花名册
+    const pc = mk('<div class="person-row" style="cursor:default"></div>');
+    const pmeta = [rec.personSex, rec.personAge ? rec.personAge + "岁" : "", rec.personJob, rec.personArea].filter(Boolean).join(" · ");
+    pc.innerHTML = '<div class="avatar sm av-blue">' + esc(rec.personName[0] || "?") + "</div>" +
+      '<div style="flex:1"><div style="font-size:18px;font-weight:600">' + esc(rec.personName) + '</div>' +
+      (pmeta ? '<div style="font-size:13px;color:var(--t3)">' + esc(pmeta) + "</div>" : "") + "</div>";
+    if(rec.personTel){
+      const tel = document.createElement("a");
+      tel.className = "tel-btn"; tel.style.width = "44px"; tel.style.height = "44px"; tel.style.borderRadius = "22px"; tel.style.padding = "0";
+      tel.href = "tel:" + rec.personTel;
+      tel.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.08 4.18 2 2 0 0 1 4.06 2h3a2 2 0 0 1 2 1.72c.127.96.362 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      pc.appendChild(tel);
+    }
+    b.appendChild(pc);
+  }
+  if(rec.scenePhoto){
+    b.appendChild(mk('<div class="section-label">现场照片</div>'));
+    const ph = mk('<div class="photo-box"><img alt="现场照片" src="' + rec.scenePhoto + '"></div>');
+    b.appendChild(ph);
+  }
+  if(rec.type === "三违"){
+    b.appendChild(mk('<div class="section-label">整改信息</div>'));
+    const lines = [];
+    if(rec.rectifyMode === "transfer") lines.push("整改责任人：" + esc(rec.transferAdminName) + "（" + esc(rec.transferTown) + "）");
+    else if(rec.rectifierName) lines.push("整改人：" + esc(rec.rectifierName));
+    if(rec.rectifyTime) lines.push("整改时间：" + fmtTime(rec.rectifyTime));
+    if(!lines.length) lines.push("等待整改");
+    const rc = mk('<div class="card" style="display:flex;flex-direction:column;gap:8px"><div style="font-size:15px;color:var(--t2);line-height:1.9">' + lines.join("<br>") + "</div></div>");
+    if(rec.afterPhoto){
+      const ph = mk('<div class="photo-box"><img alt="整改后照片" src="' + rec.afterPhoto + '"></div>');
+      rc.appendChild(ph);
+    }
+    // 复查按钮（检查人本人 / 经理对下属）
+    if(rec.status === "done" && (rec.checkerId === session.id || isMySubordinateRec(rec))){
+      const btn = mk('<button class="btn-primary" style="height:60px;font-size:19px">复查通过 · 闭环</button>');
+      btn.onclick = () => { rec.status = "reviewed"; saveDB(); refreshHomeStats(); renderDetail(rec, from); };
+      rc.appendChild(btn);
+    }
+    b.appendChild(rc);
+  }
+  $("#dt-back").onclick = () => { from ? showView(from) : showView("home"); };
+  showView("detail");
+}
+
+/* ---- 整改 ---- */
+let rectifying = null, rectifyFrom = null;
+function openRectify(rec, from){
+  rectifying = rec; rectifyFrom = from || "view-home";
+  $("#rf-chip").className = "chip " + (rec.status === "transferred" ? "yellow" : "red");
+  $("#rf-chip").innerHTML = '<span class="dot"></span>' + (rec.status === "transferred" ? "已转整改" : "未完成");
+  $("#rf-summary").textContent = rec.behavior + " · " + rec.personName;
+  $("#after-photo-box").innerHTML = "尚未拍摄";
+  $("#btn-submit-rectify").disabled = true;
+  $("#rf-back").onclick = () => showView(rectifyFrom);
+  showView("rectify");
+}
+function setAfterPhoto(dataUrl){
+  draft.afterPhoto = dataUrl; rectifying.afterPhoto = dataUrl;
+  $("#after-photo-box").innerHTML = '<img alt="整改后照片" src="' + dataUrl + '">';
+  $("#btn-submit-rectify").disabled = false;
+}
+function submitRectify(){
+  rectifying.status = "done";
+  rectifying.rectifyTime = Date.now();
+  rectifying.rectifierId = session.id;
+  rectifying.rectifierName = session.name;
+  saveDB();
+  showDone(rectifying, "整改完成");
+  rectifying = null;
+}
+
+/* ================= 事件绑定 ================= */
+document.addEventListener("DOMContentLoaded", () => {
+  // 启动：验证登录会话并自动识别角色
+  boot();
+
+  // 首页
+  $("#btn-start").onclick = startCheck;
+  $$(".entry-card").forEach(c => c.onclick = () => openEntry(c.dataset.go));
+  $$("#tabbar .tab-item").forEach(t => t.onclick = () => openTab(t.dataset.tab));
+  $("#btn-me-sub").onclick = () => openEntry("sub-checks");
+  function openTab(tab){
+    $$("#tabbar .tab-item").forEach(x => x.classList.toggle("active", x.dataset.tab === tab));
+    if(tab === "home") return;
+    if(tab === "my-checks") openEntry("my-checks");
+    if(tab === "my-rectify") openEntry("my-rectify");
+    if(tab === "me") openEntry("me");
+  }
+
+  // 返回按钮（data-back）；回到首页时底部导航高亮同步回「首页」
+  $$("[data-back]").forEach(el => el.onclick = () => {
+    showView(el.dataset.back);
+    if(el.dataset.back === "home") $$("#tabbar .tab-item").forEach(x => x.classList.toggle("active", x.dataset.tab === "home"));
+  });
+
+  // 拍照
+  $("#btn-capture").onclick = () => $("#file-camera").click();
+  $("#btn-album").onclick = () => $("#file-album").click();
+  $("#file-camera").onchange = e => { if(e.target.files[0]) compressImage(e.target.files[0], setScenePhoto); e.target.value = ""; };
+  $("#file-album").onchange = e => { if(e.target.files[0]) compressImage(e.target.files[0], setScenePhoto); e.target.value = ""; };
+  $("#btn-photo-next").onclick = () => { $("#classify-photo").src = draft.scenePhoto; showView("classify"); };
+
+  // 分类
+  $("#opt-no").onclick = () => { $("#patrol-photo").src = draft.scenePhoto; $("#btn-patrol-done").disabled = true; draft.patrolResult = null; showView("patrol"); };
+  $("#opt-yes").onclick = () => { session.role === "公司管理" ? showView("handle") : (renderVioGrid(), showView("vio")); };
+
+  // 三违宫格 → 选人
+  $("#btn-find-any").onclick = () => { // 经理跨班组搜索 → 复用公司搜索页
+    $("#co-search-input").value = ""; renderCoSearch(""); showView("co-search");
+  };
+  $("#btn-repick-admin").onclick = () => renderAdminPick();
+  $("#co-search-input").addEventListener("input", e => renderCoSearch(e.target.value.trim()));
+
+  // 处理方式（公司管理）
+  $("#opt-self").onclick = () => { $("#co-search-input").value = ""; renderCoSearch(""); showView("co-search"); };
+  $("#opt-transfer").onclick = () => { draft.transferTown = null; draft.transferManager = null; showView("transfer"); renderTownList(); };
+
+  // 转乡镇（数据源：台账「直接上级」——我的下级片区经理 → 该片区下的管理员）
+  async function renderTownList(){
+    const list = $("#tf-list");
+    const choosingAdmin = !!draft.transferTown;
+    $("#tf-head").textContent = choosingAdmin ? "第二步：指定接收管理员" : "第一步：指定责任乡镇";
+    $("#tf-sub").textContent = choosingAdmin ? "任务将推送给所选管理员的「我的整改」" : "选择问题所在的责任乡镇作业中心（来自台账）";
+    list.innerHTML = emptyTip("正在读取组织…");
+    const body = await loadSubordinates(choosingAdmin ? draft.transferManager : undefined);
+    list.innerHTML = "";
+    if(!body){ list.innerHTML = emptyTip("组织信息读取失败：" + (lastApiError || "请稍后重试")); return; }
+    const rows = choosingAdmin ? (body.admins || []) : (body.managers || []);
+    if(!rows.length){
+      list.innerHTML = emptyTip(choosingAdmin
+        ? "「" + draft.transferTown + "」在台账下暂无管理员，请联系管理员维护「直接上级」"
+        : "台账中未配置你下辖的乡镇/片区，请联系管理员维护「直接上级」");
+      return;
+    }
+    rows.forEach(node => {
+      const label = node.department || node.name;
+      const row = document.createElement("div");
+      row.className = "person-row";
+      row.innerHTML = '<div class="avatar ' + (choosingAdmin ? "av-blue" : "av-amber") + '">' + esc((choosingAdmin ? node.name : label)[0] || "镇") + '</div>' +
+        '<div style="flex:1;min-width:0"><div style="font-size:21px;font-weight:600">' + esc(choosingAdmin ? node.name : label) + '</div>' +
+        '<div style="font-size:13px;color:var(--t3)">' + esc(choosingAdmin ? (node.gridLevel || "管理员") : "责任乡镇作业中心 · " + node.name) + '</div></div>';
+      row.onclick = () => {
+        if(!draft.transferTown){
+          draft.transferTown = label; draft.transferManager = node.name; renderTownList();
+        } else {
+          const rec = makeRecord({ rectifyMode: "transfer", status: "transferred",
+            transferTown: draft.transferTown, transferAdminId: node.name, transferAdminName: node.name });
+          showDone(rec, "已发送整改任务");
+        }
+      };
+      list.appendChild(row);
+    });
+    if(draft.transferTown){
+      const back = document.createElement("button");
+      back.className = "back-link"; back.textContent = "返回重新选乡镇";
+      back.onclick = () => { draft.transferTown = null; draft.transferManager = null; renderTownList(); };
+      list.appendChild(back);
+    }
+  }
+
+  // 确认页
+  $("#btn-now").onclick = () => {
+    const rec = makeRecord({ rectifyMode: "now", rectifierId: session.id, rectifierName: session.name });
+    openRectify(rec, "view-confirm");
+    rectifyFrom = "view-home"; $("#rf-back").onclick = () => showView("home");
+  };
+  $("#btn-later").onclick = () => {
+    const rec = makeRecord({ rectifyMode: "later", rectifierId: session.id, rectifierName: session.name });
+    $("#done-title").textContent = "记录已保存";
+    const c = $("#done-card");
+    c.innerHTML = '<div style="font-size:16px;font-weight:600;color:var(--primary)">记录编号　' + rec.no + "</div>" +
+      '<div class="info-line">三违行为：' + esc(rec.behavior) + "</div>" +
+      '<div class="info-line">违章人员：' + esc(rec.personName) + "</div>" +
+      '<div class="info-line">状态：<span style="color:var(--danger);font-weight:600">未完成</span>　请到「巡查台账」继续整改</div>';
+    $("#btn-done-home").onclick = () => { enterHome(); };
+    showView("done");
+  };
+
+  // 整改拍照
+  $("#btn-rf-capture").onclick = () => $("#file-camera-2").click();
+  $("#btn-rf-album").onclick = () => $("#file-album-2").click();
+  $("#file-camera-2").onchange = e => { if(e.target.files[0]) compressImage(e.target.files[0], setAfterPhoto); e.target.value = ""; };
+  $("#file-album-2").onchange = e => { if(e.target.files[0]) compressImage(e.target.files[0], setAfterPhoto); e.target.value = ""; };
+  $("#btn-submit-rectify").onclick = submitRectify;
+
+  // 巡查
+  $$("[data-patrol]").forEach(el => el.onclick = () => {
+    draft.patrolResult = el.dataset.patrol;
+    $("#btn-patrol-done").disabled = false;
+  });
+  $("#btn-patrol-done").onclick = () => {
+    const rec = makeRecord({ type: "巡查", patrolResult: draft.patrolResult, behavior: null, personId: null, personName: "" });
+    showDone(rec, "检查完成");
+  };
+
+  // 无权限页
+  $("#btn-noperm-logout").onclick = logout;
+  $("#btn-logout").onclick = logout;
+  function logout(){ clearSession(); window.location.href = "./login.html"; }
+});
+
+function openEntry(go){
+  if(go === "my-checks"){ renderListInto("my-checks-list", myChecks(), { from: "view-my-checks" }); showView("my-checks"); }
+  if(go === "my-rectify"){
+    const mine = db.records.filter(r => (r.rectifierId === session.id || r.transferAdminName === session.name) && r.status !== "done" && r.status !== "reviewed");
+    renderListInto("my-rectify-list", mine, { from: "view-my-rectify", goLine: "点击开始整改" });
+    showView("my-rectify");
+  }
+  if(go === "my-review"){
+    const toReview = db.records.filter(r => r.status === "done" && (r.checkerId === session.id || isMySubordinateRec(r)));
+    renderListInto("my-review-list", toReview, { from: "view-my-review", goLine: "点击查看并复查" });
+    showView("my-review");
+  }
+  if(go === "sub-checks"){
+    if(session.role !== "经理") return;
+    const subNames = mySubordinateNames();          // 台账「直接上级」解析出的下级姓名
+    const subRecs = db.records.filter(r => subNames.includes(String(r.checkerName || "")));
+    const el = $("#sub-list"); el.innerHTML = "";
+    if(!subNames.length){
+      el.innerHTML = '<div class="empty-tip">台账中未配置你的下级，请联系管理员维护「直接上级」</div>';
+    } else if(!subRecs.length){
+      el.innerHTML = '<div class="empty-tip">暂无可查看的下属检查记录<br><span style="font-size:13px">下属记录保存在各自账号下，汇总查看需后端记录接口（当前版本仅显示本机记录）</span></div>';
+    }
+    subNames.forEach(nm => {
+      const recs = subRecs.filter(r => String(r.checkerName || "") === nm);
+      if(!recs.length) return;
+      const g = document.createElement("div");
+      g.className = "card"; g.style.display = "flex"; g.style.flexDirection = "column"; g.style.gap = "8px";
+      g.innerHTML = '<div style="display:flex;align-items:center;gap:12px"><div class="avatar sm av-blue">' + esc(nm[0] || "?") + '</div><div><div style="font-size:17px;font-weight:600">' + esc(nm) + '</div><div style="font-size:13px;color:var(--t3)">本机记录 · ' + recs.length + " 条</div></div></div>";
+      recs.slice(0,5).forEach(r => {
+        const row = document.createElement("div");
+        row.className = "check-line"; row.style.cursor = "pointer";
+        row.innerHTML = "<span>" + esc(r.personName + " · " + r.behavior) + "</span>" + (r.status === "unfinished" ? '<span style="color:var(--danger);font-weight:600;font-size:13px">未完成</span>' : '<span style="color:var(--success);font-weight:600;font-size:13px">已完成</span>');
+        row.onclick = () => renderDetail(r, "view-sub-checks");
+        g.appendChild(row);
+      });
+      el.appendChild(g);
+    });
+    $$(".seg-item").forEach(s => s.classList.toggle("active", s.dataset.seg === "sub"));
+    showView("sub-checks");
+  }
+  if(go === "me"){
+    $("#me-role").textContent = session.roleTag;
+    $("#me-name").textContent = session.name;
+    $("#me-meta").innerHTML = "员工编号　" + session.no + "<br>所属部门　" + esc(session.dept) + "<br>所属班组　" + esc(session.team);
+    $("#me-info").innerHTML = "网格长等级：" + esc(session.grid) + "<br>职位：" + esc(session.roleTag) + "<br>手机：" + esc(session.phone ? maskTel(session.phone) : "—");
+    showView("me");
+  }
+}
+// 下属检查分段切换
+document.addEventListener("click", e => {
+  const seg = e.target.closest(".seg-item");
+  if(!seg) return;
+  $$(".seg-item").forEach(x => x.classList.toggle("active", x === seg));
+  if(seg.dataset.seg === "mine"){ openEntry("my-checks"); }
+});
+</script>
+</body>
+</html>

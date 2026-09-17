@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>我的巡查记录</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f5f7fa; min-height: 100vh; padding-bottom: 40px; }
+    .bar { background: #2563eb; color: #fff; padding: 14px 16px; font-size: 17px; font-weight: 600; display: flex; align-items: center; }
+    .bar .back { margin-right: 10px; font-size: 20px; color: #fff; text-decoration: none; }
+    .wrap { width: 92%; max-width: 420px; margin: 0 auto; }
+    .item { background: #fff; border-radius: 12px; padding: 14px 16px; margin-top: 12px; box-shadow: 0 2px 10px rgba(0,0,0,.06); cursor: pointer; }
+    .item:active { background: #f0f6ff; }
+    .item .t { font-size: 15px; font-weight: 600; color: #1f2d3d; display: flex; justify-content: space-between; }
+    .item .m { font-size: 13px; color: #606266; margin-top: 6px; }
+    .item .tag { font-size: 12px; border-radius: 6px; padding: 2px 8px; }
+    .tag.v { color: #b91c1c; background: #fee2e2; }
+    .tag.ok { color: #15803d; background: #dcfce7; }
+    .empty { text-align: center; color: #909399; font-size: 14px; padding: 50px 0; }
+    .banner { font-size: 14px; border-radius: 10px; padding: 12px; margin-top: 14px; }
+    .banner.err { color: #b91c1c; background: #fee2e2; }
+    .banner.info { color: #1d4ed8; background: #dbeafe; }
+  </style>
+</head>
+<body>
+  <div class="bar"><a class="back" href="./home.html">‹</a>我的巡查记录</div>
+  <div class="wrap">
+    <div id="list" class="banner info">加载中…</div>
+  </div>
+  <script src="./config.js"></script>
+  <script src="./app.js"></script>
+  <script>
+    (async () => {
+      if (sessionExpiredLocally()) { clearSession(); location.href = './login.html'; return; }
+      const box = document.getElementById('list');
+      const r = await mobileApi('/api/mobile/patrol/records');
+      if (r.status !== 200 || !r.body.success) {
+        box.className = 'banner err'; box.textContent = r.body.message || '加载失败'; return;
+      }
+      const recs = r.body.records || [];
+      if (!recs.length) { box.className = 'empty'; box.textContent = '暂无巡查记录，点「开始巡查」提交第一条'; return; }
+      box.className = ''; box.innerHTML = '';
+      recs.forEach((x) => {
+        const d = document.createElement('div');
+        d.className = 'item';
+        const vTag = x.is_violation === '是' ? '<span class="tag v">三违</span>' : '<span class="tag ok">正常</span>';
+        d.innerHTML = `<div class="t"><span>${x.problem_type || '巡查'}</span>${vTag}</div>
+          <div class="m">时间：${x.inspection_time || '—'}<br>网格：${x.grid || '—'}<br>${(x.description || '').slice(0, 40)}${(x.description || '').length > 40 ? '…' : ''}</div>`;
+        d.addEventListener('click', () => { location.href = './detail.html?id=' + encodeURIComponent(x.record_id); });
+        box.appendChild(d);
+      });
+    })();
+  </script>
+</body>
+</html>
