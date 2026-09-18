@@ -4,6 +4,26 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>HSE 安全看板 · 现场巡查</title>
+<!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
+     排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
+     先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
+<meta name="hse-build" content="2026-09-18.28">
+<!-- ================= 「添加到手机桌面」（PWA） =================
+     让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
+     · manifest.webmanifest 是规范入口，Chrome / Safari 都认
+     · apple-touch-icon 是 iOS 唯一识别途径（不读 manifest）
+     · theme-color 影响 Android 状态栏与 Chrome 顶栏
+     · mobile-web-app-capable 让 iOS 全屏，去掉 Safari UI —— 桌面图标体验就靠它
+     路径用绝对 URL（/...）而不是相对：start_url 是站点根，加桌面后从站点根开，
+     相对路径会把图标拉成 ./check.html 而不是 ./。 -->
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="网格巡查">
+<meta name="theme-color" content="#1D4ED8">
 <style>
 :root{
   --bg:#F5F4F1; --card:#FFFFFF; --line:#E5E7EB;
@@ -13,148 +33,312 @@
   --warn:#D97706; --warn-soft:#FEF3C7; --warn-tint:#FFFBEB;
   --t1:#1A1A1A; --t2:#374151; --t3:#6B7280; --t4:#9CA3AF;
   --tabbar-h:calc(64px + 24px + env(safe-area-inset-bottom));
+  /* ==========================================================================
+     统一尺寸令牌（2026-09-17 收敛）
+     --------------------------------------------------------------------------
+     背景：改版前同类组件各写各的数值 —— 高度出现 72/60/56/64 四种、
+           圆角出现 16/18/20/22/24/26/28/40/48 九种，同功能控件尺寸不一致。
+     纪律：**所有组件尺寸必须从这里取，不要在组件里写死 px**。
+           新增组件若确有新尺寸需求，先在此加令牌并说明理由，再引用。
+     ========================================================================== */
+  --r-card:16px;      /* 卡片 / 面板 / 宫格 / 列表行 —— 全局唯一圆角基准 */
+  --r-pill:999px;     /* 胶囊（标签 / 徽章）—— 完全圆头 */
+  --r-btn:16px;       /* 按钮 —— 与卡片同值，视觉上同一套 */
+  --h-btn:64px;       /* 主/次按钮高度（原 72，与搜索框统一到 64） */
+  --h-btn-sm:52px;    /* 次级小按钮（如「去登录」这类页内操作） */
+  --h-input:64px;     /* 输入类（搜索框）—— 与 --h-btn 同高，横排时对齐 */
+  --h-cell:88px;      /* 宫格单元（三违行为）—— 触摸目标 ≥ 44px 的两倍 */
+  --h-entry:78px;     /* 首页统计卡 / 入口卡 —— 两个同类卡片统一同高（原 78/76 混用） */
+  --h-tabbar:64px;    /* 底部导航栏 */
+  --h-navbar:56px;    /* 顶部标题栏 */
+  --pad-card:16px;    /* 卡片内边距 —— 全局唯一 */
+  --pad-opt:20px;     /* 主操作卡（「是三违/不是三违」这类大选择块）内边距 */
+  --pad-row:16px;     /* 列表行内边距 —— 与卡片同值，同类同尺寸 */
+  --gap:12px;         /* 组件间距 —— 全局唯一（原 12/14/18 混用） */
+  /* ---- 字号：6 级制 ----------------------------------------------------------
+     改版前实际散落着 30/26/24/22/21/20/19/18/17/16/15/14/13/12/11 共 15 种字号，
+     且同类语义各写一份 —— 例：区块小标题有 18 和 17 两个值；正文有 16/15/14 三个值；
+     列表行主标题有 21/20/19/17 四个值。用户看到的「同功能大小不一致」正源于此。
+     现按视觉层级收敛为 6 级，**组件只准引用这 6 个变量**。
+     映射规则：同类语义 → 取原值中出现频次最高的那个作为定值。
+     -------------------------------------------------------------------------- */
+  --fs-hero:30px;     /* 主视觉（首页姓名、HSE 看板标题）—— 全站仅 2 处 */
+  --fs-h1:26px;       /* 大数字 / 页面级标题（统计数、分组标签、完成页大标题） */
+  --fs-h2:24px;       /* 区块标题（选择块、大按钮 CTA、记录卡标题） */
+  --fs-btn:22px;      /* 按钮文字 / 次要标题 */
+  --fs-title:20px;    /* 列表行主标题（乡镇名 / 人名）/ 输入框文字 ← 原 21/20/19/17 合并 */
+  --fs-body:15px;     /* 正文、菜单项、次级信息 ← 原 16/15/14 合并（14 出现最多） */
+  --fs-sub:13px;      /* 副标题 / 说明 / 徽章 */
+  --fs-cap:11px;      /* 最小字号（底部导航标签） */
+  --h-cta:190px;      /* 主操作大按钮（拍现场照片 / 拍整改后照片 / 开始检查）—— 三个同类按钮统一同高
+                         （改版前：首页 190 / 现场拍照 150 / 整改后拍照 140，同类三值） */
+  --h-photo:180px;    /* 照片预览区（尚未拍摄时的占位高度）—— 同类三处统一
+                         （改版前：通用 180 / 现场照片 200 / 整改后照片 170） */
+  --h-topbar:48px;    /* 首页顶栏 */
+  --icon-btn:40px;    /* 圆形图标按钮（返回 / 头像位） */
+  --icon-avatar:56px; /* 列表头像圆底（列表行 / 人员行统一） */
+  --icon-avatar-sm:44px; /* 小头像圆底（首页顶栏 / 记录卡内联） */
+  --icon-thumb:72px;  /* 缩略图（已拍照片预览） */
+  --icon-badge:22px;  /* 角标（未读计数）—— 高度；宽度随内容 */
+  --icon-mark:26px;   /* 勾选标记圆底（可选中卡片的对勾） */
+  --icon-logo:64px;   /* 登录页品牌图标底 */
+  --icon-glyph:20px;  /* 内联图标字形（底部导航 tab 图标等）—— 与 20px 文字同高 */
+  --icon-cta:44px;    /* 主操作大按钮内的大图标（相机）—— 同类三处统一（原 44/40 混用） */
+  --icon-state:96px;  /* 状态页大图标圆底（完成页 / 无权限页）—— 同类同尺寸（原 96/80 混用） */
+  /* ---- 行高型按钮（「从相册上传」「提交」这类单行按钮）----------------------
+     与 .card 参照行（如「未完成  null · 吕孟辉」那一行）保持**同一套尺寸**：
+       .card = padding 16px×2 + 内容 31px（.chip 高） = 65px
+     故按钮不再用固定高度，改用**同样的 padding 驱动**，这样：
+       · 高度自动与参照行一致（撑出来就是 65px），参照行改 padding 按钮自动跟随
+       · 不再多一个「按钮高」常量需要单独维护
+     ---- */
+  --pad-btn-row:var(--pad-card); /* 行高型按钮上下内边距 —— 与卡片同值：同一套尺寸 */
+  --fs-btn-row:var(--fs-body);   /* 行高型按钮字号 —— 与卡片内文字同值：同一套尺寸 */
+  --h-btn-row:65px;  /* 行高型按钮**总高** = .card 参照行高度（padding 16×2 + 内容 31 + 边框 1×2 ≈ 65）。
+                        直接锁总高而不是锁内容高：按钮内容有「带图标(22px)」与「纯文字(15px)」两种，
+                        用同样的 padding 会撑出不同高度（56 vs 47）。锁总高才能保证**同类等高**。 */
+  --icon-btn-row:22px; /* 行高型按钮内的图标（相册图标）—— 居中显示，不参与撑高 */
+  --icon-cell:28px;   /* 三违行为宫格单元内的图标 —— 每个行为一个语义图标，
+                         与 20px 单元格文字形成「图标 + 标签」的固定节奏。
+                         取 28px：大于文字行高（约 27px）确保图标是视觉主语，又不挤压 88px 单元高。 */
+  --cta-icon-gap:var(--pad-card); /* 主操作大按钮「图标下沿 → 标题上沿」间距。
+                        直接取 .card 的内边距令牌（16px）—— 与「未完成  null · 吕孟辉」
+                        那一行给内容块的垂直留白**同一个值、同一个令牌**，视觉节奏才一致。
+                        （改版前用 --gap:12px，比参照行窄 4px；实测参照行留白 17px
+                          = 1px 边框 + 16px padding，故真实设计值就是 16px。） */
 }
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+/* 三段式布局（微信式，2026-09-18）：顶部状态栏+导航固定、底部导航固定，仅中间 .page 滚动。
+   做法：html,body 与 #app 锁定可视高度并 hidden 溢出；每个 view 是 flex 纵列，
+   其 .statusbar/.navbar 为 flex:none（固定），.page 为 flex:1 + overflow-y:auto（滚动）；
+   底部 .tabbar-wrap 作为 #app 末尾 flex 行天然贴底，不再随内容滚走。 */
 html,body{height:100%;overflow:hidden}
 body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;background:#DDD;color:var(--t1);-webkit-text-size-adjust:100%}
-/* 每屏自适应：100dvh（动态视口，含地址栏收放）+ 视口内滚动；底部导航固定于应用框内 */
-#app{max-width:480px;margin:0 auto;height:100dvh;background:var(--bg);position:relative;display:flex;flex-direction:column;overflow:hidden}
-.view{display:none;flex-direction:column;height:100%;min-height:0;overflow:hidden}
-.view.active{display:flex}
-.view.has-tab .page{padding-bottom:calc(var(--tabbar-h) + 8px)}
+/* #app 锁定为可视高度：内部 flex 纵列，活跃 view 吃掉剩余空间，顶部/底部固定 */
+#app{max-width:480px;margin:0 auto;height:100dvh;overflow:hidden;background:var(--bg);position:relative;display:flex;flex-direction:column}
+.view{display:none;flex-direction:column;min-height:0;overflow:hidden}
+.view.active{display:flex;flex:1 1 0%;min-height:0}
+.view.has-tab .page{padding-bottom:var(--pad-card)}
 .statusbar{height:calc(28px + env(safe-area-inset-top));padding-top:env(safe-area-inset-top);background:transparent;flex:none}
-.navbar{height:56px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;flex:none}
-.navbar .nav-title{font-size:18px;font-weight:600}
-.icon-btn{width:40px;height:40px;border-radius:20px;background:var(--card);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;cursor:pointer}
-.page{flex:1;min-height:0;display:flex;flex-direction:column;padding:16px;gap:12px;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+.navbar{height:var(--h-navbar);display:flex;align-items:center;justify-content:space-between;padding:0 16px;flex:none}
+.navbar .nav-title{font-size:var(--fs-title);font-weight:600}
+.icon-btn{width:var(--icon-btn);height:var(--icon-btn);border-radius:var(--r-pill);background:var(--card);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;cursor:pointer}
+/* 圆形图标按钮内的字形尺寸 —— 用令牌锁定，不再依赖 HTML 的内联 width/height。
+   改版前完全靠 svg 内联属性（各写 20/18/14），漏写一个就会按 viewBox 比例撑满 40px 圆底。 */
+.icon-btn svg{width:var(--icon-glyph);height:var(--icon-glyph);flex:0 0 auto}
+.page{display:flex;flex-direction:column;padding:var(--pad-card);gap:var(--gap);
+  flex:1 1 0%;min-height:0;overflow-y:auto;overflow-x:hidden;
+  overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
 .page.center{align-items:stretch}
-.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px}
-.btn-primary{display:flex;align-items:center;justify-content:center;height:72px;border-radius:18px;background:var(--primary);color:#fff;font-size:22px;font-weight:600;border:none;cursor:pointer;gap:10px;box-shadow:0 6px 16px -2px rgba(29,78,216,.25)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r-card);padding:var(--pad-card)}
+.btn-primary{display:flex;align-items:center;justify-content:center;height:var(--h-btn);border-radius:var(--r-btn);background:var(--primary);color:#fff;font-size:var(--fs-btn);font-weight:600;border:none;cursor:pointer;gap:var(--gap);box-shadow:0 6px 16px -2px rgba(29,78,216,.25)}
 .btn-primary:active{transform:scale(.98)}
 .btn-primary:disabled{background:#B6C4E8;box-shadow:none;cursor:not-allowed}
-.btn-ghost{display:flex;align-items:center;justify-content:center;height:72px;border-radius:18px;background:var(--card);border:1px solid var(--line);font-size:22px;font-weight:600;color:var(--t1);cursor:pointer;gap:10px}
+.btn-ghost{display:flex;align-items:center;justify-content:center;height:var(--h-btn);border-radius:var(--r-btn);background:var(--card);border:1px solid var(--line);font-size:var(--fs-btn);font-weight:600;color:var(--t1);cursor:pointer;gap:var(--gap)}
 .btn-ghost:active{transform:scale(.98)}
-.big-cta{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;height:190px;border-radius:24px;background:var(--primary);color:#fff;cursor:pointer;border:none;box-shadow:0 10px 24px -4px rgba(29,78,216,.3)}
+/* 行高型按钮（.btn-row）：高度由 padding 驱动，与 .card 参照行同一套尺寸。
+   用在「从相册上传」「提交」这类单行按钮上 —— 用户要求它们与
+   「未完成  null · 吕孟辉」那一行大小一致（高度 / 字号 / 圆角 / 内边距全对齐）。
+   ⚠️ 必须写在 .btn-primary / .btn-ghost **之后**并带双类选择器：
+      否则同为单类选择器时后定义者胜出，.btn-ghost 的 font-size/height 会盖掉这里。 */
+.btn-primary.btn-row,.btn-ghost.btn-row{height:var(--h-btn-row);min-height:0;padding:0 var(--pad-card);
+  font-size:var(--fs-btn-row);gap:var(--gap);line-height:1}
+/* 按钮内图标：固定 --icon-btn-row，居中，不参与撑高（高度已被 --h-btn-row 锁定）。
+   ⚠️ 必须限定在按钮内，绝不能写成裸 `svg` 或跨组件后代选择器 ——
+      否则会命中导航栏返回箭头等无关 svg（第十二轮回归即由此类越界命中埋下隐患）。 */
+.btn-row svg{width:var(--icon-btn-row);height:var(--icon-btn-row);flex:0 0 auto}
+/* 按钮组容器：必须显式声明为 flex column。
+   ⚠️ 这是第十二轮缺陷根因：`#photo-actions` 原先是个**无任何 CSS 的裸 div**，
+      它是 block 容器 → 里面 <button> 是 inline-block → **收缩到内容宽度**，
+      而非像 .page 直接子元素那样被 flex 拉满 358px。
+      结果是「拍现场照片」大按钮被压成一条窄柱、文字换行、图标显得异常巨大。
+      凡「多个按钮叠放」处一律走这个容器，保证与 .page 同一套 gap / 拉伸行为。 */
+.btn-stack{display:flex;flex-direction:column;gap:var(--gap)}
+.big-cta{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--cta-icon-gap);height:var(--h-cta);border-radius:var(--r-card);background:var(--primary);color:#fff;cursor:pointer;border:none;box-shadow:0 10px 24px -4px rgba(29,78,216,.3)}
 .big-cta:active{transform:scale(.985)}
 .big-cta:disabled{background:#B6C4E8;box-shadow:none}
-.big-cta .cta-title{font-size:30px;font-weight:700}
-.big-cta .cta-sub{font-size:15px;color:var(--primary-light)}
-.chip{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;font-size:13px;font-weight:600}
-.chip .dot{width:8px;height:8px;border-radius:4px}
+/* 标题去掉行盒上下多余留白，让「图标下沿→字面下沿」真正等于 --cta-icon-gap。
+   否则 font-size 越大，行盒半leading 越大，视觉间距会被撑大且不受控。 */
+.big-cta .cta-title{font-size:var(--fs-h2);font-weight:700;line-height:1.15;display:block}
+.big-cta .cta-sub{font-size:var(--fs-body);color:var(--primary-light)}
+/* 大按钮内的图标统一尺寸 —— 三处 CTA 的图标一律取 --icon-cta，
+   避免 HTML 里各写 52/44/40（同类组件尺寸必须一致）。 */
+.big-cta svg{width:var(--icon-cta);height:var(--icon-cta);flex:0 0 auto}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:var(--r-pill);font-size:var(--fs-sub);font-weight:600}
+.chip .dot{width:8px;height:8px;border-radius:var(--r-pill)}
 .chip.red{background:var(--danger-soft);color:var(--danger)} .chip.red .dot{background:var(--danger)}
 .chip.green{background:var(--success-soft);color:var(--success)} .chip.green .dot{background:var(--success)}
 .chip.yellow{background:var(--warn-soft);color:var(--warn)} .chip.yellow .dot{background:var(--warn)}
 .chip.blue{background:var(--primary-soft);color:var(--primary)}
-.gps-line{font-size:12px;line-height:1.7;color:#BFDBFE}
+/* 台账页待补传提示条：失败记录留本地但用户必须看得见，故用告警底色 + 可点击重试 */
+#sync-bar{display:flex;align-items:center;justify-content:space-between;gap:var(--gap);margin:0 20px 12px;padding:12px 16px;border-radius:var(--r-card);background:var(--warn-soft);color:var(--warn);font-size:var(--fs-body);cursor:pointer}
+#sync-bar:active{transform:scale(.99)}
+.gps-line{font-size:var(--fs-sub);line-height:1.7;color:#BFDBFE}
 .gps-line.warn{color:#FECACA}
 .gps-line a{color:#fff;text-decoration:underline}
-.opt-card{display:flex;flex-direction:column;gap:6px;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:24px;cursor:pointer}
+.opt-card{display:flex;flex-direction:column;gap:6px;background:var(--card);border:1px solid var(--line);border-radius:var(--r-card);padding:var(--pad-opt);cursor:pointer}
 .opt-card:active{transform:scale(.98)}
-.opt-card .opt-title{font-size:24px;font-weight:600}
-.opt-card .opt-sub{font-size:15px;color:var(--t3)}
-.opt-card.accent{border:2px solid var(--danger)}
+.opt-card .opt-title{font-size:var(--fs-h2);font-weight:600}
+.opt-card .opt-sub{font-size:var(--fs-body);color:var(--t3)}
+.opt-card.accent{border-color:var(--danger)}
+/* 强调态：**只换颜色、不改边框宽度** —— 改宽度会改变盒模型高度，
+   导致同类卡片相差 2px（改版前 #opt-transfer 用行内 2px 边框就踩了这个坑）。 */
+.opt-card.primary{border-color:var(--primary);box-shadow:0 0 0 1px var(--primary)}
 /* 单选卡（普通巡查结果）：必须一眼看出点了哪一个 —— 高亮边框 + 淡蓝底 + 右侧勾选标记。
    用 box-shadow 画外圈而非加粗 border，避免选中瞬间卡片尺寸跳动。 */
-.opt-group{display:flex;flex-direction:column;gap:12px}
+.opt-group{display:flex;flex-direction:column;gap:var(--gap)}
 .opt-card.selectable{position:relative;padding-right:76px;transition:border-color .15s,background .15s,box-shadow .15s}
-.opt-card.selectable .opt-mark{position:absolute;right:22px;top:50%;transform:translateY(-50%);width:26px;height:26px;border-radius:50%;border:2px solid var(--line);background:#fff;display:flex;align-items:center;justify-content:center;transition:border-color .15s,background .15s}
+.opt-card.selectable .opt-mark{position:absolute;right:22px;top:50%;transform:translateY(-50%);width:var(--icon-mark);height:var(--icon-mark);border-radius:var(--r-pill);border:2px solid var(--line);background:#fff;display:flex;align-items:center;justify-content:center;transition:border-color .15s,background .15s}
 .opt-card.selectable .opt-mark svg{opacity:0;transition:opacity .15s}
 .opt-card.selectable.selected{border-color:var(--primary);background:var(--primary-soft);box-shadow:0 0 0 1px var(--primary)}
 .opt-card.selectable.selected .opt-title{color:var(--primary)}
 .opt-card.selectable.selected .opt-sub{color:var(--primary)}
 .opt-card.selectable.selected .opt-mark{border-color:var(--primary);background:var(--primary)}
 .opt-card.selectable.selected .opt-mark svg{opacity:1}
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.vio-cell{display:flex;align-items:center;justify-content:center;height:88px;border-radius:16px;background:var(--card);border:1px solid var(--line);font-size:19px;font-weight:600;cursor:pointer}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:var(--gap)}
+/* 三违行为宫格单元：图标在上、行为名在下。
+   用户诉求（第十四轮）：「按照列表排列，每个三违行为前放一个图标」。
+   图标取 --icon-cell 令牌，颜色随单元格文字色（继承 currentColor），
+   这样 active/选中态只需改一处 color 即可整体联动。 */
+.vio-cell{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;height:var(--h-cell);border-radius:var(--r-card);background:var(--card);border:1px solid var(--line);font-size:var(--fs-body);font-weight:600;cursor:pointer;padding:8px 10px;text-align:center;color:var(--t1)}
+.vio-cell .vio-icon{width:var(--icon-cell);height:var(--icon-cell);flex:0 0 auto;display:flex;align-items:center;justify-content:center;color:var(--primary)}
+.vio-cell .vio-icon svg{width:100%;height:100%;display:block}
+.vio-cell .vio-label{line-height:1.25;word-break:break-word}
 .vio-cell:active{transform:scale(.96);border-color:var(--primary)}
-.person-row{display:flex;align-items:center;gap:16px;padding:18px;background:var(--card);border:1px solid var(--line);border-radius:16px;cursor:pointer}
+.person-row{display:flex;align-items:center;gap:var(--gap);padding:var(--pad-row);background:var(--card);border:1px solid var(--line);border-radius:var(--r-card);cursor:pointer}
 .person-row:active{transform:scale(.98);border-color:var(--primary)}
-.avatar{width:56px;height:56px;border-radius:28px;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:600;flex:none}
-.avatar.sm{width:44px;height:44px;border-radius:22px;font-size:18px}
+.avatar{width:var(--icon-avatar);height:var(--icon-avatar);border-radius:var(--r-pill);display:flex;align-items:center;justify-content:center;font-size:var(--fs-btn);font-weight:600;flex:none}
+.avatar.sm{width:var(--icon-avatar-sm);height:var(--icon-avatar-sm);border-radius:var(--r-pill);font-size:var(--fs-title)}
 .av-blue{background:var(--primary-soft);color:var(--primary)}
 .av-amber{background:#FEF3C7;color:var(--warn)}
+/* 转责任乡镇：第一步乡镇清单（12 个乡镇作业中心依次向下排列） */
+.town-row{display:flex;align-items:center;gap:var(--gap);padding:var(--pad-row);background:var(--card);border:1px solid var(--line);border-radius:var(--r-card);cursor:pointer}
+.town-row:active{transform:scale(.98);border-color:var(--primary)}
+.town-row .town-name{font-size:var(--fs-title);font-weight:600;color:var(--t1)}
+.town-row .town-meta{font-size:var(--fs-sub);color:var(--t3);margin-top:2px}
+.town-badge{flex:none;min-width:60px;text-align:center;font-size:var(--fs-sub);font-weight:600;padding:6px 10px;border-radius:var(--r-pill);background:var(--primary-soft);color:var(--primary)}
+.town-badge.warn{background:#FEF3C7;color:var(--warn)}
+/* 第二步：乡镇下的经理 / 管理员，两级分组 */
+.tp-group{font-size:var(--fs-sub);font-weight:600;color:var(--t3);letter-spacing:.04em;margin:4px 0 -2px 4px}
+.tp-person{display:flex;align-items:center;gap:var(--gap);padding:var(--pad-row);background:var(--card);border:1px solid var(--line);border-radius:var(--r-card);cursor:pointer}
+.tp-person:active{transform:scale(.98);border-color:var(--primary)}
+.tp-person .tp-name{font-size:var(--fs-title);font-weight:600;color:var(--t1)}
+.tp-person .tp-meta{font-size:var(--fs-sub);color:var(--t3);margin-top:2px}
+.tp-tag{flex:none;min-width:60px;text-align:center;font-size:var(--fs-cap);font-weight:600;padding:6px 10px;border-radius:var(--r-pill);background:#F3F4F6;color:var(--t3)}
+.tp-tag.mgr{background:var(--primary-soft);color:var(--primary)}
 .av-green{background:var(--success-soft);color:var(--success)}
-.search-bar{display:flex;align-items:center;gap:12px;height:72px;padding:0 20px;border-radius:18px;background:var(--card);border:2px solid var(--primary)}
-.search-bar input{flex:1;border:none;outline:none;font-size:19px;font-weight:600;font-family:inherit;color:var(--t1);background:transparent}
+.search-bar{display:flex;align-items:center;gap:var(--gap);height:var(--h-input);padding:0 20px;border-radius:var(--r-btn);background:var(--card);border:1px solid var(--line)}
+.search-bar:focus-within{border-color:var(--primary);box-shadow:0 0 0 1px var(--primary)}
+.search-bar input{flex:1;border:none;outline:none;font-size:var(--fs-title);font-weight:600;font-family:inherit;color:var(--t1);background:transparent}
 .search-bar input::placeholder{color:var(--primary);opacity:.75}
-.tabbar-wrap{position:absolute;left:0;right:0;bottom:0;z-index:20;padding:8px 16px calc(16px + env(safe-area-inset-bottom));
+/* 底部导航：sticky 贴视口底部（整页滚动放开后仍固定可见）。
+   用 sticky 而非 absolute：父级不再锁高，absolute 会跟着内容跑到页面最下方。 */
+.tabbar-wrap{position:sticky;bottom:0;left:0;right:0;z-index:20;margin-top:auto;
+  padding:8px 16px calc(16px + env(safe-area-inset-bottom));
   background:linear-gradient(180deg,rgba(245,244,241,0) 0%,var(--bg) 36%);pointer-events:none}
 .tabbar-wrap .tabbar{pointer-events:auto}
-.tabbar{height:64px;background:var(--card);border:1px solid var(--line);border-radius:16px;display:flex;align-items:stretch;justify-content:space-evenly;padding:0 24px;box-shadow:0 6px 18px -8px rgba(0,0,0,.18)}
-.tab-item{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:11px;color:var(--t4);cursor:pointer;border:none;background:none;font-family:inherit}
+.tabbar{height:var(--h-tabbar);background:var(--card);border:1px solid var(--line);border-radius:var(--r-card);display:flex;align-items:stretch;justify-content:space-evenly;padding:0 24px;box-shadow:0 6px 18px -8px rgba(0,0,0,.18)}
+.tab-item{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:var(--fs-cap);color:var(--t4);cursor:pointer;border:none;background:none;font-family:inherit}
 .tab-item.active{color:var(--primary);font-weight:600}
-.tab-item svg{width:20px;height:20px}
-.info-line{font-size:16px;font-weight:500;color:var(--t2);line-height:1.9}
-.muted{font-size:12px;color:var(--t4);line-height:1.6}
-.section-label{font-size:14px;font-weight:500;color:var(--t4)}
-.photo-box{width:100%;border-radius:16px;overflow:hidden;background:#E8E6E0;display:flex;align-items:center;justify-content:center;min-height:180px}
+.tab-item svg{width:var(--icon-glyph);height:var(--icon-glyph)}
+.info-line{font-size:var(--fs-body);font-weight:500;color:var(--t2);line-height:1.9}
+.muted{font-size:var(--fs-sub);color:var(--t4);line-height:1.6}
+.section-label{font-size:var(--fs-body);font-weight:500;color:var(--t4)}
+.photo-box{width:100%;border-radius:var(--r-card);overflow:hidden;background:#E8E6E0;display:flex;align-items:center;justify-content:center;min-height:var(--h-photo)}
 .photo-box img{width:100%;display:block}
 .photo-box.clickable{cursor:pointer}
-.photo-thumb{width:72px;height:72px;border-radius:12px;object-fit:cover;flex:none}
-.stat-row{display:flex;gap:12px}
-.stat-card{flex:1;height:78px;border-radius:16px;background:var(--card);border:1px solid var(--line);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px}
-.stat-card .num{font-size:26px;font-weight:700}
-.stat-card .lab{font-size:13px;color:var(--t3)}
-.entry-row{display:flex;gap:12px}
-.entry-card{flex:1;height:76px;border-radius:16px;background:var(--card);border:1px solid var(--line);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;font-size:15px;font-weight:600;cursor:pointer;position:relative}
+.photo-thumb{width:var(--icon-thumb);height:var(--icon-thumb);border-radius:var(--r-card);object-fit:cover;flex:none}
+.stat-row{display:flex;gap:var(--gap)}
+/* 统计卡与入口卡同高（原 78 / 76 两个值 → 统一 --h-entry） */
+.stat-card{flex:1;height:var(--h-entry);border-radius:var(--r-card);background:var(--card);border:1px solid var(--line);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px}
+.stat-card .num{font-size:var(--fs-h1);font-weight:700}
+.stat-card .lab{font-size:var(--fs-sub);color:var(--t3)}
+.entry-row{display:flex;gap:var(--gap)}
+.entry-card{flex:1;height:var(--h-entry);border-radius:var(--r-card);background:var(--card);border:1px solid var(--line);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;font-size:var(--fs-body);font-weight:600;cursor:pointer;position:relative}
 .entry-card:active{transform:scale(.97)}
-.entry-card .badge{position:absolute;top:8px;right:10px;min-width:22px;height:22px;border-radius:11px;background:var(--danger);color:#fff;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;padding:0 6px}
-.blue-idcard{border-radius:20px;padding:16px;display:flex;flex-direction:column;gap:6px;background:linear-gradient(180deg,#3B82F6 0%,#1D4ED8 100%);color:#fff}
-.blue-idcard .role-tag{font-size:13px;color:var(--primary-light)}
-.blue-idcard .name{font-size:30px;font-weight:700}
-.blue-idcard .meta{font-size:14px;font-weight:500;line-height:1.8}
-.record-card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:8px;cursor:pointer}
+.entry-card .badge{position:absolute;top:8px;right:10px;min-width:var(--icon-badge);height:var(--icon-badge);border-radius:var(--r-pill);background:var(--danger);color:#fff;font-size:var(--fs-cap);font-weight:600;display:flex;align-items:center;justify-content:center;padding:0 6px}
+.blue-idcard{border-radius:var(--r-card);padding:var(--pad-card);display:flex;flex-direction:column;gap:6px;background:linear-gradient(180deg,#3B82F6 0%,#1D4ED8 100%);color:#fff}
+.blue-idcard .role-tag{font-size:var(--fs-sub);color:var(--primary-light)}
+.blue-idcard .name{font-size:var(--fs-hero);font-weight:700}
+.blue-idcard .meta{font-size:var(--fs-body);font-weight:500;line-height:1.8}
+.record-card{background:var(--card);border:1px solid var(--line);border-radius:var(--r-card);padding:var(--pad-card);display:flex;flex-direction:column;gap:8px;cursor:pointer}
 .record-card:active{transform:scale(.985)}
 .record-card.unfinished{border:1.5px solid #FCA5A5}
-.record-card .r-top{display:flex;align-items:center;justify-content:space-between}
-.record-card .r-title{font-size:22px;font-weight:600}
-.record-card .r-sub{font-size:14px;color:var(--t3)}
-.record-card .r-go{display:flex;align-items:center;justify-content:space-between;color:var(--primary);font-size:16px;font-weight:600}
+.record-card .r-top{display:flex;align-items:center;gap:8px}
+.record-card .r-top>:last-child{margin-left:auto}
+.record-card .r-title{font-size:var(--fs-btn);font-weight:600}
+.record-card .r-sub{font-size:var(--fs-body);color:var(--t3)}
+.record-card .r-go{display:flex;align-items:center;justify-content:space-between;color:var(--primary);font-size:var(--fs-body);font-weight:600}
 .crumbs{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.crumb{padding:6px 10px;border-radius:999px;font-size:13px;font-weight:600}
-.back-link{display:flex;align-items:center;justify-content:center;gap:8px;height:56px;color:var(--primary);font-size:16px;font-weight:600;cursor:pointer;border:none;background:none;font-family:inherit}
-.topbar-home{display:flex;align-items:center;justify-content:space-between;height:48px}
-.topbar-home .app-name{font-size:20px;font-weight:700}
-.topbar-home .me-avatar{width:38px;height:38px;border-radius:19px;background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:600}
-.tel-btn{display:flex;align-items:center;justify-content:center;gap:12px;height:64px;border-radius:16px;background:var(--success);color:#fff;font-size:20px;font-weight:600;text-decoration:none}
+.crumb{padding:6px 10px;border-radius:var(--r-pill);font-size:var(--fs-sub);font-weight:600}
+.back-link{display:flex;align-items:center;justify-content:center;gap:8px;height:var(--h-btn-sm);color:var(--primary);font-size:var(--fs-body);font-weight:600;cursor:pointer;border:none;background:none;font-family:inherit}
+.topbar-home{display:flex;align-items:center;justify-content:space-between;height:var(--h-topbar)}
+.topbar-home .app-name{font-size:var(--fs-title);font-weight:700}
+.topbar-home .me-avatar{width:var(--icon-btn);height:var(--icon-btn);border-radius:var(--r-pill);background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;font-size:var(--fs-body);font-weight:600}
+/* 首页顶栏右侧组合：刷新按钮 + 头像 */
+.topbar-right{display:flex;align-items:center;gap:var(--gap)}
+/* 强制刷新按钮——与 .icon-btn 同规格，仅在首页可见；按一次 = 清内存 orgCache + 硬刷新页面
+   （前端 shell 已部署 no-cache，下次 location.reload() 必拿最新 HTML/JS） */
+.topbar-right .icon-btn[aria-label="强制刷新"]{position:relative}
+.topbar-right .icon-btn[aria-label="强制刷新"]:active{transform:scale(.96)}
+.topbar-right .icon-btn[aria-label="强制刷新"] svg{transition:transform .4s ease}
+.topbar-right .icon-btn[aria-label="强制刷新"].spinning svg{transform:rotate(360deg)}
+.tel-btn{display:flex;align-items:center;justify-content:center;gap:var(--gap);height:var(--h-btn);border-radius:var(--r-btn);background:var(--success);color:#fff;font-size:var(--fs-btn);font-weight:600;text-decoration:none}
 .tel-btn:active{transform:scale(.98)}
-.check-line{display:flex;justify-content:space-between;font-size:15px;color:var(--t2);line-height:2}
+.check-line{display:flex;justify-content:space-between;font-size:var(--fs-body);color:var(--t2);line-height:2}
 .check-line b{font-weight:600}
-.field-label{font-size:26px;font-weight:700}
-.field-sub{font-size:15px;color:var(--t3)}
+.field-label{font-size:var(--fs-h1);font-weight:700}
+.field-sub{font-size:var(--fs-body);color:var(--t3)}
 .divider{height:1px;background:var(--line)}
-.empty-tip{text-align:center;color:var(--t4);font-size:14px;padding:32px 0}
-.login-wrap{flex:1;display:flex;flex-direction:column;padding:32px 24px;gap:16px;justify-content:center}
-.login-logo{display:flex;flex-direction:column;align-items:center;gap:10px;margin-bottom:8px}
-.login-logo .lg{width:64px;height:64px;border-radius:18px;background:var(--primary);display:flex;align-items:center;justify-content:center}
+.empty-tip{text-align:center;color:var(--t4);font-size:var(--fs-body);padding:32px 0}
+.login-wrap{flex:1;display:flex;flex-direction:column;padding:32px 24px;gap:var(--pad-card);justify-content:center}
+.login-logo{display:flex;flex-direction:column;align-items:center;gap:var(--gap);margin-bottom:8px}
+.login-logo .lg{width:var(--icon-logo);height:var(--icon-logo);border-radius:var(--r-card);background:var(--primary);display:flex;align-items:center;justify-content:center}
 .login-input{display:flex;flex-direction:column;gap:6px}
-.login-input label{font-size:15px;font-weight:500;color:var(--t2)}
-.login-input input{height:60px;border-radius:14px;border:1.5px solid var(--line);background:var(--card);padding:0 18px;font-size:19px;font-family:inherit;outline:none}
+.login-input label{font-size:var(--fs-body);font-weight:500;color:var(--t2)}
+.login-input input{height:var(--h-input);border-radius:var(--r-card);border:1px solid var(--line);background:var(--card);padding:0 18px;font-size:var(--fs-title);font-family:inherit;outline:none}
 .login-input input:focus{border-color:var(--primary)}
 .demo-chips{display:flex;gap:8px;flex-wrap:wrap}
-.demo-chip{padding:8px 12px;border-radius:999px;background:var(--primary-soft);color:var(--primary);font-size:13px;font-weight:600;border:none;cursor:pointer;font-family:inherit}
-.login-err{color:var(--danger);font-size:14px;min-height:20px}
-.seg{display:flex;height:52px;padding:4px;gap:4px;border-radius:26px;background:#E8EAED}
-.seg .seg-item{flex:1;display:flex;align-items:center;justify-content:center;border-radius:22px;font-size:16px;font-weight:500;color:var(--t3);cursor:pointer;border:none;background:none;font-family:inherit}
+.demo-chip{padding:8px 12px;border-radius:var(--r-pill);background:var(--primary-soft);color:var(--primary);font-size:var(--fs-sub);font-weight:600;border:none;cursor:pointer;font-family:inherit}
+.login-err{color:var(--danger);font-size:var(--fs-body);min-height:20px}
+/* 分段控件：外框圆角 = 内项圆角 + 内边距（视觉同心），故用 calc 而非硬编码 */
+.seg{display:flex;height:var(--h-btn-sm);padding:4px;gap:4px;border-radius:var(--r-pill);background:#E8EAED}
+.seg .seg-item{flex:1;display:flex;align-items:center;justify-content:center;border-radius:calc(var(--h-btn-sm) / 2 - 4px);font-size:var(--fs-body);font-weight:500;color:var(--t3);cursor:pointer;border:none;background:none;font-family:inherit}
 .seg .seg-item.active{background:var(--primary);color:#fff;font-weight:600}
-.ro-tag{background:#F3F4F6;color:var(--t3);font-size:12px;font-weight:400;padding:5px 10px;border-radius:999px}
+.ro-tag{background:#F3F4F6;color:var(--t3);font-size:var(--fs-cap);font-weight:400;padding:5px 10px;border-radius:var(--r-pill)}
+/* ===== 「添加到手机桌面」：点击必须有**看得见**的动态反馈 =====
+   现场反馈：「点了这个按钮，完全没有动态，我怎么知道点没点中」。
+   三层反馈，缺一不可：
+     ① 按下瞬间：卡片压暗 + 微缩放（:active 在部分安卓 WebView 上不生效，
+        故 JS 同时加 .loading 类兜底改背景）
+     ② 加载中：右侧箭头换成转圈 spinner，副标题改成「正在打开…」
+     ③ 浮层：从底部滑入 + 遮罩淡入（不瞬间蹦出，视觉上确认操作已被接收） */
+#btn-add-home{transition:transform .12s ease,background-color .12s ease}
+#btn-add-home:active,#btn-add-home.loading{transform:scale(.985);background:#F3F4F6}
+#add-home-arrow,#add-home-spin{display:block}
+#add-home-spin{display:none;width:16px;height:16px;border:2px solid #D1D5DB;border-top-color:var(--primary);border-radius:50%;animation:hseSpin .7s linear infinite}
+#btn-add-home.loading #add-home-spin{display:block}
+#btn-add-home.loading #add-home-arrow{display:none}
+@keyframes hseSpin{to{transform:rotate(360deg)}}
+#add-home-modal{animation:hseFade .18s ease}
+#add-home-modal>div{animation:hseSlideUp .24s cubic-bezier(.2,.8,.3,1)}
+@keyframes hseFade{from{opacity:0}to{opacity:1}}
+@keyframes hseSlideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+#add-home-do{transition:transform .12s ease,opacity .12s ease}
+#add-home-do:active{transform:scale(.985);opacity:.88}
+#add-home-do:disabled{opacity:.6}
+#add-home-close:active{background:#F3F4F6;border-radius:12px}
 .hidden{display:none!important}
 /* file input 专用：视觉隐藏但保持渲染。不能用 display:none —— 老版 X5/部分安卓 WebView
    会拒绝调起 display:none 的 file input（点了「从相册上传」没反应）；
    程序化 .click() 与 Playwright setInputFiles 均不受 pointer-events:none 影响 */
 .file-ghost{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
-/* 矮屏（小屏手机 / 键盘弹出）压缩纵向尺寸，保证「每屏一屏可读完」 */
-@media (max-height:700px){
-  .big-cta{height:156px} .big-cta .cta-title{font-size:26px}
-  .blue-idcard .name{font-size:26px} .blue-idcard{padding:14px}
-  .field-label{font-size:22px}
-  .btn-primary,.btn-ghost{height:60px;font-size:20px}
-  .stat-card{height:66px} .stat-card .num{font-size:22px}
-  .opt-card{padding:18px} .opt-card .opt-title{font-size:21px}
-  .opt-card.selectable{padding-right:68px}
-  .person-row{padding:14px} .search-bar{height:60px}
-  .photo-box{min-height:150px}
-}
+/* ----------------------------------------------------------------------------
+   注：原 @media (max-height:700px) 的「矮屏压缩」规则已删除。
+   那段规则为「把内容塞进一屏」而存在，会让同一组件在大/小屏高度不同
+   （按钮 64↔52、卡片 88↔66…），正是「同功能组件尺寸不一致」的来源之一。
+   整页滚动放开后不再需要压缩，组件在所有屏高下保持同一尺寸。
+   ---------------------------------------------------------------------------- */
 </style>
 </head>
 <body>
@@ -168,7 +352,7 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
       <div class="lg">
         <svg width="34" height="34" viewBox="0 0 24 24" fill="none"><path d="M12 2l8 3v6c0 5-3.5 9.5-8 11-4.5-1.5-8-6-8-11V5l8-3z" stroke="#fff" stroke-width="1.8" stroke-linejoin="round"/><path d="M8.5 12l2.5 2.5 4.5-4.5" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
-      <div style="font-size:26px;font-weight:700">HSE 安全看板</div>
+      <div style="font-size:var(--fs-hero);font-weight:700">HSE 安全看板</div>
       <div class="muted" id="boot-msg">正在验证登录状态…</div>
     </div>
     <button class="btn-primary hidden" id="btn-boot-login" style="margin-top:20px">去登录</button>
@@ -181,16 +365,21 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
   <div class="page">
     <div class="topbar-home">
       <div class="app-name">HSE 安全看板</div>
-      <div class="me-avatar" id="home-avatar">张</div>
+      <div class="topbar-right">
+        <div class="icon-btn" id="btn-refresh" aria-label="强制刷新" title="强制刷新（解决页面卡在旧逻辑）">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v4h-4" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <div class="me-avatar" id="home-avatar"></div>
+      </div>
     </div>
     <div class="blue-idcard">
-      <div class="role-tag" id="idc-role">乡镇作业中心经理</div>
-      <div class="name" id="idc-name">曹周平</div>
-      <div class="meta" id="idc-meta">网格长等级　三级网格长<br>所属班组　宁城街道一班</div>
+      <div class="role-tag" id="idc-role"></div>
+      <div class="name" id="idc-name"></div>
+      <div class="meta" id="idc-meta"></div>
       <div class="gps-line" id="gps-bar" style="margin-top:2px"><span id="gps-addr">正在后台定位…</span><span id="gps-note">（经纬度仅后台保存，页面显示解析出的位置）</span></div>
     </div>
     <button class="big-cta" id="btn-start">
-      <svg width="52" height="52" viewBox="0 0 24 24" fill="none"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.5" stroke="#fff" stroke-width="1.6"/></svg>
+      <svg viewBox="0 0 24 24" fill="none"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.5" stroke="#fff" stroke-width="1.6"/></svg>
       <div class="cta-title">开始检查</div>
     </button>
     <div class="stat-row">
@@ -199,8 +388,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
       <div class="stat-card"><div class="num" style="color:var(--success)" id="stat-done">0</div><div class="lab">已闭环</div></div>
     </div>
     <div class="card" id="todo-card">
-      <div style="font-size:16px;font-weight:600;margin-bottom:6px">待办提醒</div>
-      <div id="todo-list" style="font-size:14px;color:var(--t2);line-height:1.9"></div>
+      <div style="font-size:var(--fs-body);font-weight:600;margin-bottom:6px">待办提醒</div>
+      <div id="todo-list" style="font-size:var(--fs-body);color:var(--t2);line-height:1.9"></div>
     </div>
     <div style="flex:1"></div>
   </div>
@@ -216,15 +405,15 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
   <div class="page">
     <div class="field-label">拍现场照片</div>
     <div class="field-sub">照片是检查记录的第一手证据</div>
-    <div class="photo-box" id="scene-photo-box" style="min-height:200px;color:var(--t4);font-size:14px">尚未拍摄</div>
-    <div id="photo-actions" style="display:flex;flex-direction:column;gap:12px">
-      <button class="big-cta" style="height:150px" id="btn-capture">
-        <svg width="44" height="44" viewBox="0 0 24 24" fill="none"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.5" stroke="#fff" stroke-width="1.6"/></svg>
-        <div class="cta-title" style="font-size:24px">拍现场照片</div>
+    <div class="photo-box" id="scene-photo-box" style="color:var(--t4);font-size:var(--fs-body)">尚未拍摄</div>
+    <div id="photo-actions" class="btn-stack">
+      <button class="big-cta" id="btn-capture">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.5" stroke="#fff" stroke-width="1.6"/></svg>
+        <div class="cta-title">拍现场照片</div>
         <div class="cta-sub">调用手机摄像头</div>
       </button>
-      <button class="btn-ghost" id="btn-album">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="3" stroke="#1A1A1A" stroke-width="1.8"/><circle cx="9" cy="9" r="2" stroke="#1A1A1A" stroke-width="1.8"/><path d="M3.5 17l5-5 4 4 3.5-3.5 4.5 4.5" stroke="#1A1A1A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <button class="btn-ghost btn-row" id="btn-album">
+        <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="3" stroke="#1A1A1A" stroke-width="1.8"/><circle cx="9" cy="9" r="2" stroke="#1A1A1A" stroke-width="1.8"/><path d="M3.5 17l5-5 4 4 3.5-3.5 4.5 4.5" stroke="#1A1A1A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
         从相册上传
       </button>
     </div>
@@ -280,7 +469,7 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
     <span class="chip blue" style="align-self:flex-start">乡镇作业中心经理 · 两步选择</span>
     <div class="field-label">第一步：选择管理员</div>
     <div class="field-sub">点击管理员姓名，查看他班组的人员</div>
-    <div id="admin-list" style="display:flex;flex-direction:column;gap:12px"></div>
+    <div id="admin-list" style="display:flex;flex-direction:column;gap:var(--gap)"></div>
     <button class="btn-ghost" id="btn-find-any">
       <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="#1D4ED8" stroke-width="2"/><path d="M16.5 16.5L21 21" stroke="#1D4ED8" stroke-width="2" stroke-linecap="round"/></svg>
       找人 · 跨班组直接搜姓名
@@ -304,7 +493,7 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
     </div>
     <div class="field-label" id="pp-head">请选择违章人员</div>
     <div class="field-sub" id="pp-sub">您权限范围内的全部人员 · 来自「花名册」</div>
-    <div id="person-list" style="display:flex;flex-direction:column;gap:12px"></div>
+    <div id="person-list" style="display:flex;flex-direction:column;gap:var(--gap)"></div>
     <button class="back-link hidden" id="btn-repick-admin">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1D4ED8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       返回重新选管理员
@@ -322,7 +511,7 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
   </div>
   <div class="page">
     <div class="card">
-      <div style="font-size:18px;font-weight:600" id="handle-title">未戴安全帽</div>
+      <div style="font-size:var(--fs-title);font-weight:600" id="handle-title">三违行为</div>
       <div class="muted" style="margin-top:4px">公司管理人员现场检查发现</div>
     </div>
     <div class="field-label">怎么处理？</div>
@@ -330,43 +519,56 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
       <div class="opt-title">自己处理</div>
       <div class="opt-sub">确认人员后，现场拍照整改</div>
     </div>
-    <div class="opt-card" id="opt-transfer" style="border:2px solid var(--primary)">
-      <div class="opt-title">转给责任乡镇</div>
-      <div class="opt-sub">指定乡镇与管理员，发送整改任务</div>
+    <div class="opt-card primary" id="opt-transfer">
+      <div class="opt-title">转给作业中心</div>
+      <div class="opt-sub">指定作业中心与管理员，发送整改任务</div>
     </div>
   </div>
 </section>
 
-<!-- ============ 公司管理：转责任乡镇 ============ -->
+<!-- ============ 公司管理：转作业中心（乡镇 / 公园 / 作业中心） ============ -->
 <section class="view" id="view-transfer">
   <div class="statusbar"></div>
   <div class="navbar">
     <div class="icon-btn" data-back="handle"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-    <div class="nav-title">转给责任乡镇</div><div style="width:40px"></div>
+    <div class="nav-title">转给作业中心</div><div style="width:40px"></div>
   </div>
   <div class="page">
-    <div class="field-label" id="tf-head">指定责任乡镇</div>
-    <div class="field-sub" id="tf-sub">选择问题所在的责任乡镇作业中心</div>
-    <div id="tf-list" style="display:flex;flex-direction:column;gap:12px"></div>
+    <div class="field-label" id="tf-head">第一步：指定作业中心</div>
+    <div class="field-sub" id="tf-sub">选择问题所属的责任单位（乡镇 / 公园 / 作业中心）</div>
+    <div id="tf-list"></div>
   </div>
 </section>
 
-<!-- ============ 公司管理：自己处理选人 ============ -->
+<!-- ============ 公司管理：自己处理选人（乡镇 → 班组 → 人员 级联） ============ -->
 <section class="view" id="view-co-search">
   <div class="statusbar"></div>
   <div class="navbar">
-    <div class="icon-btn" data-back="handle"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-    <div class="nav-title">自己处理 · 选择人员</div><div style="width:40px"></div>
+    <div class="icon-btn" id="co-back"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title" id="co-title">自己处理 · 选择人员</div><div style="width:40px"></div>
   </div>
   <div class="page">
-    <div class="field-label">谁来整改？</div>
-    <div class="field-sub">违章人员不在您的班组，请搜索花名册确认人员</div>
-    <div class="search-bar">
-      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" style="flex:none"><circle cx="11" cy="11" r="7" stroke="#1D4ED8" stroke-width="2"/><path d="M16.5 16.5L21 21" stroke="#1D4ED8" stroke-width="2" stroke-linecap="round"/></svg>
-      <input id="co-search-input" placeholder="输入姓名，搜索全公司花名册">
+    <!-- 面包屑：点击上级层可回退（乡镇 › 班组） -->
+    <div class="crumbs hidden" id="co-crumbs"></div>
+    <div class="field-label" id="co-head">第 1 步：选择乡镇作业中心</div>
+    <div class="field-sub" id="co-sub">点击乡镇，查看该镇各班组的名称与管理员</div>
+    <div id="co-cascade"></div>
+
+    <!-- 搜索直选：乡镇层级保留入口（跳到确认页）；进到班组后隐藏，避免与级联打架 -->
+    <div id="co-search-wrap">
+      <div class="back-link" id="co-search-toggle" style="justify-content:center">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="#1D4ED8" stroke-width="2"/><path d="M16.5 16.5L21 21" stroke="#1D4ED8" stroke-width="2" stroke-linecap="round"/></svg>
+        记不住班组？直接搜姓名
+      </div>
+      <div id="co-search-box" class="hidden">
+        <div class="search-bar">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" style="flex:none"><circle cx="11" cy="11" r="7" stroke="#1D4ED8" stroke-width="2"/><path d="M16.5 16.5L21 21" stroke="#1D4ED8" stroke-width="2" stroke-linecap="round"/></svg>
+          <input id="co-search-input" placeholder="输入姓名，搜索全公司花名册">
+        </div>
+        <div class="section-label" id="co-search-label"></div>
+        <div id="co-person-list" style="display:flex;flex-direction:column;gap:var(--gap)"></div>
+      </div>
     </div>
-    <div class="section-label" id="co-search-label">最近选择</div>
-    <div id="co-person-list" style="display:flex;flex-direction:column;gap:12px"></div>
   </div>
 </section>
 
@@ -380,7 +582,7 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
   <div class="page">
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-        <span style="font-size:18px;font-weight:600">违章人员信息</span>
+        <span style="font-size:var(--fs-title);font-weight:600">违章人员信息</span>
         <span class="ro-tag">只读 · 来自花名册</span>
       </div>
       <div class="info-line" id="cf-info"></div>
@@ -403,21 +605,21 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
     <div class="nav-title">整改</div><div style="width:40px"></div>
   </div>
   <div class="page">
-    <div class="card" style="display:flex;align-items:center;gap:12px">
+    <div class="card" style="display:flex;align-items:center;gap:var(--gap)">
       <span class="chip red" id="rf-chip"><span class="dot"></span>未完成</span>
-      <span style="font-size:16px;font-weight:600" id="rf-summary">未戴安全帽 · 张三</span>
+      <span style="font-size:var(--fs-body);font-weight:600" id="rf-summary">未戴安全帽 · 张三</span>
     </div>
-    <div class="photo-box" id="after-photo-box" style="min-height:170px;color:var(--t4);font-size:14px">尚未拍摄</div>
-    <button class="big-cta" style="height:140px" id="btn-rf-capture">
-      <svg width="40" height="40" viewBox="0 0 24 24" fill="none"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.5" stroke="#fff" stroke-width="1.6"/></svg>
-      <div class="cta-title" style="font-size:24px">拍整改后照片</div>
+    <div class="photo-box" id="after-photo-box" style="color:var(--t4);font-size:var(--fs-body)">尚未拍摄</div>
+    <button class="big-cta" id="btn-rf-capture">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.5" stroke="#fff" stroke-width="1.6"/></svg>
+      <div class="cta-title">拍整改后照片</div>
       <div class="cta-sub">整改完成后，拍一张现场照片</div>
     </button>
-    <button class="btn-ghost" id="btn-rf-album">
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="3" stroke="#1A1A1A" stroke-width="1.8"/><circle cx="9" cy="9" r="2" stroke="#1A1A1A" stroke-width="1.8"/><path d="M3.5 17l5-5 4 4 3.5-3.5 4.5 4.5" stroke="#1A1A1A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <button class="btn-ghost btn-row" id="btn-rf-album">
+      <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="3" stroke="#1A1A1A" stroke-width="1.8"/><circle cx="9" cy="9" r="2" stroke="#1A1A1A" stroke-width="1.8"/><path d="M3.5 17l5-5 4 4 3.5-3.5 4.5 4.5" stroke="#1A1A1A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
       从相册上传
     </button>
-    <button class="btn-primary" id="btn-submit-rectify" disabled>提交</button>
+    <button class="btn-primary btn-row" id="btn-submit-rectify" disabled>提交</button>
     <input type="file" accept="image/*" capture="environment" class="file-ghost" id="file-camera-2">
     <input type="file" accept="image/*" class="file-ghost" id="file-album-2">
   </div>
@@ -426,11 +628,11 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
 <!-- ============ 完成 ============ -->
 <section class="view" id="view-done">
   <div class="statusbar"></div>
-  <div class="page" style="padding:48px;padding-top:80px;gap:20px">
-    <div style="width:96px;height:96px;border-radius:48px;background:var(--success-soft);display:flex;align-items:center;justify-content:center;align-self:center">
+  <div class="page" style="padding:var(--pad-card);padding-top:56px;gap:var(--gap)">
+    <div style="width:var(--icon-state);height:var(--icon-state);border-radius:var(--r-pill);background:var(--success-soft);display:flex;align-items:center;justify-content:center;align-self:center">
       <svg width="48" height="48" viewBox="0 0 24 24" fill="none"><path d="M4 12.5l5 5L20 6.5" stroke="#16A34A" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </div>
-    <div style="font-size:32px;font-weight:700;text-align:center" id="done-title">整改完成</div>
+    <div style="font-size:var(--fs-h1);font-weight:700;text-align:center" id="done-title">整改完成</div>
     <div class="card" style="display:flex;flex-direction:column;gap:6px" id="done-card"></div>
     <button class="btn-primary" id="btn-done-home">返回首页</button>
   </div>
@@ -470,6 +672,7 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
     <div class="icon-btn" data-back="home"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
     <div class="nav-title">巡查台账</div><div style="width:40px"></div>
   </div>
+  <div id="sync-bar" class="hidden"></div>
   <div class="page" id="my-checks-list"></div>
 </section>
 
@@ -532,16 +735,31 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
     </div>
     <div class="card" style="cursor:pointer;display:none" id="btn-me-sub">
       <div style="display:flex;align-items:center;justify-content:space-between">
-        <div style="font-size:17px;font-weight:600">下属检查</div>
+        <div style="font-size:var(--fs-title);font-weight:600">下属检查</div>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 5l7 7-7 7" stroke="#9CA3AF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
-      <div style="font-size:13px;color:var(--t3);margin-top:2px">查看下属网格员的检查记录与闭环进度</div>
+      <div style="font-size:var(--fs-sub);color:var(--t3);margin-top:2px">查看下属网格员的检查记录与闭环进度</div>
+    </div>
+    <!-- 「添加到手机桌面」入口：点桌面图标直接进系统（登录态在本机 localStorage，通常免登录）。
+         Android/Chrome：捕获 beforeinstallprompt → 用户主动触发系统安装对话框；
+         iOS Safari：无原生入口，弹底部 sheet 手动引导「分享 → 添加到主屏幕」。
+         已安装时（standalone）点击显示提示文案，逻辑见末尾 js。 -->
+    <div class="card" style="cursor:pointer" id="btn-add-home">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div style="font-size:var(--fs-title);font-weight:600">添加到手机桌面</div>
+        <!-- 右侧图标位：常态显示箭头，点击后由 CSS 换成转圈（见 #btn-add-home.loading） -->
+        <div style="display:flex;align-items:center;justify-content:center;width:18px;height:18px;flex:0 0 18px">
+          <svg id="add-home-arrow" width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 5l7 7-7 7" stroke="#9CA3AF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <div id="add-home-spin"></div>
+        </div>
+      </div>
+      <div style="font-size:var(--fs-sub);color:var(--t3);margin-top:2px" id="add-home-hint">点桌面图标直接进入，下次打开自动登录</div>
     </div>
     <div class="card">
       <div class="info-line" id="me-info"></div>
     </div>
     <div class="card" style="cursor:pointer" id="btn-logout">
-      <div style="font-size:17px;font-weight:600;color:var(--danger);text-align:center">退出登录</div>
+      <div style="font-size:var(--fs-title);font-weight:600;color:var(--danger);text-align:center">退出登录</div>
     </div>
     <div class="muted">身份信息来自网格长信息台账 · 检查记录暂存本机</div>
   </div>
@@ -550,13 +768,13 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
 <!-- ============ 无权限降级页 ============ -->
 <section class="view" id="view-noperm">
   <div class="statusbar"></div>
-  <div class="page center" style="justify-content:center;align-items:center;gap:16px">
-    <div style="width:80px;height:80px;border-radius:40px;background:var(--warn-soft);display:flex;align-items:center;justify-content:center">
-      <svg width="40" height="40" viewBox="0 0 24 24" fill="none"><path d="M12 9v4M12 17h.01" stroke="#D97706" stroke-width="2" stroke-linecap="round"/><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" stroke="#D97706" stroke-width="1.8" stroke-linejoin="round"/></svg>
+  <div class="page center" style="justify-content:center;align-items:center;gap:var(--gap)">
+    <div style="width:var(--icon-state);height:var(--icon-state);border-radius:var(--r-pill);background:var(--warn-soft);display:flex;align-items:center;justify-content:center">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none"><path d="M12 9v4M12 17h.01" stroke="#D97706" stroke-width="2" stroke-linecap="round"/><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" stroke="#D97706" stroke-width="1.8" stroke-linejoin="round"/></svg>
     </div>
-    <div style="font-size:24px;font-weight:700">暂无巡查权限</div>
+    <div style="font-size:var(--fs-h2);font-weight:700">暂无巡查权限</div>
     <div class="muted" style="text-align:center;max-width:280px">当前账号未在网格长信息台账登记或「分级」未配置，请联系管理员在台账中维护。</div>
-    <button class="btn-ghost" id="btn-noperm-logout" style="width:200px;height:56px;font-size:18px">退出登录</button>
+    <button class="btn-ghost" id="btn-noperm-logout" style="width:200px">退出登录</button>
   </div>
 </section>
 
@@ -579,8 +797,76 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
 </div>
 
 </div>
-<script src="./config.js"></script>
-<script src="./app.js"></script>
+<!-- CF-WPS-25c：脚本 URL 加 ?v=BUILD + 内联热更新检测（双保险）。
+   - ?v=BUILD 让浏览器把每次发版后的 app.js / config.js 视为不同资源→ 必然重下载。
+   - 下面内联的热更新脚本**完全绕开浏览器磁盘缓存**：fetch 一次最新 check.html，
+     读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
+   - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
+   - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
+<script src="./config.js?v=2026-09-18.27"></script>
+<script src="./app.js?v=2026-09-18.27"></script>
+<script>
+/* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
+(function(){
+  try {
+    const here = (document.querySelector('meta[name="hse-build"]')||{}).content || "0";
+    fetch('/check?probe=' + Date.now(), { cache: 'no-store', credentials: 'omit' })
+      .then(r => r.text())
+      .then(html => {
+        const m = html.match(/hse-build"\s+content="([^"]+)"/);
+        const remote = m ? m[1] : null;
+        if(remote && compareBuild(remote, here) > 0){
+          // 比当前页面**新** → 弹遮罩让用户主动覆盖（不强制刷新，否则用户输入会丢）
+          showUpdateBanner(remote, html);
+        }
+      }).catch(()=>{});
+  } catch(e){}
+  function compareBuild(a, b){
+    const pa = String(a).split('.'), pb = String(b).split('.');
+    for(let i=0;i<Math.max(pa.length,pb.length);i++){
+      const x = parseInt(pa[i]||'0',10), y = parseInt(pb[i]||'0',10);
+      if(x!==y) return x-y;
+    }
+    return 0;
+  }
+  function showUpdateBanner(remoteBuild, newHtml){
+    const d = document.createElement('div');
+    d.id = 'hse-update-banner';
+    d.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:99999;background:#1A1A1A;color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;font-size:14px;font-family:system-ui,-apple-system,sans-serif;box-shadow:0 4px 12px rgba(0,0,0,.25)';
+    d.innerHTML = '<span style="flex:1">检测到新版本 <b>'+remoteBuild+'</b>（当前 '+document.querySelector('meta[name="hse-build"]').content+'），点击下方按钮升级</span>' +
+      '<button id="hse-update-go" style="background:#fff;color:#1A1A1A;border:0;border-radius:8px;padding:8px 14px;font-weight:600;cursor:pointer;font-size:14px">立即升级</button>' +
+      '<button id="hse-update-skip" style="background:transparent;color:#fff;border:1px solid #555;border-radius:8px;padding:8px 12px;cursor:pointer;font-size:14px">稍后</button>';
+    document.body.appendChild(d);
+    document.getElementById('hse-update-go').onclick = async () => {
+      // 拉新 app.js / config.js（URL 已带 ?v=BUILD，浏览器**必须**重下载）
+      try {
+        const v = remoteBuild;
+        await Promise.all([
+          fetch('./config.js?v='+v+'&force='+Date.now(), {cache:'no-store'}).then(r=>r.text()),
+          fetch('./app.js?v='+v+'&force='+Date.now(), {cache:'no-store'}).then(r=>r.text())
+        ]);
+        // 用 location.replace 强制重新加载（带 cache-bust 查询参数）
+        location.replace('/check?cb='+Date.now());
+      } catch(e){ location.reload(); }
+    };
+    document.getElementById('hse-update-skip').onclick = () => d.remove();
+  }
+  // 暴露重检入口，方便诊断脚本和现场巡检员发现「页面卡住」时手动触发
+  window.__hse_recheckUpdate = function(){
+    return fetch('/check?probe='+Date.now(), { cache: 'no-store', credentials: 'omit' })
+      .then(r=>r.text()).then(html=>{
+        const m = html.match(/hse-build"\s+content="([^"]+)"/);
+        const remote = m ? m[1] : null;
+        const here = (document.querySelector('meta[name="hse-build"]')||{}).content || "0";
+        if(remote && compareBuild(remote, here) > 0){
+          showUpdateBanner(remote, html);
+          return 'banner-shown';
+        }
+        return 'up-to-date';
+      }).catch(e=>'err:'+e.message);
+  };
+})();
+</script>
 <script>
 "use strict";
 /* ================= 数据层 =================
@@ -590,7 +876,11 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
    接口不可用或数据为空时给出明确提示，绝不静默回退假数据。
    检查记录按登录账号隔离存 localStorage（后端记录接口就绪后替换）。 */
 let STORE_KEY = "hse_check_v1_default";
-const VIO_LIB = ["未戴安全帽","未穿反光服","未设置警示","违规作业","车辆违规","其他三违"]; // 待接真实三违标准库
+// 三违库：**服务端权威清单**，来自 GET /api/mobile/patrol/meta 的 violation_types（当前 20 条）。
+// 前端绝不硬编码 —— 否则新增三违项时前端能选、后端校验拒绝，形成静默失败。
+// 未取到之前为空数组，宫格显示加载态；取不到则明确报错，不回退假清单。
+let VIO_LIB = [];
+let VIO_LIB_READY = false;
 
 let orgCache = {};            // under 姓名 -> 下级组织；"__me__" = 本人
 let rosterCache = new Map();  // "area|q|limit" -> 花名册结果
@@ -623,8 +913,174 @@ async function loadRoster(opt){
   if(body) rosterCache.set(key, body);
   return body;
 }
-function clearPickCache(){ orgCache = {}; rosterCache = new Map(); lastApiError = ""; }
+function clearPickCache(){ orgCache = {}; rosterCache = new Map(); coTeamsCache = new Map(); lastApiError = ""; }
 function emptyTip(msg){ return '<div class="empty-tip">' + esc(msg) + '</div>'; }
+
+/* ================= 乡镇 → 班组 → 人员 级联（惰性加载） =================
+   「自己处理」不再一上来拉全公司花名册（1291 人），改为点到哪个乡镇/班组才加载哪个。
+   三层数据源：
+     ① 乡镇清单  GET /api/mobile/org/towns            （12 个责任乡镇，含经理姓名）
+     ② 乡镇班组  GET /api/mobile/org/teams?town=XX     （片区在首，其后一班/二班/三班…，含管理员姓名）
+     ③ 班组人员  GET /api/mobile/roster?area=XX一班    （复用花名册，按班组收敛）
+   每层各自缓存，返回上层不重复请求。 */
+let coTeamsCache = new Map();
+
+// 进入级联页前复位：只清层级，**保留三层缓存**（返回上层不重新请求）
+function resetCoCascade(){
+  draft.coTown = null; draft.coTeamDept = null;
+  draft.coTeamMgr = ""; draft.coTeamAdmins = [];
+  $("#co-crumbs").classList.add("hidden");
+  $("#co-search-box").classList.add("hidden");       // 搜索面板默认收起
+  $("#co-search-toggle").classList.remove("hidden");
+  $("#co-search-input").value = "";
+  $("#co-person-list").innerHTML = "";
+  $("#co-search-label").textContent = "";
+}
+// 当前层级：0=乡镇 1=班组 2=人员
+function coLevel(){
+  return draft.coTeamDept ? 2 : (draft.coTown ? 1 : 0);
+}
+async function loadTowns(){
+  if(orgCache["__towns__"]) return orgCache["__towns__"];
+  const body = await apiGet("/api/mobile/org/towns");
+  if(body) orgCache["__towns__"] = body;
+  return body;
+}
+async function loadTeams(town){
+  if(coTeamsCache.has(town)) return coTeamsCache.get(town);
+  const body = await apiGet("/api/mobile/org/teams?town=" + encodeURIComponent(town));
+  if(body) coTeamsCache.set(town, body);
+  return body;
+}
+
+/* ================= 后端记录链路（patrol） =================
+   本页记录**上报到后端**（飞书多维表格），不再只存 localStorage。
+   localStorage 退化为**离线草稿 + 本地缓存**：提交成功以服务端返回为准。
+
+   两套字段模型的映射（前端业务模型 → /api/mobile/patrol/submit）：
+     · 三违  → is_violation=是, violation_desc=behavior(三违库名), violation_people=人员串
+     · 普通巡查 → is_violation=否, problem_type=patrolResult, description=说明
+   服务端 protected 字段（employee_code/grid_id 等）一律不传，由 Worker 从 Session 注入。 */
+
+// 幂等键：同一草稿重复提交只落一条（8~64 位 [A-Za-z0-9_-]）
+function newClientRequestId(){
+  const rnd = (Date.now().toString(36) + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2));
+  return rnd.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 32);
+}
+// 本地日期时间 "YYYY-MM-DD HH:MM"（服务端就地存储，不用 ISO/UTC 以免差时区）
+function nowLocalInspectTime(){
+  const d = new Date(), p = n => String(n).padStart(2, "0");
+  return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
+}
+// 巡查网格：优先取 geo/regeo 解析出的乡镇/网格，回退到服务端 meta 的解析结果
+function resolveGridForSubmit(){
+  const m = patrolMeta || {};
+  const grids = Array.isArray(m.grids) ? m.grids.filter(Boolean) : [];
+  if(grids.length === 1) return grids[0];
+  return grids.length ? grids[0] : "";
+}
+
+// 前端记录 → patrol/submit 请求体
+function toPatrolBody(rec){
+  const isVio = rec.type !== "巡查";
+  const g = resolveGridForSubmit();
+  const body = {
+    inspection_time: rec.inspectTime || nowLocalInspectTime(),
+    grid: g,
+    problem_type: "",
+    description: "",
+    is_violation: isVio ? "是" : "否",
+    client_request_id: rec.clientRequestId || newClientRequestId(),
+    photo_taken: !!rec.scenePhoto,
+  };
+  // 现场照片：已上传成功的 file_token 随提交落入主台账「违章照片」附件列
+  if(rec.photoToken) body.photo_tokens = [rec.photoToken];
+  if(isVio){
+    body.problem_type = "三违";
+    // 主台账「违章人员姓名」是**单个人名**列，不是「姓名,职位,班组」的杂烩串
+    // （旧代码把三者逗号拼接塞进去 → 台账里出现「张三,驾驶员,某班组」这种脏值）。
+    // 违章人档案现在拆列落库：姓名→「违章人员姓名」、性别→「性别」、年龄→「年龄」、
+    // 职位→「车辆类型|保洁员」；班组无独立列，仍留在「描述」里不丢信息。
+    const extras = [rec.personTeam].filter(Boolean).join("·");
+    const who = [rec.personName, extras].filter(Boolean).join("·");
+    body.description = String(rec.behavior || "三违") + (who ? "（" + who + "）" : "");
+    body.violation_desc = rec.behavior || "";
+    body.violation_people = rec.personName || "未指定";
+    body.violation_sex = rec.personSex || "";
+    body.violation_age = rec.personAge || "";
+    body.violation_job = rec.personJob || "";
+  } else {
+    body.problem_type = rec.patrolResult || "其他";
+    body.description = "巡查结果：" + (rec.patrolResult || "无异常");
+  }
+  return body;
+}
+
+// 提交一条记录到后端。返回 {ok, recordId, deduplicated, code, message}
+async function submitRecordToBackend(rec){
+  const r = await mobileApi("/api/mobile/patrol/submit", toPatrolBody(rec));
+  const ok = r.status === 200 && r.body && r.body.success;
+  return {
+    ok: ok,
+    deduplicated: !!(r.body && r.body.deduplicated),
+    recordId: (r.body && r.body.recordIds && r.body.recordIds[0]) || null,
+    code: (r.body && r.body.code) || ("HTTP " + r.status),
+    message: (r.body && r.body.message) || "",
+  };
+}
+/* ---- 照片上传链：dataURL → 飞书 file_token → 主台账附件列 ----
+   ⚠️ 此前照片只被 compressImage 压成 dataURL 存 localStorage：
+      ① 永远进不了飞书台账（提交 body 里根本没有 photo_tokens）
+      ② 大图 dataURL 很快把 localStorage 撑满（配额 5~10MB，几十张就爆）
+   现在：提交前先走 /api/mobile/upload 拿 file_token，随 body.photo_tokens
+   落入主台账「违章照片」列；整改后照片是**提交之后**才拍的，改走
+   /api/mobile/patrol/attach 补挂到同一条记录。 */
+function dataUrlToFile(dataUrl, name){
+  const m = /^data:([^;]+);base64,(.*)$/.exec(String(dataUrl || ""));
+  if(!m) return null;
+  try{
+    const bin = atob(m[2]);
+    const u8 = new Uint8Array(bin.length);
+    for(let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    const mime = m[1] || "image/jpeg";
+    const ext = mime.indexOf("png") >= 0 ? "png" : "jpg";
+    return new File([u8], name + "." + ext, { type: mime });
+  }catch(e){ return null; }
+}
+// 上传一张照片 → file_token（失败返回 null，绝不抛给调用方打断提交流程）
+async function uploadPhotoToken(dataUrl, kind, clientRequestId){
+  const file = dataUrlToFile(dataUrl, kind || "photo");
+  if(!file) return null;
+  try{
+    const r = await mobileUpload(file, clientRequestId);
+    if(r.status !== 200 || !r.body || !r.body.success) return null;
+    return r.body.file_token || null;
+  }catch(e){ return null; }
+}
+// 整改后照片补挂（记录已提交，只能 PUT 回同一条）
+async function attachPhotoToRecord(rec, kind){
+  if(!rec || !rec.serverRecordId) return false;
+  const token = kind === "rectify" ? rec.rectifyPhotoToken : rec.photoToken;
+  if(!token) return false;
+  const r = await mobileApi("/api/mobile/patrol/attach", {
+    record_id: rec.serverRecordId, kind: kind || "scene", photo_tokens: [token],
+  });
+  return r.status === 200 && r.body && r.body.success;
+}
+
+function patrolSubmitHint(res){
+  const map = {
+    GRID_UNRESOLVED: "当前账号未匹配到巡查网格，请联系管理员维护台账「负责区域」",
+    GRID_NOT_ALLOWED: "巡查网格与后台解析不一致，请重新定位后再试",
+    PATROL_FIELD_INVALID: "提交内容校验未通过（" + (res.message || "") + "）",
+    PATROL_TARGET_NOT_CONFIGURED: "巡查目标表未配置，请联系管理员",
+    UNAUTHORIZED: "登录态已失效，请重新登录",
+    WPS_UPSTREAM_ERROR: "后端存储暂时不可用，请稍后重试",
+    UPLOAD_NOT_SUPPORTED: "当前后端不支持照片上传",
+  };
+  return map[res.code] || (res.message || "提交失败，请稍后重试");
+}
+
 // 花名册记录 → 选人卡片数据（字段缺失时容错，不臆造）
 // dept = 所属部门（班组/部门，飞书「花名册」表「所属部门」，如「宁城街道一班」）
 // area = 负责区域（在职）（网格责任区，如「八里堂村+惠宁」）——两者语义不同，卡片主显示班组
@@ -753,6 +1209,13 @@ window.addEventListener("popstate", (ev) => {
   while(viewStack.length && viewStack[viewStack.length - 1] !== v) viewStack.pop();
   if(!viewStack.length) viewStack = [v];
   navSuppress = true;
+  // 系统返回键 = 页内返回箭头：在级联页内先按层级回退（人员→班组→乡镇），回不到就交还历史栈
+  if(v !== "co-search" && viewStack[viewStack.length - 1] === "co-search" && !coBackStep()){
+    viewStack.push("co-search");
+    try{ history.pushState({ h5view: "co-search" }, "", location.href); }catch(e){}
+    renderView("co-search");
+    return;
+  }
   if(v === "home") enterHome(); else showView(v);
 });
 
@@ -787,8 +1250,10 @@ async function boot(){
   STORE_KEY = "hse_check_v1_" + session.id; // 记录按登录账号隔离
   loadDB();
   clearPickCache();
-  // 预加载组织关系（台账「直接上级」）；失败不阻断进入首页，选人页会再给明确提示
-  if(session.role !== "管理员") loadSubordinates();
+  // 登录后立即后台预热：花名册 → 三违库 → 组织关系 → 作业中心（见 startPrefetch）。
+  // **不 await** —— 预热只是加速，绝不能挡住进首页。原来这里只预热组织关系，
+  // 且顺序上让 patrol/meta 抢在花名册前面，反而触发一次冷拉取。
+  startPrefetch();
   renderIdentity();
   startBackgroundGPS();   // 后台持续定位：不阻塞任何流程（信号弱时自动重试）
   enterHome();
@@ -867,12 +1332,80 @@ function renderIdentity(){
   // 经理：下属检查入口在「我的」页；公司管理人员整改任务 Tab 显示"任务反馈"
   $("#btn-me-sub").style.display = session.role === "经理" ? "" : "none";
   $("#tab-rectify-label").textContent = session.role === "公司管理" ? "任务反馈" : "整改任务";
+  // 强制刷新按钮：解决「页面卡在旧 JS / 旧组织树缓存」—— 现场人员极少主动重开浏览器，
+  //   加这个按钮等于「一键等价于关闭重开」。
+  //   三重保险：
+  //   ① 清内存缓存（orgCache 等）—— 第十轮教训：同乡镇累加
+  //   ② 解绑 Service Worker（若存在）—— 防 SW 拦截 API 返回旧响应
+  //   ③ location.reload() —— check.html 已 no-cache；app.js / config.js 带 ?v=BUILD
+  //      （每次发版改后缀），URL 变化 → 浏览器**必然**重下载新版 JS
+  //   注：localStorage 里的本机记录（hse_check_v1_<id>）**故意不删**，那是用户的检查数据。
+  const btn = $("#btn-refresh");
+  if(btn && !btn._wired){
+    btn._wired = true;
+    btn.addEventListener("click", () => {
+      btn.classList.add("spinning");
+      try { clearPickCache(); } catch(e) {}
+      // 解绑 SW —— 它们的 fetch 事件可能缓存接口响应，导致 API 返回旧数据。
+      // ⚠️ 但**保留我们自己注册的 /sw.js**：它只用来满足 Android Chrome 的安装条件，
+      //    不拦截任何请求；解绑它会导致「已安装到桌面」的状态被撤掉，
+      //    用户再次点图标就退化成普通浏览器打开，体验倒退。
+      try {
+        if(navigator.serviceWorker && navigator.serviceWorker.getRegistrations){
+          navigator.serviceWorker.getRegistrations().then(regs => {
+            for(const r of regs){
+              const u = (r.active && r.active.scriptURL) || '';
+              if(u.endsWith('/sw.js')) continue;
+              try{ r.unregister(); }catch(e){}
+            }
+          }).catch(()=>{});
+        }
+      } catch(e) {}
+      setTimeout(() => { try { location.reload(); } catch(e) {} }, 260);
+    });
+  }
 }
 function enterHome(){
   renderIdentity();
   renderGPSBar();      // 后台定位结果（可能已回填 / 仍在重试）
   refreshHomeStats();
   showView("home");
+  retryPendingSync();  // 回到首页顺带补传（幂等；失败静默，台账页可见待补传条数）
+  startPrefetch();     // 幂等；boot 里已经发过，这里兜底防止从别处进首页时漏掉
+}
+
+/* ---- 登录后预热队列 ----
+   用户点开「三违 / 花名册 / 选人」时才去拉数据，会正撞冷启动
+   （花名册 1291 人 → 3 次串行上游分页 ≈ 6~11s，实测 10.9s）。
+   登录成功后立刻在后台按**依赖顺序**串行预热，把等待摊到用户还没操作的空档里。
+
+   ⚠️ 顺序很关键：patrol/meta（三违库 + 网格解析）内部也要拉花名册，
+      若它先发起就会自己触发一次冷拉取 —— 所以**花名册必须排第一**。
+
+   全部走带缓存的 loader（结果直接进 orgCache / patrolMeta / localStorage），
+   用户真正点开时命中缓存 = 零等待。任意一步失败都静默跳过，绝不阻塞进首页。 */
+let prefetchStarted = false;
+async function startPrefetch(){
+  if(prefetchStarted) return;
+  prefetchStarted = true;
+  const steps = [
+    // ① 花名册：最重，且被 patrol/meta 依赖 → 必须第一。
+    //    用 mobileApi 而非 loadRoster：limit=1 只是为了让 Worker 侧缓存落地，
+    //    不写前端 rosterCache，避免污染真实查询的 key。
+    () => mobileApi("/api/mobile/roster?limit=1", null, "GET"),
+    // ② 三违库 + 网格解析（结果写 patrolMeta / VIO_LIB / localStorage）
+    () => loadPatrolMeta(),
+    // ③ 组织关系（转派页用；管理员角色本就不需要，跳过省一次请求）
+    () => (session && session.role !== "管理员" ? loadSubordinates() : null),
+    // ④ 作业中心清单（「自己处理」选人页第 1 层）
+    () => loadTowns(),
+  ];
+  for(const step of steps){
+    const prevErr = lastApiError;   // 预热是加速手段，失败不该污染空态提示
+    try{ await step(); }catch{ /* 静默 */ }
+    lastApiError = prevErr;
+    await new Promise(r => setTimeout(r, 30)); // 让出主线程，避免连续请求卡住首屏渲染
+  }
 }
 
 /* ================= 首页统计 ================= */
@@ -899,6 +1432,9 @@ function refreshHomeStats(){
   const lines = [];
   unfinished.slice(0,2).forEach(r => lines.push("· " + r.personName + " " + r.behavior + "，尚未完成整改"));
   pending.filter(r => r.transferAdminId === session.id).slice(0,2).forEach(r => lines.push("· 收到转派任务：" + r.behavior + "（来自 " + r.checkerName + "）"));
+  // 后端上报失败/未完成 → 必须让用户可见（记录还在本机，但尚未进飞书台账）
+  const unsynced = db.records.filter(r => r.syncState && r.syncState !== "synced");
+  if(unsynced.length) lines.push("· 有 " + unsynced.length + " 条记录待上报，进「巡查台账」可重试");
   todo.innerHTML = lines.length ? lines.map(l => "<div>" + esc(l) + "</div>").join("") : "<div>· 暂无待办，一切正常</div>";
 }
 function setBadge(id, n){ const el = document.getElementById(id); if(!el) return; el.classList.toggle("hidden", !n); el.textContent = n; }
@@ -919,7 +1455,8 @@ function esc(s){ return String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt
 function startCheck(){
   // 定位不再是前置门槛（乡镇信号差）。本次记录的定位取「创建记录那一刻」的最新值，
   // 后台定位若在此期间成功即会自动带上，失败则该条记录定位留空（不影响记录本身）。
-  draft = { scenePhoto: null, behavior: null, person: null, patrolResult: null, afterPhoto: null };
+  draft = { scenePhoto: null, behavior: null, person: null, patrolResult: null, afterPhoto: null,
+            coTown: null, coTeamDept: null, coTeamMgr: "", coTeamAdmins: [] };  // co*：级联选人的三层状态
   resetScenePhotoUI();
   renderPatrolChoice();   // 清掉上一次的选中高亮，避免「看着选过了、其实没选」
   showView("photo");
@@ -967,15 +1504,167 @@ function setScenePhoto(dataUrl){
   $("#photo-tip").textContent = "点击上方照片可重拍，或改从相册上传";
 }
 
+/* ---- 三违库加载（服务端权威清单，一次加载 + 缓存） ---- */
+// 数据源：GET /api/mobile/patrol/meta → violation_types
+// 顺带缓存 patrol meta（网格解析结果），供提交时复用，避免重复请求。
+let patrolMeta = null;
+
+// 三违清单是**低频变更的服务端配置**（env 变量），没必要每次进页面都等网络。
+// 落 localStorage 做 stale-while-revalidate：先拿旧值秒开宫格，后台再刷新覆盖。
+// 实测 patrol/meta 冷启动可达 10.9s（花名册 1291 人 7 次串行分页），
+// 无缓存时用户点「是三违」会盯着空白等十几秒。
+const VIO_CACHE_KEY = "hse_vio_lib_v1";
+function readVioCache(){
+  try{
+    const j = JSON.parse(localStorage.getItem(VIO_CACHE_KEY) || "null");
+    return (j && Array.isArray(j.lib) && j.lib.length) ? j : null;
+  }catch{ return null; }
+}
+function writeVioCache(lib){
+  try{ localStorage.setItem(VIO_CACHE_KEY, JSON.stringify({ lib, at: Date.now() })); }catch{}
+}
+
+async function loadPatrolMeta(force){
+  if(patrolMeta && !force && VIO_LIB_READY) return patrolMeta;
+  // 首次进入：先用本地缓存顶上（秒开），网络回来后再覆盖
+  if(!VIO_LIB_READY){
+    const c = readVioCache();
+    if(c){ VIO_LIB = c.lib; VIO_LIB_READY = true; }
+  }
+  const body = await apiGet("/api/mobile/patrol/meta");
+  if(!body){
+    // 网络失败时保留缓存值（VIO_LIB_READY 仍为 true），不回退硬编码清单
+    return null;
+  }
+  patrolMeta = body;
+  const lib = Array.isArray(body.violation_types) ? body.violation_types.filter(Boolean) : [];
+  if(lib.length){
+    VIO_LIB = lib;
+    VIO_LIB_READY = true;
+    writeVioCache(lib);
+  }
+  return body;
+}
+
+/* ---- 三违行为图标库（用户诉求：每个三违行为前放一个图标）--------------------------
+   设计原则：
+   ① 图标**只做视觉锚点**，行为名仍以文字为准 —— 图标缺失/不精准都不影响业务正确性，
+      故这里允许「关键词兜底」，绝不因为图标映射不全就报错或漏项。
+   ② 不硬编码行为清单：图标表按**行为名精确匹配**，未命中的走关键词规则，
+      仍未命中的用通用「警示」图标兜底。后端新增三违项时前端自动跟随，无需改代码。
+   ③ 全部为 24×24 viewBox、`stroke="currentColor"`、`stroke-width=1.8`，
+      与站内其它内联图标同一套画法；颜色由 .vio-icon 的 color 统一控制。
+   ------------------------------------------------------------------------------ */
+const VIO_ICONS = {
+  /* 交通 / 行车类 */
+  "闯红灯":        '<path d="M12 3a9 9 0 0 0-9 9v7a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1v-7a9 9 0 0 0-9-9z"/><path d="M12 8v5"/><circle cx="12" cy="16.5" r=".6" fill="currentColor"/>',
+  "骑车不戴头盔":  '<path d="M3 16a9 9 0 0 1 18 0"/><path d="M3 16h18"/><path d="M9 8.5A4 4 0 0 1 15 8.5"/><path d="M6 16v2M18 16v2"/>',
+  "逆行":          '<path d="M12 4l0 16"/><path d="M7 9l5-5 5 5"/><path d="M4 20h16"/>',
+  "违章停车":      '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M9 16V8h3.5a2.5 2.5 0 0 1 0 5H9"/><path d="M4 4l16 16"/>',
+  "超速行驶":      '<path d="M12 20a8 8 0 1 1 8-8"/><path d="M12 12l4.5-4.5"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/><path d="M19 17l1.5 1.5M21 13h2"/>',
+  "违章掉头":      '<path d="M4 18V9a4 4 0 0 1 4-4h6"/><path d="M11 2l3 3-3 3"/><path d="M4 18h4"/>',
+  "违章变道":      '<path d="M4 5h9a4 4 0 0 1 4 4v10"/><path d="M14 16l3 3 3-3"/><path d="M4 9h5M4 13h5"/>',
+  "驾车时抽烟":    '<path d="M3 18h13a4 4 0 0 0 0-8H8"/><path d="M17 6c1.2 1 1.2 2.6 0 3.6"/><path d="M3 21h12"/>',
+  "打电话":        '<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z"/>',
+  "破坏车内监控设施": '<circle cx="12" cy="12" r="3"/><path d="M4 8l2-3h12l2 3v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V8z"/><path d="M4 4l16 16"/>',
+
+  /* 劳保 / 着装类 */
+  "未穿工作服":    '<path d="M9 3l3 2 3-2 4 2v5h-3v11H8V10H5V5l4-2z"/><path d="M10 10h4"/>',
+  "未戴安全帽":    '<path d="M3 16a9 9 0 0 1 18 0"/><path d="M2 16h20"/><path d="M9 8V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3"/>',
+  "不领取防暑物资": '<circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/>',
+
+  /* 行人行为类 */
+  "横穿马路":      '<path d="M13 4a1.5 1.5 0 1 0 0-.01"/><path d="M13 7l-2 3 2 2v6"/><path d="M11 10l-3 1"/><path d="M13 12l3 1"/><path d="M2 21h20"/>',
+  "翻越护栏":      '<path d="M3 9h18M3 17h18"/><path d="M6 6v14M12 6v14M18 6v14"/><path d="M9 5l3-2 3 2"/>',
+
+  /* 作业 / 现场类 */
+  "出车不三检":    '<circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><path d="M9 17h6"/><path d="M4 17V9l2-4h9l3 4v8"/><path d="M9 12h4"/><path d="M11 10v4"/>',
+  "脱岗、玩岗、替岗": '<circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/><path d="M3 5l18 14"/>',
+  "隐瞒身体不适状况上岗": '<path d="M12 21s-7-4.3-7-9.5A4.5 4.5 0 0 1 12 8a4.5 4.5 0 0 1 7 3.5C19 16.7 12 21 12 21z"/><path d="M11 11.5l2 2 2.5-2.5"/>',
+  "危险作业未按要求采取保护措施": '<path d="M12 3l9 16H3l9-16z"/><path d="M12 9v4"/><circle cx="12" cy="16.3" r=".6" fill="currentColor"/>',
+  "机动车道作业未摆放路锥": '<path d="M9 20h6l-1.5-13h-3L9 20z"/><path d="M7 20h10"/><path d="M10.2 10h3.6M10.8 14h2.4"/>',
+  "背向来车方向作业": '<circle cx="12" cy="5" r="2"/><path d="M12 7v7"/><path d="M12 14l-3 6M12 14l3 6"/><path d="M5 8h4M15 8h4"/>',
+};
+
+/* 关键词兜底：图标表未精确命中时的二级规则（顺序敏感，先匹配者胜）。
+   只做「语义相近」的粗分类，不追求逐条精准 —— 图标是辅助，不承载业务判定。 */
+const VIO_ICON_RULES = [
+  [/红灯|信号/, "闯红灯"],
+  [/头盔/, "骑车不戴头盔"],
+  [/逆行|反向/, "逆行"],
+  [/停车|泊车/, "违章停车"],
+  [/超速|速度/, "超速行驶"],
+  [/掉头|调头/, "违章掉头"],
+  [/变道|并线/, "违章变道"],
+  [/抽烟|吸烟/, "驾车时抽烟"],
+  [/电话|手机|通话/, "打电话"],
+  [/监控|摄像头|记录仪/, "破坏车内监控设施"],
+  [/工作服|劳保|着装/, "未穿工作服"],
+  [/安全帽|头盔防护/, "未戴安全帽"],
+  [/防暑|降温|物资/, "不领取防暑物资"],
+  [/横穿|穿行|马路|行人/, "横穿马路"],
+  [/护栏|围栏|翻越/, "翻越护栏"],
+  [/三检|车检|检查车/, "出车不三检"],
+  [/脱岗|玩岗|替岗|离岗/, "脱岗、玩岗、替岗"],
+  [/身体|不适|生病|带病/, "隐瞒身体不适状况上岗"],
+  [/危险作业|保护措施|防护措施/, "危险作业未按要求采取保护措施"],
+  [/路锥|锥筒|警示标志|摆放/, "机动车道作业未摆放路锥"],
+  [/背向|来车|面向车辆/, "背向来车方向作业"],
+];
+
+// 通用兜底图标（警示三角）—— 后端新增三违项、前端图标表未及时补充时使用，
+// 保证「任何一条行为都一定有图标」，不会出现空格子。
+const VIO_ICON_FALLBACK =
+  '<path d="M12 3l9 16H3l9-16z"/><path d="M12 9.5v4"/><circle cx="12" cy="16.4" r=".6" fill="currentColor"/>';
+
+// SVG 外壳：统一 viewBox / 描边画法，颜色继承 currentColor
+function vioSvg(inner){
+  return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" ' +
+         'stroke-linecap="round" stroke-linejoin="round">' + inner + '</svg>';
+}
+// 行为名 → 图标（精确 → 关键词 → 通用兜底，三级降级，必有结果）
+function vioIconOf(name){
+  const key = String(name || "").trim();
+  if(VIO_ICONS[key]) return VIO_ICONS[key];
+  for(const [re, iconKey] of VIO_ICON_RULES){
+    if(re.test(key) && VIO_ICONS[iconKey]) return VIO_ICONS[iconKey];
+  }
+  return VIO_ICON_FALLBACK;
+}
+
 /* ---- 三违宫格 ---- */
 function renderVioGrid(){
-  const g = $("#vio-grid"); g.innerHTML = "";
+  const g = $("#vio-grid");
+  if(!VIO_LIB_READY){
+    g.innerHTML = emptyTip("三违库加载中…");
+    loadPatrolMeta().then(() => renderVioGrid());
+    return;
+  }
+  g.innerHTML = "";
   VIO_LIB.forEach(name => {
     const d = document.createElement("div");
-    d.className = "vio-cell"; d.textContent = name;
-    d.onclick = () => { draft.behavior = name; goPersonSelect(); };
+    d.className = "vio-cell";
+    // 图标 + 行为名（图标纯装饰，用 aria-hidden 避免读屏重复念）
+    d.innerHTML = '<div class="vio-icon" aria-hidden="true">' + vioSvg(vioIconOf(name)) + '</div>' +
+                  '<div class="vio-label">' + esc(name) + '</div>';
+    d.onclick = () => selectViolation(name);
     g.appendChild(d);
   });
+}
+/* 选中三违行为 → 按角色分流。
+   · 公司管理：本人现场检查发现 → 直接进「处理方式」（自己处理 / 转给责任乡镇）
+   · 其它角色（管理员 / 片区经理）：进入「选违章人员」流程
+   统一入口，保证「选行为」这一步对所有角色都是必经的。 */
+function selectViolation(name){
+  draft.behavior = name;
+  if(session.role === "公司管理"){ renderHandle(); showView("handle"); }
+  else goPersonSelect();
+}
+/* 「处理方式」页顶部卡片显示当前选中的三违行为。
+   改版前是写死的「未戴安全帽」，与实际选择无关 —— 属误导性硬编码，已移除。 */
+function renderHandle(){
+  const t = $("#handle-title");
+  if(t) t.textContent = draft.behavior || "三违行为";
 }
 /* ---- 选人（数据源：台账「直接上级」组织关系 + 飞书多维表格「花名册」表） ---- */
 function personRow(p, onpick){
@@ -984,8 +1673,8 @@ function personRow(p, onpick){
   const color = ["av-blue","av-amber","av-green"][p.name.charCodeAt(0) % 3];
   const sub = [p.job, p.team].filter(Boolean).join(" · ") || "花名册人员";
   row.innerHTML = '<div class="avatar ' + color + '">' + p.name[0] + '</div>' +
-    '<div style="flex:1;min-width:0"><div style="font-size:21px;font-weight:600">' + esc(p.name) + '</div>' +
-    '<div style="font-size:13px;color:var(--t3)">' + esc(sub) + '</div></div>' +
+    '<div style="flex:1;min-width:0"><div style="font-size:var(--fs-title);font-weight:600">' + esc(p.name) + '</div>' +
+    '<div style="font-size:var(--fs-sub);color:var(--t3)">' + esc(sub) + '</div></div>' +
     '<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 5l7 7-7 7" stroke="#9CA3AF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   row.onclick = () => onpick(p);
   return row;
@@ -996,8 +1685,8 @@ function orgRow(node, sub, onpick){
   row.className = "person-row";
   const color = ["av-blue","av-amber","av-green"][node.name.charCodeAt(0) % 3];
   row.innerHTML = '<div class="avatar ' + color + '">' + node.name[0] + '</div>' +
-    '<div style="flex:1;min-width:0"><div style="font-size:21px;font-weight:600">' + esc(node.name) + '</div>' +
-    '<div style="font-size:13px;color:var(--t3)">' + esc(sub) + '</div></div>' +
+    '<div style="flex:1;min-width:0"><div style="font-size:var(--fs-title);font-weight:600">' + esc(node.name) + '</div>' +
+    '<div style="font-size:var(--fs-sub);color:var(--t3)">' + esc(sub) + '</div></div>' +
     '<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 5l7 7-7 7" stroke="#9CA3AF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   row.onclick = () => onpick();
   return row;
@@ -1006,7 +1695,7 @@ function appendSearchAll(list){
   const b = document.createElement("button");
   b.className = "back-link";
   b.textContent = "搜索全部人员";
-  b.onclick = () => { $("#co-search-input").value = ""; renderCoSearch(""); showView("co-search"); };
+  b.onclick = () => { resetCoCascade(); $("#co-search-box").classList.remove("hidden"); renderCoCascade(); $("#co-search-input").focus(); };
   list.appendChild(b);
 }
 function renderPersonList(list, body, ctx){
@@ -1048,9 +1737,9 @@ async function goPersonSelect(){
   } else if(mode === "two-step"){
     await renderAdminPick();
   } else {
-    // 公司管理：搜索全公司花名册
-    $("#co-search-input").value = "";
-    renderCoSearch("");
+    // 公司管理：乡镇 → 班组 → 人员 级联（不再一次性拉全公司 1291 人）
+    resetCoCascade();
+    renderCoCascade();
     showView("co-search");
   }
 }
@@ -1093,6 +1782,168 @@ async function showCrewOf(admin){
   renderPersonList(list, body, { area: admin.department, adminName: admin.name });
 }
 let coTimer = null, coSeq = 0;
+
+/* ---------- 级联三层渲染 ---------- */
+// 面包屑：乡镇 › 班组（点击可回退到该层）
+function renderCoCrumbs() {
+  const el = $("#co-crumbs");
+  const parts = [];
+  if (draft.coTown) parts.push({ label: draft.coTown, level: "town" });
+  if (draft.coTeamDept) parts.push({ label: draft.coTeamDept, level: "team" });
+  if (!parts.length) { el.classList.add("hidden"); el.innerHTML = ""; return; }
+  el.classList.remove("hidden");
+  const ico = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M9 5l7 7-7 7" stroke="#9CA3AF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  el.innerHTML = '<span class="crumb" style="background:var(--primary-soft);color:var(--primary)" data-co="towns">乡镇</span>' +
+    parts.map((p, i) =>
+      ico + '<span class="crumb" style="background:' + (i === parts.length - 1 ? "var(--primary);color:#fff" : "var(--primary-soft);color:var(--primary)") +
+      '" data-co="' + p.level + '">' + esc(p.label) + "</span>").join("");
+  el.querySelectorAll("[data-co]").forEach(n => {
+    n.onclick = () => {
+      const lv = n.dataset.co;
+      if (lv === "towns") { draft.coTown = null; draft.coTeamDept = null; renderCoCascade(); }
+      else if (lv === "town") { draft.coTeamDept = null; renderCoCascade(); }
+    };
+  });
+}
+
+// 层 1：作业中心清单（12 乡镇 + 3 公园 + 2 作业中心 = 17 个，依次向下）
+async function renderCoTowns() {
+  const list = $("#co-cascade");
+  list.innerHTML = emptyTip("正在读取作业中心…");
+  const body = await loadTowns();
+  list.innerHTML = "";
+  if (!body) { list.innerHTML = emptyTip("作业中心清单读取失败：" + (lastApiError || "请稍后重试")); return; }
+  const towns = body.towns || [];
+  if (!towns.length) { list.innerHTML = emptyTip("台账中未解析到作业中心，请联系管理员维护「所属部门」"); return; }
+  towns.forEach(t => {
+    const row = document.createElement("div");
+    row.className = "town-row";
+    const nTeam = t.teamCount || 0;
+    row.innerHTML = '<div class="avatar av-amber">' + esc(t.town[0] || "单") + "</div>" +
+      '<div style="flex:1;min-width:0"><div class="town-name">' + esc(t.town) + "</div>" +
+      '<div class="town-meta">' + (t.managerName ? "负责人 " + esc(t.managerName) : "未配负责人") +
+      "　·　" + nTeam + " 个班组</div></div>" +
+      '<div class="town-badge">' + esc((t.peopleCount || 0) + " 人") + "</div>";
+    row.onclick = () => { draft.coTown = t.town; draft.coTeamDept = null; renderCoCascade(); };
+    list.appendChild(row);
+  });
+}
+
+// 层 2：该乡镇的班组（片区=经理在最前，其后一班/二班/三班…，每行显示管理员姓名）
+async function renderCoTeams() {
+  const list = $("#co-cascade");
+  list.innerHTML = emptyTip("正在读取班组…");
+  const body = await loadTeams(draft.coTown);
+  list.innerHTML = "";
+  if (!body) { list.innerHTML = emptyTip("班组读取失败：" + (lastApiError || "请稍后重试")); return; }
+  const teams = body.teams || [];
+  if (!teams.length) { list.innerHTML = emptyTip("「" + draft.coTown + "」下未解析到班组，请联系管理员维护台账「所属部门」"); return; }
+
+  // 片区（经理）单独提到最前，视觉上与班组区分；后端已保证其排在首位
+  teams.forEach(t => {
+    const row = document.createElement("div");
+    row.className = t.isManagerTeam ? "tp-person" : "town-row";
+    if (t.isManagerTeam) {
+      // 经理行：显示姓名 + 「乡镇作业中心经理」标签
+      const nm = t.managerName || "（未配经理）";
+      row.innerHTML = '<div class="avatar sm av-blue">' + esc(nm[0] || "?") + "</div>" +
+        '<div style="flex:1;min-width:0"><div class="tp-name">' + esc(nm) + "</div>" +
+        '<div class="tp-meta">' + esc(t.dept) + "　·　" + (t.rosterCount || 0) + " 人</div></div>" +
+        '<div class="tp-tag mgr">乡镇作业中心经理</div>';
+    } else {
+      // 班组行：用户要求格式「大曹镇一班：管理员姓名」
+      const adm = (t.admins || []).map(a => a.name);
+      const admTxt = adm.length ? adm.join("、") : "未配管理员";
+      row.innerHTML = '<div class="avatar av-amber">' + esc(t.dept.replace(draft.coTown, "")[0] || "班") + "</div>" +
+        '<div style="flex:1;min-width:0"><div class="town-name">' + esc(t.dept) + "：" + esc(admTxt) + "</div>" +
+        '<div class="town-meta">' + (adm.length ? "管理员 " + adm.length + " 人" : "管理员待维护") +
+        "　·　在职 " + (t.rosterCount || 0) + " 人</div></div>" +
+        '<div class="town-badge' + (adm.length ? "" : " warn") + '">' + (adm.length ? adm.length + " 管理员" : "待维护") + "</div>";
+    }
+    row.onclick = () => { draft.coTeamDept = t.dept; draft.coTeamMgr = t.managerName || ""; draft.coTeamAdmins = t.admins || []; renderCoCascade(); };
+    list.appendChild(row);
+  });
+}
+
+// 层 3：该班组全部人员（含管理员本人）
+async function renderCoTeamMembers() {
+  const list = $("#co-cascade");
+  list.innerHTML = emptyTip("正在读取人员…");
+  const body = await loadRoster({ area: draft.coTeamDept, limit: 200 });
+  list.innerHTML = "";
+  if (!body) { list.innerHTML = emptyTip("人员读取失败：" + (lastApiError || "请稍后重试")); return; }
+  if (!body.items.length) {
+    list.innerHTML = emptyTip("「" + draft.coTeamDept + "」暂无在职人员<br><span style=\"font-size:var(--fs-sub)\">若确认应有人员，请联系管理员核对花名册「所属部门」</span>");
+    return;
+  }
+  $("#co-head").textContent = draft.coTeamDept + " · " + body.total + " 人";
+  // 管理员置顶：他是整改责任人，被选中的概率最高
+  const admSet = new Set((draft.coTeamAdmins || []).map(a => a.name));
+  const items = body.items.slice().sort((a, b) => (admSet.has(b.name) ? 1 : 0) - (admSet.has(a.name) ? 1 : 0));
+  items.forEach(it => {
+    const p = rosterToPerson(it);
+    const isAdm = admSet.has(p.name);
+    const row = personRow(p, pickPerson);
+    if (isAdm) {
+      const tag = document.createElement("span");
+      tag.className = "tp-tag mgr"; tag.textContent = "管理员";
+      const box = row.querySelector("div[style*='flex:1']");
+      if (box) { tag.style.marginLeft = "8px"; box.appendChild(tag); }
+    }
+    list.appendChild(row);
+  });
+}
+
+// 路由到当前层级
+function renderCoCascade() {
+  const searching = !$("#co-search-box").classList.contains("hidden");
+  renderCoCrumbs();
+  // 进到班组层：整套搜索区（开关 + 面板）一并收起，避免与级联列表打架
+  // 第 1 步（乡镇）保留搜索入口 —— 用户可能记不住班组，需要按姓名反查
+  if (draft.coTeamDept) {
+    $("#co-search-wrap").classList.add("hidden");
+    $("#co-search-box").classList.add("hidden");
+  } else {
+    $("#co-search-wrap").classList.remove("hidden");
+    // 第 2 步（乡镇的班组列表）：入口在、面板收 —— 面板与班组列表叠加会互相淹没
+    if (draft.coTown) $("#co-search-box").classList.add("hidden");
+  }
+  const lv = coLevel();
+  if (lv === 2) {
+    $("#co-title").textContent = "选择违章人员";
+    $("#co-head").textContent = "第 3 步：选择人员";
+    $("#co-sub").textContent = "点击人员姓名，进入违章信息确认";
+    renderCoTeamMembers();
+  } else if (lv === 1) {
+    $("#co-title").textContent = draft.coTown;
+    $("#co-head").textContent = "第 2 步：" + draft.coTown + " 的班组";
+    $("#co-sub").textContent = "负责人（经理）在最前，其后按一班、二班、三班排列";
+    renderCoTeams();
+  } else {
+    $("#co-title").textContent = "自己处理 · 选择人员";
+    $("#co-head").textContent = "第 1 步：选择作业中心";
+    $("#co-sub").textContent = "点击作业中心（乡镇 / 公园 / 作业中心），查看其下属班组的名称与管理员";
+    renderCoTowns();
+  }
+  if (searching) renderCoSearch($("#co-search-input").value.trim());
+}
+
+/* 页内返回箭头 / 系统返回键的语义（层级回退优先，回到乡镇层才退出本页）：
+     人员层 → 班组层 → 乡镇层 → 离开本页（交还 navigateBack 走历史栈） */
+function coBackStep(){
+  const lv = coLevel();
+  if (lv === 2 && !$("#co-search-box").classList.contains("hidden") && !draft.coTeamDept) {
+    // 乡镇层展开着搜索：先收起搜索面板
+    $("#co-search-box").classList.add("hidden"); renderCoCascade(); return false;
+  }
+  if (lv === 2) { draft.coTeamDept = null; draft.coTeamMgr = ""; draft.coTeamAdmins = []; renderCoCascade(); return false; }
+  if (lv === 1) { draft.coTown = null; renderCoCascade(); return false; }
+  if (!$("#co-search-box").classList.contains("hidden")) {
+    $("#co-search-box").classList.add("hidden"); renderCoCascade(); return false;
+  }
+  return true;   // 已在第 1 步：允许离开
+}
+
 function renderCoSearch(q){
   clearTimeout(coTimer);
   const list = $("#co-person-list");
@@ -1136,7 +1987,7 @@ function pickPerson(p){
   } else {
     telBtn.classList.add("hidden"); // 花名册未配手机号 → 不显示拨打入口（不臆造号码）
   }
-  // 返回逻辑
+  // 返回逻辑：search 模式回级联页（保留已下钻的层级与缓存，不做复位）
   const mode = selPersonMode(session);
   $("#cf-back").onclick = () => { mode === "two-step" ? showView("pick-person") : (mode === "search" ? showView("co-search") : showView("pick-person")); };
   showView("confirm");
@@ -1165,17 +2016,115 @@ function makeRecord(extra){
     status: "unfinished",
     rectifyMode: null, rectifyTime: null,
     transferTown: null, transferAdminId: null, transferAdminName: null,
+    transferDepartment: null, transferAdminJob: null, transferAdminRole: null,
+    // 服务端上报状态（localStorage 仅作离线草稿 + 本地缓存）
+    clientRequestId: newClientRequestId(),
+    inspectTime: nowLocalInspectTime(),
+    syncState: "pending",   // pending | synced | failed
+    syncError: null,
+    serverRecordId: null,
     location: gps ? { lat: gps.lat, lng: gps.lng, addr: gps.addr || "已定位（位置解析中）", town: gps.town || "", accuracy: gps.accuracy || null, at: gps.at || null } : null
   }, extra || {});
   db.records.unshift(rec);
   saveDB();
   return rec;
 }
+
+/* ---- 上报后端（后台执行，不阻塞用户看到「完成」页） ----
+   幂等键已在 makeRecord 固定 → 重复调用只落一条，安全重试。 */
+async function syncRecord(rec){
+  if(!rec || rec.syncState === "synced") return rec;
+  try {
+    // ── 提交前置校验：把「必然被服务端 400 拒掉」的情况拦在本地 ──────────────
+    // 背景：控制台里出现过 4 次 patrol/submit 400 —— 服务端会拒，但用户只看到
+    // 「提交失败」，不知道缺什么；retryPendingSync 还会一遍遍重试同一个坏 body。
+    // 这里提前拦下并给出**可操作**的提示，同时避免无意义的重试打服务端。
+    if(rec.type !== "巡查" && !String(rec.behavior || "").trim()){
+      rec.syncState = "failed";
+      rec.syncError = "未选择三违行为，请打开该记录补选后再提交";
+      saveDB(); return rec;
+    }
+    // 网格来自 patrol/meta；若页面刚打开还没拉到（或拉失败），先补拉一次再提交。
+    // 直接拿空 grid 发请求 = 必然 400 PATROL_FIELD_INVALID:grid。
+    if(!resolveGridForSubmit()){
+      try { await loadPatrolMeta(); } catch(e){ /* 下面统一判空 */ }
+      if(!resolveGridForSubmit()){
+        rec.syncState = "failed";
+        rec.syncError = "未能解析巡查网格，请检查网络后重试（或联系管理员在花名册维护「负责区域」）";
+        saveDB(); return rec;
+      }
+    }
+
+    // 照片先上传拿 file_token（只传一次，token 缓存在记录上；失败不静默丢）
+    if(rec.scenePhoto && !rec.photoToken){
+      rec.photoToken = await uploadPhotoToken(rec.scenePhoto, "scene", rec.clientRequestId);
+      saveDB();
+      // 现场照片是三违证据，上传失败就整条记录一起留待重试 —— 避免「文字进了台账、证据没进」
+      if(!rec.photoToken){
+        rec.syncState = "failed";
+        rec.syncError = "现场照片上传失败，请在网络良好时到「巡查台账」重试";
+        saveDB(); return rec;
+      }
+    }
+
+    const res = await submitRecordToBackend(rec);
+    if(res.ok){
+      rec.syncState = "synced";
+      rec.syncError = null;
+      rec.serverRecordId = res.recordId;
+      rec.deduplicated = !!res.deduplicated;
+    } else {
+      rec.syncState = "failed";
+      rec.syncError = patrolSubmitHint(res);
+    }
+  } catch(e){
+    rec.syncState = "failed";
+    rec.syncError = "网络异常，请稍后在「巡查台账」重试";
+  }
+  saveDB();
+  return rec;
+}
+// 提交并同步（页面跳转前调用；失败不阻断，记录留在本地待重试）
+function makeAndSync(extra){
+  const rec = makeRecord(extra);
+  syncRecord(rec);
+  return rec;
+}
+// 补传所有未同步记录（进「巡查台账」时调用）
+async function retryPendingSync(){
+  const pend = db.records.filter(r => r.syncState !== "synced");
+  if(!pend.length) return;
+  for(const r of pend) await syncRecord(r);
+  // 补挂重试：上次「整改后照片」上传/补挂失败的记录（有照片但没拿到 token）
+  for(const r of db.records){
+    if(r.syncState !== "synced" || !r.serverRecordId) continue;
+    if(r.afterPhoto && !r.rectifyPhotoToken){
+      r.rectifyPhotoToken = await uploadPhotoToken(r.afterPhoto, "after", r.clientRequestId);
+      if(r.rectifyPhotoToken){ await attachPhotoToRecord(r, "rectify"); saveDB(); }
+    }
+  }
+  renderSyncBar();
+  // 只在本页可见时重渲染 —— 否则每次进首页都会白拉一次台账
+  if(viewStack[viewStack.length - 1] === "my-checks") renderMyChecks();
+  else renderListInto("my-checks-list", myChecks(), { from: "view-my-checks" });
+}
+// 台账页顶部「待补传」提示条（仅在存在未上报记录时显示；点击手动重试）
+function renderSyncBar(){
+  const bar = $("#sync-bar");
+  if(!bar) return;
+  const pend = db.records.filter(r => r.syncState !== "synced");
+  if(!pend.length){ bar.classList.add("hidden"); bar.innerHTML = ""; return; }
+  const failed = pend.filter(r => r.syncState === "failed").length;
+  bar.classList.remove("hidden");
+  bar.innerHTML = '<span>有 ' + pend.length + " 条记录待上报" + (failed ? "（" + failed + " 条上次失败）" : "") +
+    '，点击重试</span><span style="font-weight:600">重试</span>';
+  bar.onclick = () => retryPendingSync();
+}
 function showDone(rec, title){
   $("#done-title").textContent = title || "整改完成";
   const c = $("#done-card");
   const rows = [];
-  rows.push('<div style="font-size:16px;font-weight:600;color:var(--primary)">记录编号　' + rec.no + "</div>");
+  rows.push('<div style="font-size:var(--fs-body);font-weight:600;color:var(--primary)">记录编号　' + rec.no + "</div>");
   if(rec.type === "三违"){
     rows.push('<div class="info-line">违章人员：' + esc(rec.personName) + "</div>");
     rows.push('<div class="info-line">三违行为：' + esc(rec.behavior) + "</div>");
@@ -1191,7 +2140,7 @@ function showDone(rec, title){
   showView("done");
 }
 function lineKV(k, v){
-  return '<div style="display:flex;justify-content:space-between;font-size:16px;color:var(--t2)"><span>' + k + '</span><span style="font-weight:600;color:var(--success)">' + v + "</span></div>";
+  return '<div style="display:flex;justify-content:space-between;font-size:var(--fs-body);color:var(--t2)"><span>' + k + '</span><span style="font-weight:600;color:var(--success)">' + v + "</span></div>";
 }
 
 /* ================= 列表渲染 ================= */
@@ -1202,13 +2151,19 @@ function statusChip(rec){
   return '<span class="chip green"><span class="dot"></span>已完成</span>';
 }
 function fmtTime(t){ const d = new Date(t); return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0") + " " + String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0"); }
+// 上报状态徽标（服务端落库状态；synced 是常态，不在卡片上占视觉）
+function syncChip(rec){
+  if(rec.syncState === "synced") return '<span class="chip green" title="已上报飞书台账"><span class="dot"></span>已上报</span>';
+  if(rec.syncState === "failed") return '<span class="chip red" title="' + esc(rec.syncError || "上报失败") + '"><span class="dot"></span>待补传</span>';
+  return '<span class="chip yellow"><span class="dot"></span>上报中</span>';
+}
 function recordCard(rec, opts){
   opts = opts || {};
   const card = document.createElement("div");
   card.className = "record-card" + (rec.status === "unfinished" ? " unfinished" : "");
   const goLine = opts.goLine || (rec.status === "unfinished" && rec.checkerId === session.id ? "点击继续整改" : null);
   card.innerHTML =
-    '<div class="r-top">' + statusChip(rec) + '<span style="font-size:13px;color:var(--t4)">' + fmtTime(rec.time).slice(11) + "</span></div>" +
+    '<div class="r-top">' + statusChip(rec) + syncChip(rec) + '<span style="font-size:var(--fs-sub);color:var(--t4)">' + fmtTime(rec.time).slice(11) + "</span></div>" +
     '<div class="r-title">' + esc(rec.type === "三违" ? rec.behavior : "普通巡查 · " + rec.patrolResult) + "</div>" +
     '<div class="r-sub">' + (rec.personName ? esc(rec.personName) + " · " + esc(rec.personJob) + "　" : "") + esc(rec.no) + "</div>";
   if(rec.scenePhoto){
@@ -1248,21 +2203,83 @@ function renderListInto(elId, records, opts){
     groups[day].forEach(r => el.appendChild(recordCard(r, opts)));
   });
 }
+/* ---- 巡查台账：服务端权威台账（飞书主台账）+ 本机待补传 ----
+   以前台账页只读 localStorage —— 换手机 / 清缓存就「什么都没有」，
+   而且本机草稿和服务端台账对不上号也不自知。现改为两段展示：
+     ① 待上报：本机 syncState !== synced，还没进飞书
+     ② 已上报：服务端 patrol/records，权威、跨设备一致
+   两段各有各的状态，绝不混在一张卡里假扮成同一条记录。 */
+let serverRecs = null, serverRecsAt = 0, serverRecsErr = "";
+const SERVER_RECS_TTL = 60000;   // 60s 内不重复拉；进页面时强制刷新
+async function loadServerRecs(force){
+  if(!force && serverRecs && Date.now() - serverRecsAt < SERVER_RECS_TTL) return serverRecs;
+  const r = await mobileApi("/api/mobile/patrol/records", null, "GET");
+  if(r.status !== 200 || !r.body || !r.body.success){
+    serverRecs = null; serverRecsAt = 0;
+    serverRecsErr = (r.body && r.body.message) || ("HTTP " + r.status);
+    return null;
+  }
+  serverRecs = r.body.records || [];
+  serverRecsAt = Date.now(); serverRecsErr = "";
+  return serverRecs;
+}
+// 服务端记录卡片：只显示服务端真有的字段，缺什么就空着，绝不拿本地数据补
+function serverRecCard(x){
+  const card = document.createElement("div");
+  card.className = "record-card";
+  const isVio = x.is_violation === "是";
+  const t = x.inspection_time || x.created_at || "";
+  const hm = t.length >= 16 ? t.slice(11, 16) : "";
+  const sub = [x.violation_people, x.grid].filter(Boolean).map(esc).join(" · ");
+  card.innerHTML =
+    '<div class="r-top"><span class="chip green"><span class="dot"></span>已上报</span>' +
+    (x.photo_count ? '<span class="chip blue">' + x.photo_count + " 张照片</span>" : "") +
+    (hm ? '<span style="font-size:var(--fs-sub);color:var(--t4)">' + esc(hm) + "</span>" : "") + "</div>" +
+    '<div class="r-title">' + esc(isVio ? (x.violation_desc || "三违") : "普通巡查") + "</div>" +
+    (sub ? '<div class="r-sub">' + sub + "</div>" : "") +
+    (x.description ? '<div class="r-sub">' + esc(x.description) + "</div>" : "") +
+    '<div class="r-sub">' + esc(t) + "</div>";
+  return card;
+}
+async function renderMyChecks(){
+  const el = document.getElementById("my-checks-list");
+  if(!el) return;
+  const pend = myChecks().filter(r => r.syncState !== "synced");
+  el.innerHTML = '<div class="empty-tip">正在读取台账…</div>';
+  const list = await loadServerRecs(true);
+  el.innerHTML = "";
+  if(pend.length){
+    const lab = document.createElement("div");
+    lab.className = "section-label"; lab.textContent = "待上报（" + pend.length + "）";
+    el.appendChild(lab);
+    pend.forEach(r => el.appendChild(recordCard(r, { from: "view-my-checks" })));
+  }
+  if(list && list.length){
+    const lab = document.createElement("div");
+    lab.className = "section-label"; lab.textContent = "已上报台账（" + list.length + "）";
+    el.appendChild(lab);
+    list.forEach(x => el.appendChild(serverRecCard(x)));
+  }
+  if(!pend.length && (!list || !list.length)){
+    el.innerHTML = '<div class="empty-tip">' + (serverRecsErr ? "台账读取失败：" + esc(serverRecsErr) : "暂无记录") + "</div>";
+  }
+}
+
 function renderDetail(rec, from){
   const b = $("#detail-body"); b.innerHTML = "";
   const mk = html => { const d = document.createElement("div"); d.innerHTML = html; return d.firstElementChild; };
   b.appendChild(mk('<div class="card" style="display:flex;flex-direction:column;gap:8px">' +
-    '<div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:15px;font-weight:600;color:var(--primary)">' + esc(rec.no) + "</span>" + statusChip(rec) + "</div>" +
-    '<div style="font-size:24px;font-weight:700">' + esc(rec.type === "三违" ? rec.behavior : "普通巡查 · " + rec.patrolResult) + "</div>" +
-    (rec.personName ? '<div style="font-size:14px;color:var(--t3)">' + esc(rec.personName) + " · " + esc(rec.personJob) + " · " + esc(rec.personTeam) + "</div>" : "") +
-    '<div style="font-size:15px;color:var(--t2);line-height:1.9">检查人：' + esc(rec.checkerName) + "<br>检查时间：" + fmtTime(rec.time) + "<br>定位：" + esc(rec.location ? rec.location.addr : "—") + "</div></div>"));
+    '<div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:var(--fs-body);font-weight:600;color:var(--primary)">' + esc(rec.no) + "</span>" + statusChip(rec) + "</div>" +
+    '<div style="font-size:var(--fs-h2);font-weight:700">' + esc(rec.type === "三违" ? rec.behavior : "普通巡查 · " + rec.patrolResult) + "</div>" +
+    (rec.personName ? '<div style="font-size:var(--fs-body);color:var(--t3)">' + esc(rec.personName) + " · " + esc(rec.personJob) + " · " + esc(rec.personTeam) + "</div>" : "") +
+    '<div style="font-size:var(--fs-body);color:var(--t2);line-height:1.9">检查人：' + esc(rec.checkerName) + "<br>检查时间：" + fmtTime(rec.time) + "<br>定位：" + esc(rec.location ? rec.location.addr : "—") + "</div></div>"));
   if(rec.personName){
     // 违章人员信息取记录快照（选人时从花名册写入），不依赖演示花名册
     const pc = mk('<div class="person-row" style="cursor:default"></div>');
     const pmeta = [rec.personSex, rec.personAge ? rec.personAge + "岁" : "", rec.personJob, rec.personArea].filter(Boolean).join(" · ");
     pc.innerHTML = '<div class="avatar sm av-blue">' + esc(rec.personName[0] || "?") + "</div>" +
-      '<div style="flex:1"><div style="font-size:18px;font-weight:600">' + esc(rec.personName) + '</div>' +
-      (pmeta ? '<div style="font-size:13px;color:var(--t3)">' + esc(pmeta) + "</div>" : "") + "</div>";
+      '<div style="flex:1"><div style="font-size:var(--fs-title);font-weight:600">' + esc(rec.personName) + '</div>' +
+      (pmeta ? '<div style="font-size:var(--fs-sub);color:var(--t3)">' + esc(pmeta) + "</div>" : "") + "</div>";
     if(rec.personTel){
       const tel = document.createElement("a");
       tel.className = "tel-btn"; tel.style.width = "44px"; tel.style.height = "44px"; tel.style.borderRadius = "22px"; tel.style.padding = "0";
@@ -1284,14 +2301,14 @@ function renderDetail(rec, from){
     else if(rec.rectifierName) lines.push("整改人：" + esc(rec.rectifierName));
     if(rec.rectifyTime) lines.push("整改时间：" + fmtTime(rec.rectifyTime));
     if(!lines.length) lines.push("等待整改");
-    const rc = mk('<div class="card" style="display:flex;flex-direction:column;gap:8px"><div style="font-size:15px;color:var(--t2);line-height:1.9">' + lines.join("<br>") + "</div></div>");
+    const rc = mk('<div class="card" style="display:flex;flex-direction:column;gap:8px"><div style="font-size:var(--fs-body);color:var(--t2);line-height:1.9">' + lines.join("<br>") + "</div></div>");
     if(rec.afterPhoto){
       const ph = mk('<div class="photo-box"><img alt="整改后照片" src="' + rec.afterPhoto + '"></div>');
       rc.appendChild(ph);
     }
     // 复查按钮（检查人本人 / 经理对下属）
     if(rec.status === "done" && (rec.checkerId === session.id || isMySubordinateRec(rec))){
-      const btn = mk('<button class="btn-primary" style="height:60px;font-size:19px">复查通过 · 闭环</button>');
+      const btn = mk('<button class="btn-primary">复查通过 · 闭环</button>');
       btn.onclick = () => { rec.status = "reviewed"; saveDB(); refreshHomeStats(); renderDetail(rec, from); };
       rc.appendChild(btn);
     }
@@ -1324,6 +2341,18 @@ function submitRectify(){
   rectifying.rectifierId = session.id;
   rectifying.rectifierName = session.name;
   saveDB();
+  // 整改后照片：这条记录**早已提交**，提交时不可能带上现在才拍的照片，
+  // 只能上传后 PUT 补挂回同一条（见 attachPhotoToRecord）。后台执行，不挡「整改完成」页。
+  const done = rectifying;
+  if(done.afterPhoto && !done.rectifyPhotoToken && done.serverRecordId){
+    (async () => {
+      done.rectifyPhotoToken = await uploadPhotoToken(done.afterPhoto, "after", done.clientRequestId);
+      if(done.rectifyPhotoToken){
+        await attachPhotoToRecord(done, "rectify");
+        saveDB();
+      }
+    })();
+  }
   showDone(rectifying, "整改完成");
   rectifying = null;
 }
@@ -1361,73 +2390,147 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // 分类
   $("#opt-no").onclick = () => { $("#patrol-photo").src = draft.scenePhoto; draft.patrolResult = null; renderPatrolChoice(); showView("patrol"); };
-  $("#opt-yes").onclick = () => { session.role === "公司管理" ? showView("handle") : (renderVioGrid(), showView("vio")); };
+  /* 「是三违」→ **所有角色都必须先选三违行为**，选中后再按角色分流（见 selectViolation）。
+     ⚠️ 缺陷修复（第十四轮）：此前公司管理被单独写成直接 showView("handle")，
+        跳过了「选择三违行为」这一步 —— 于是 draft.behavior 从未赋值，
+        且 #handle-title 是硬编码的「未戴安全帽」，用户看到的是**假行为名**，
+        最终上报记录里的三违行为字段也是错的。
+        分流逻辑统一收敛到 selectViolation()，避免以后再出现「某角色少走一步」。 */
+  $("#opt-yes").onclick = () => { draft.behavior = null; renderVioGrid(); showView("vio"); };
 
   // 三违宫格 → 选人
-  $("#btn-find-any").onclick = () => { // 经理跨班组搜索 → 复用公司搜索页
-    $("#co-search-input").value = ""; renderCoSearch(""); showView("co-search");
+  // 经理跨班组搜索 → 复用公司级联页：跳级联、直接展开搜索面板（经理看「全公司花名册」也能命中）
+  $("#btn-find-any").onclick = () => {
+    resetCoCascade();
+    $("#co-search-box").classList.remove("hidden");
+    showView("co-search"); renderCoCascade();
+    $("#co-search-input").focus();
   };
   $("#btn-repick-admin").onclick = () => renderAdminPick();
   $("#co-search-input").addEventListener("input", e => renderCoSearch(e.target.value.trim()));
+  $("#co-search-toggle").onclick = () => {
+    const box = $("#co-search-box");
+    box.classList.toggle("hidden");
+    if (!box.classList.contains("hidden")) $("#co-search-input").focus();
+    else { $("#co-person-list").innerHTML = ""; $("#co-search-label").textContent = ""; }
+  };
+  $("#co-back").onclick = () => { if (coBackStep()) showView("handle"); };
 
-  // 处理方式（公司管理）
-  $("#opt-self").onclick = () => { $("#co-search-input").value = ""; renderCoSearch(""); showView("co-search"); };
-  $("#opt-transfer").onclick = () => { draft.transferTown = null; draft.transferManager = null; showView("transfer"); renderTownList(); };
+  // 处理方式（公司管理）：自己处理 → 乡镇 → 班组 → 人员 级联（惰性加载，不预拉全公司花名册）
+  $("#opt-self").onclick = () => { resetCoCascade(); showView("co-search"); renderCoCascade(); };
+  $("#opt-transfer").onclick = () => { draft.transferTown = null; draft.transferDepartment = ""; showView("transfer"); renderTownList(); };
 
   // 转乡镇（数据源：台账「直接上级」——我的下级片区经理 → 该片区下的管理员）
   async function renderTownList(){
     const list = $("#tf-list");
     const choosingAdmin = !!draft.transferTown;
-    $("#tf-head").textContent = choosingAdmin ? "第二步：指定接收管理员" : "第一步：指定责任乡镇";
-    $("#tf-sub").textContent = choosingAdmin ? "任务将推送给所选管理员的「我的整改」" : "选择问题所在的责任乡镇作业中心（来自台账）";
+    $("#tf-head").textContent = choosingAdmin ? "第二步：指定接收人" : "第一步：指定作业中心";
+    $("#tf-sub").textContent = choosingAdmin
+      ? "「" + draft.transferTown + "」的负责人 / 管理员，点击发送整改任务"
+      : "选择问题所属的责任单位（乡镇 / 公园 / 作业中心，来自网格长信息台账）";
     list.innerHTML = emptyTip("正在读取组织…");
-    const body = await loadSubordinates(choosingAdmin ? draft.transferManager : undefined);
+    const body = await loadSubordinates();
     list.innerHTML = "";
     if(!body){ list.innerHTML = emptyTip("组织信息读取失败：" + (lastApiError || "请稍后重试")); return; }
-    const rows = choosingAdmin ? (body.admins || []) : (body.managers || []);
-    if(!rows.length){
-      list.innerHTML = emptyTip(choosingAdmin
-        ? "「" + draft.transferTown + "」在台账下暂无管理员，请联系管理员维护「直接上级」"
-        : "台账中未配置你下辖的乡镇/片区，请联系管理员维护「直接上级」");
+
+    if(!choosingAdmin){
+      const towns = body.towns || [];
+      if(!towns.length){
+        list.innerHTML = emptyTip("台账中未解析到作业中心，请联系管理员维护「所属部门」");
+        return;
+      }
+      towns.forEach(t => {
+        const row = document.createElement("div");
+        row.className = "town-row";
+        // ⚠️ 后端下发的是嵌套对象 `manager:{name,phone}`，**不是**扁平的 managerName。
+        //    改版前这里读 t.managerName 恒为 undefined → 全部乡镇都显示「未配经理」
+        //    （即使台账里明明配了 杨清华/王臣祥 等）。兼容两种形状，避免后端调整再踩。
+        const mgr = (t.manager && t.manager.name) || t.managerName || "";
+        const admins = Array.isArray(t.admins) ? t.admins : [];
+        const n = t.peopleCount || 0;
+        // 只显示「经理 xxx」，管理员姓名由右侧 badge 上的总人数体现
+        // （用户反馈：第一行已经能看清经理，不要把管理员全名列在右侧，视觉拥挤）
+        row.innerHTML = '<div class="avatar av-amber">' + esc(t.town[0] || "单") + '</div>' +
+          '<div style="flex:1;min-width:0"><div class="town-name">' + esc(t.town) + '</div>' +
+          '<div class="town-meta">' + (mgr ? "负责人 " + esc(mgr) : "未配负责人") + '</div></div>' +
+          '<div class="town-badge' + (n ? "" : " warn") + '">' + (n ? n + " 人" : "待维护") + '</div>';
+        row.onclick = () => { draft.transferTown = t.town; draft.transferDepartment = t.department || ""; renderTownList(); };
+        list.appendChild(row);
+      });
       return;
     }
-    rows.forEach(node => {
-      const label = node.department || node.name;
-      const row = document.createElement("div");
-      row.className = "person-row";
-      row.innerHTML = '<div class="avatar ' + (choosingAdmin ? "av-blue" : "av-amber") + '">' + esc((choosingAdmin ? node.name : label)[0] || "镇") + '</div>' +
-        '<div style="flex:1;min-width:0"><div style="font-size:21px;font-weight:600">' + esc(choosingAdmin ? node.name : label) + '</div>' +
-        '<div style="font-size:13px;color:var(--t3)">' + esc(choosingAdmin ? (node.gridLevel || "管理员") : "责任乡镇作业中心 · " + node.name) + '</div></div>';
-      row.onclick = () => {
-        if(!draft.transferTown){
-          draft.transferTown = label; draft.transferManager = node.name; renderTownList();
-        } else {
-          const rec = makeRecord({ rectifyMode: "transfer", status: "transferred",
-            transferTown: draft.transferTown, transferAdminId: node.name, transferAdminName: node.name });
-          showDone(rec, "已发送整改任务");
-        }
-      };
-      list.appendChild(row);
-    });
-    if(draft.transferTown){
-      const back = document.createElement("button");
-      back.className = "back-link"; back.textContent = "返回重新选乡镇";
-      back.onclick = () => { draft.transferTown = null; draft.transferManager = null; renderTownList(); };
-      list.appendChild(back);
+
+    // 第二步：本乡镇的接收人。经理在前（第一接单人），管理员在后（具体整改人）。
+    const cur = (body.towns || []).find(t => t.town === draft.transferTown) || null;
+    if(!cur){
+      list.innerHTML = emptyTip("未找到「" + draft.transferTown + "」，请返回重新选择");
+      return;
     }
+    // 接收人来源做三路兜底，避免因**单个乡镇**数据异常就整页空白（原缺陷表现）：
+    //   ① cur.managers / cur.admins —— 正常路径（后端按「所属部门」归镇）
+    //   ② cur.manager 单经理对象 —— 万一后端只下发嵌套 manager 而未展开 managers 数组
+    //   ③ cur.others —— 分级未规范化但仍然在该镇的人（让用户至少能选到人，不卡死流程）
+    const managers = (cur.managers || []).slice();
+    const admins = (cur.admins || []).slice();
+    if(!managers.length && cur.manager && cur.manager.name) managers.push(cur.manager);
+    const extras = (!managers.length && !admins.length) ? (cur.others || []) : [];
+    if(!managers.length && !admins.length && !extras.length){
+      list.innerHTML = emptyTip("「" + draft.transferTown + "」暂无负责人或管理员，请联系管理员维护台账「所属部门」");
+      const back0 = document.createElement("button");
+      back0.className = "back-link"; back0.textContent = "返回重新选单位";
+      back0.onclick = () => { draft.transferTown = null; draft.transferDepartment = ""; renderTownList(); };
+      list.appendChild(back0);
+      return;
+    }
+    const pick = (node, kind) => {
+      const rec = makeAndSync({ rectifyMode: "transfer", status: "transferred",
+        transferTown: draft.transferTown, transferDepartment: draft.transferDepartment || cur.department || "",
+        transferAdminId: node.name, transferAdminName: node.name,
+        transferAdminJob: node.position || node.grade || "",
+        transferAdminRole: kind });
+      showDone(rec, "已发送整改任务");
+    };
+    const addGroup = (title, arr, kind) => {
+      if(!arr.length) return;
+      const h = document.createElement("div");
+      h.className = "tp-group"; h.textContent = title;
+      list.appendChild(h);
+      arr.forEach(node => {
+        const row = document.createElement("div");
+        row.className = "tp-person";
+        // 标签用**台账真实分级**（乡镇作业中心经理 / 公司管理 / 管理员）。
+        // 否则环卫·市政园林作业中心里「公司管理」分级的人会被误标成「乡镇作业中心经理」。
+        const k = node.grade || kind;
+        const meta = [node.position || k, node.phone ? maskTel(node.phone) : ""].filter(Boolean).join("　·　");
+        row.innerHTML = '<div class="avatar sm ' + (k === "管理员" ? "av-amber" : "av-blue") + '">' + esc(node.name[0] || "?") + '</div>' +
+          '<div style="flex:1;min-width:0"><div class="tp-name">' + esc(node.name) + '</div>' +
+          '<div class="tp-meta">' + esc(meta) + '</div></div>' +
+          '<div class="tp-tag' + (k === "乡镇作业中心经理" ? " mgr" : "") + '">' + esc(k) + '</div>';
+        row.onclick = () => pick(node, k);
+        list.appendChild(row);
+      });
+    };
+    addGroup("负责人 / 经理", managers, "负责人");
+    addGroup("管理员", admins, "管理员");
+    // 兜底通道：该单位人员分级未规范化时，至少把「其他人」列出来，不让流程卡死
+    addGroup("该单位其他人员（分级待维护）", extras, "整改人");
+    const back = document.createElement("button");
+    back.className = "back-link"; back.textContent = "返回重新选单位";
+    back.onclick = () => { draft.transferTown = null; draft.transferDepartment = ""; renderTownList(); };
+    list.appendChild(back);
   }
 
   // 确认页
   $("#btn-now").onclick = () => {
-    const rec = makeRecord({ rectifyMode: "now", rectifierId: session.id, rectifierName: session.name });
+    const rec = makeAndSync({ rectifyMode: "now", rectifierId: session.id, rectifierName: session.name });
     openRectify(rec, "view-confirm");
     rectifyFrom = "view-home"; $("#rf-back").onclick = () => showView("home");
   };
   $("#btn-later").onclick = () => {
-    const rec = makeRecord({ rectifyMode: "later", rectifierId: session.id, rectifierName: session.name });
+    const rec = makeAndSync({ rectifyMode: "later", rectifierId: session.id, rectifierName: session.name });
     $("#done-title").textContent = "记录已保存";
     const c = $("#done-card");
-    c.innerHTML = '<div style="font-size:16px;font-weight:600;color:var(--primary)">记录编号　' + rec.no + "</div>" +
+    c.innerHTML = '<div style="font-size:var(--fs-body);font-weight:600;color:var(--primary)">记录编号　' + rec.no + "</div>" +
       '<div class="info-line">三违行为：' + esc(rec.behavior) + "</div>" +
       '<div class="info-line">违章人员：' + esc(rec.personName) + "</div>" +
       '<div class="info-line">状态：<span style="color:var(--danger);font-weight:600">未完成</span>　请到「巡查台账」继续整改</div>';
@@ -1449,7 +2552,7 @@ document.addEventListener("DOMContentLoaded", () => {
     el.onkeydown = e => { if(e.key === "Enter" || e.key === " "){ e.preventDefault(); pick(); } };
   });
   $("#btn-patrol-done").onclick = () => {
-    const rec = makeRecord({ type: "巡查", patrolResult: draft.patrolResult, behavior: null, personId: null, personName: "" });
+    const rec = makeAndSync({ type: "巡查", patrolResult: draft.patrolResult, behavior: null, personId: null, personName: "" });
     showDone(rec, "检查完成");
   };
 
@@ -1460,7 +2563,13 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 function openEntry(go){
-  if(go === "my-checks"){ renderListInto("my-checks-list", myChecks(), { from: "view-my-checks" }); showView("my-checks"); }
+  if(go === "my-checks"){
+    // 台账 = 服务端已上报 + 本机待补传（见 renderMyChecks）
+    showView("my-checks");
+    renderSyncBar();          // 展示待补传条数
+    renderMyChecks();         // 服务端台账（进页面强制拉一次最新的）
+    retryPendingSync();       // 进入台账即尝试补传（幂等，安全重试）
+  }
   if(go === "my-rectify"){
     const mine = db.records.filter(r => (r.rectifierId === session.id || r.transferAdminName === session.name) && r.status !== "done" && r.status !== "reviewed");
     renderListInto("my-rectify-list", mine, { from: "view-my-rectify", goLine: "点击开始整改" });
@@ -1479,18 +2588,18 @@ function openEntry(go){
     if(!subNames.length){
       el.innerHTML = '<div class="empty-tip">台账中未配置你的下级，请联系管理员维护「直接上级」</div>';
     } else if(!subRecs.length){
-      el.innerHTML = '<div class="empty-tip">暂无可查看的下属检查记录<br><span style="font-size:13px">下属记录保存在各自账号下，汇总查看需后端记录接口（当前版本仅显示本机记录）</span></div>';
+      el.innerHTML = '<div class="empty-tip">暂无可查看的下属检查记录<br><span style="font-size:var(--fs-sub)">下属记录保存在各自账号下，汇总查看需后端记录接口（当前版本仅显示本机记录）</span></div>';
     }
     subNames.forEach(nm => {
       const recs = subRecs.filter(r => String(r.checkerName || "") === nm);
       if(!recs.length) return;
       const g = document.createElement("div");
       g.className = "card"; g.style.display = "flex"; g.style.flexDirection = "column"; g.style.gap = "8px";
-      g.innerHTML = '<div style="display:flex;align-items:center;gap:12px"><div class="avatar sm av-blue">' + esc(nm[0] || "?") + '</div><div><div style="font-size:17px;font-weight:600">' + esc(nm) + '</div><div style="font-size:13px;color:var(--t3)">本机记录 · ' + recs.length + " 条</div></div></div>";
+      g.innerHTML = '<div style="display:flex;align-items:center;gap:var(--gap)"><div class="avatar sm av-blue">' + esc(nm[0] || "?") + '</div><div><div style="font-size:var(--fs-title);font-weight:600">' + esc(nm) + '</div><div style="font-size:var(--fs-sub);color:var(--t3)">本机记录 · ' + recs.length + " 条</div></div></div>";
       recs.slice(0,5).forEach(r => {
         const row = document.createElement("div");
         row.className = "check-line"; row.style.cursor = "pointer";
-        row.innerHTML = "<span>" + esc(r.personName + " · " + r.behavior) + "</span>" + (r.status === "unfinished" ? '<span style="color:var(--danger);font-weight:600;font-size:13px">未完成</span>' : '<span style="color:var(--success);font-weight:600;font-size:13px">已完成</span>');
+        row.innerHTML = "<span>" + esc(r.personName + " · " + r.behavior) + "</span>" + (r.status === "unfinished" ? '<span style="color:var(--danger);font-weight:600;font-size:var(--fs-sub)">未完成</span>' : '<span style="color:var(--success);font-weight:600;font-size:var(--fs-sub)">已完成</span>');
         row.onclick = () => renderDetail(r, "view-sub-checks");
         g.appendChild(row);
       });
@@ -1514,6 +2623,115 @@ document.addEventListener("click", e => {
   $$(".seg-item").forEach(x => x.classList.toggle("active", x === seg));
   if(seg.dataset.seg === "mine"){ openEntry("my-checks"); }
 });
+
+/* ================= 「添加到手机桌面」引导 =================
+   两条路：
+   ① Android/Chrome：beforeinstallprompt 事件先把 prompt 事件抓到 deferredPWAInstall
+      → 用户主动点入口时调 deferredPWAInstall.prompt() 弹系统原生安装对话框
+   ② iOS Safari：没有原生入口，弹底部 sheet 引导「分享 → 添加到主屏幕」
+   桌面图标打开 /check → boot() → 本地有会话或凭据就静默重登 → 免登录 */
+let deferredPWAInstall = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();   // 不让浏览器自己弹；等用户主动点入口再弹
+  deferredPWAInstall = e;
+});
+function isIOS(){ return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream; }
+function isInStandalone(){ return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true; }
+// 微信/QQ/UC 等 App 内置浏览器**不支持 PWA 安装**，且各家「添加到桌面」入口位置不同，
+// 必须分开引导；否则用户只看到一句「不支持」，等于什么都没说。
+function isWeChat(){ return /MicroMessenger/i.test(navigator.userAgent); }
+function isQQBrowser(){ return /MQQBrowser|QQBrowser/i.test(navigator.userAgent) && !isWeChat(); }
+function isUCBrowser(){ return /UCBrowser|UCWEB/i.test(navigator.userAgent); }
+function showAddHomeModal(){
+  const m = document.getElementById('add-home-modal'); if(!m) return;
+  const body = document.getElementById('add-home-body'), doBtn = document.getElementById('add-home-do'), title = document.getElementById('add-home-title');
+  if(isInStandalone()){
+    title.textContent = '已安装';
+    body.innerHTML = '已经装到桌面了，点手机桌面上的「<b>网格巡查</b>」图标即可直接进入。';
+    doBtn.style.display = 'none';
+  } else if(isWeChat()){
+    title.textContent = '在微信里添加到桌面';
+    body.innerHTML = '请按下面 2 步操作：<br><br>' +
+      '<b>1.</b> 点右上角 <span style="background:#F3F4F6;padding:2px 8px;border-radius:6px">···</span> 菜单<br>' +
+      '<b>2.</b> 选择「<b>添加到桌面</b>」<br><br>' +
+      '<span style="color:#6B7280">提示：微信内打开的功能有限，建议点右上角「在浏览器打开」后再添加到桌面，之后点图标会以全屏方式进入。</span>';
+    doBtn.style.display = 'none';
+  } else if(isQQBrowser() || isUCBrowser()){
+    title.textContent = '添加到桌面';
+    body.innerHTML = '请点底部或右上角的 <span style="background:#F3F4F6;padding:2px 8px;border-radius:6px">菜单</span>，' +
+      '选择「<b>添加到桌面</b>」（部分版本叫「发送到桌面」）。<br><br>' +
+      '<span style="color:#6B7280">若找不到，可先复制网址，用系统浏览器（Chrome / 华为浏览器等）打开后再添加。</span>';
+    doBtn.style.display = 'none';
+  } else if(isIOS()){
+    title.textContent = '添加到 iPhone / iPad 桌面';
+    body.innerHTML = 'iOS 没有自动安装入口，请按下面 3 步操作：<br><br>' +
+      '<b>1.</b> 点浏览器底部的 <span style="background:#F3F4F6;padding:2px 8px;border-radius:6px">分享</span> 图标<br>' +
+      '<b>2.</b> 在弹出的菜单里选「<b>添加到主屏幕</b>」<br>' +
+      '<b>3.</b> 确认名称为「<b>网格巡查</b>」，点右上角「添加」';
+    doBtn.style.display = 'none';
+  } else if(deferredPWAInstall){
+    title.textContent = '安装到桌面';
+    body.innerHTML = '点击下方「<b>添加到桌面</b>」按钮，浏览器会弹出「安装」对话框，确认即可。';
+    doBtn.style.display = 'block';
+  } else {
+    title.textContent = '添加到桌面';
+    body.innerHTML = '请用浏览器右上角 <span style="background:#F3F4F6;padding:2px 8px;border-radius:6px">⋮</span> 菜单里的' +
+      '「<b>安装应用</b>」或「<b>添加到主屏幕</b>」。<br><br>' +
+      '<span style="color:#6B7280">若菜单里没有这两项，通常是当前用的不是 Chrome/Edge 等支持安装的浏览器，或已在其他浏览器里打开本页。</span>';
+    doBtn.style.display = 'none';
+  }
+  // ⚠️ 用 style.display，不能用 classList：本元素有内联 display:none，class 移不掉它
+  m.style.display = 'flex';
+}
+// ⚠️ 必须用**事件委托**，不能用 getElementById().onclick：
+//    引导浮层（#add-home-modal）的 HTML 排在**本段脚本之后**，
+//    脚本执行时 #add-home-do / #add-home-close 还是 null，
+//    直接绑定会静默失败（安卓实测：「我知道了」按了没反应，浮层关不掉）。
+//    委托挂在 document 上，与 DOM 先后顺序无关，以后挪动 HTML 也不会再坏。
+document.addEventListener('click', (e) => {
+  const t = e.target;
+  if(!t || !t.id) return;
+  if(t.id === 'btn-add-home'){ showAddHomeModal(); return; }
+  if(t.id === 'add-home-close'){ document.getElementById('add-home-modal').style.display = 'none'; return; }
+  if(t.id === 'add-home-do'){
+    (async () => {
+      if(!deferredPWAInstall) return;
+      try{
+        deferredPWAInstall.prompt();
+        const r = await deferredPWAInstall.userChoice;
+        if(r && r.outcome === 'accepted') document.getElementById('add-home-modal').style.display = 'none';
+      }catch(e){}
+      deferredPWAInstall = null;
+    })();
+  }
+});
+// 已安装时改下入口卡片的提示文案
+if(isInStandalone()){
+  const h = document.getElementById('add-home-hint');
+  if(h) h.textContent = '已装到桌面 · 点手机桌面图标进入';
+}
+
+// 注册极简 SW —— 只为满足 Android Chrome 「添加到主屏幕」→ 安装条件；
+// 不拦截任何请求（见 /sw.js），对业务零影响。注册失败（HTTP / HTTPS 不匹配等）静默。
+if('serviceWorker' in navigator){
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});
+  });
+}
 </script>
+
+<!-- 添加到桌面引导浮层（底部 sheet） -->
+<!-- ⚠️ 显示/隐藏**必须用 style.display 控制**，不能靠 class="hidden"：
+     本元素自带内联 `display:none`，而 .hidden 只是 class，优先级低于内联样式，
+     classList.remove('hidden') 移不掉内联的 display:none —— 曾因此点了「添加到手机桌面」
+     完全没反应（安卓实测）。 -->
+<div id="add-home-modal" style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:none;align-items:flex-end;justify-content:center">
+  <div style="background:#fff;border-radius:20px 20px 0 0;padding:22px 20px 30px;max-width:420px;width:100%;box-shadow:0 -8px 24px rgba(0,0,0,.18)">
+    <div id="add-home-title" style="font-size:18px;font-weight:700;margin-bottom:10px">添加到手机桌面</div>
+    <div id="add-home-body" style="font-size:14px;color:#374151;line-height:1.8"></div>
+    <button id="add-home-do" style="display:none;width:100%;margin-top:16px;padding:14px;background:#1D4ED8;color:#fff;border:none;border-radius:14px;font-size:16px;font-weight:600">添加到桌面</button>
+    <button id="add-home-close" style="margin-top:8px;width:100%;padding:12px;background:transparent;border:none;color:#6B7280;font-size:14px">我知道了</button>
+  </div>
+</div>
 </body>
 </html>
