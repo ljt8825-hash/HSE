@@ -7,7 +7,7 @@
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-09-18.29">
+<meta name="hse-build" content="2026-09-18.30">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -806,8 +806,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
      读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
    - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
    - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
-<script src="./config.js?v=2026-09-18.28"></script>
-<script src="./app.js?v=2026-09-18.28"></script>
+<script src="./config.js?v=2026-09-18.29"></script>
+<script src="./app.js?v=2026-09-18.29"></script>
 <script>
 /* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
 (function(){
@@ -1433,7 +1433,7 @@ function refreshHomeStats(){
   setBadge("badge-review", toReview.length);
   const todo = $("#todo-list");
   const lines = [];
-  unfinished.slice(0,2).forEach(r => lines.push("· " + r.personName + " " + r.behavior + "，尚未完成整改"));
+  unfinished.slice(0,2).forEach(r => lines.push("· " + (r.personName || "未指定") + " " + (r.behavior || "") + "，尚未完成整改"));
   pending.filter(r => r.transferAdminId === session.id).slice(0,2).forEach(r => lines.push("· 收到转派任务：" + r.behavior + "（来自 " + r.checkerName + "）"));
   // 后端上报失败/未完成 → 必须让用户可见（记录还在本机，但尚未进飞书台账）
   const unsynced = db.records.filter(r => r.syncState && r.syncState !== "synced");
@@ -2129,7 +2129,7 @@ function showDone(rec, title){
   const rows = [];
   rows.push('<div style="font-size:var(--fs-body);font-weight:600;color:var(--primary)">记录编号　' + rec.no + "</div>");
   if(rec.type === "三违"){
-    rows.push('<div class="info-line">违章人员：' + esc(rec.personName) + "</div>");
+    rows.push('<div class="info-line">违章人员：' + esc(rec.personName || "未指定") + "</div>");
     rows.push('<div class="info-line">三违行为：' + esc(rec.behavior) + "</div>");
   } else {
     rows.push('<div class="info-line">巡查结果：' + esc(rec.patrolResult) + "</div>");
@@ -2168,7 +2168,7 @@ function recordCard(rec, opts){
   card.innerHTML =
     '<div class="r-top">' + statusChip(rec) + syncChip(rec) + '<span style="font-size:var(--fs-sub);color:var(--t4)">' + fmtTime(rec.time).slice(11) + "</span></div>" +
     '<div class="r-title">' + esc(rec.type === "三违" ? rec.behavior : "普通巡查 · " + rec.patrolResult) + "</div>" +
-    '<div class="r-sub">' + (rec.personName ? esc(rec.personName) + " · " + esc(rec.personJob) + "　" : "") + esc(rec.no) + "</div>";
+    '<div class="r-sub">' + (rec.personName ? esc(rec.personName) + " · " + esc(rec.personJob || "—") + "　" : "") + esc(rec.no) + "</div>";
   if(rec.scenePhoto){
     const img = document.createElement("img");
     img.className = "photo-thumb"; img.src = rec.scenePhoto; img.alt = "现场照片";
@@ -2274,8 +2274,8 @@ function renderDetail(rec, from){
   b.appendChild(mk('<div class="card" style="display:flex;flex-direction:column;gap:8px">' +
     '<div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:var(--fs-body);font-weight:600;color:var(--primary)">' + esc(rec.no) + "</span>" + statusChip(rec) + "</div>" +
     '<div style="font-size:var(--fs-h2);font-weight:700">' + esc(rec.type === "三违" ? rec.behavior : "普通巡查 · " + rec.patrolResult) + "</div>" +
-    (rec.personName ? '<div style="font-size:var(--fs-body);color:var(--t3)">' + esc(rec.personName) + " · " + esc(rec.personJob) + " · " + esc(rec.personTeam) + "</div>" : "") +
-    '<div style="font-size:var(--fs-body);color:var(--t2);line-height:1.9">检查人：' + esc(rec.checkerName) + "<br>检查时间：" + fmtTime(rec.time) + "<br>定位：" + esc(rec.location ? rec.location.addr : "—") + "</div></div>"));
+    (rec.personName ? '<div style="font-size:var(--fs-body);color:var(--t3)">' + esc(rec.personName) + " · " + esc(rec.personJob || "—") + " · " + esc(rec.personTeam || "—") + "</div>" : "") +
+    '<div style="font-size:var(--fs-body);color:var(--t2);line-height:1.9">检查人：' + esc(rec.checkerName || "—") + "<br>检查时间：" + fmtTime(rec.time) + "<br>定位：" + esc(rec.location ? rec.location.addr : "—") + "</div></div>")));
   if(rec.personName){
     // 违章人员信息取记录快照（选人时从花名册写入），不依赖演示花名册
     const pc = mk('<div class="person-row" style="cursor:default"></div>');
@@ -2327,7 +2327,7 @@ function openRectify(rec, from){
   rectifying = rec; rectifyFrom = from || "view-home";
   $("#rf-chip").className = "chip " + (rec.status === "transferred" ? "yellow" : "red");
   $("#rf-chip").innerHTML = '<span class="dot"></span>' + (rec.status === "transferred" ? "已转整改" : "未完成");
-  $("#rf-summary").textContent = rec.behavior + " · " + rec.personName;
+  $("#rf-summary").textContent = (rec.behavior || "—") + " · " + (rec.personName || "未指定");
   $("#after-photo-box").innerHTML = "尚未拍摄";
   $("#btn-submit-rectify").disabled = true;
   $("#rf-back").onclick = () => showView(rectifyFrom);
@@ -2535,7 +2535,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const c = $("#done-card");
     c.innerHTML = '<div style="font-size:var(--fs-body);font-weight:600;color:var(--primary)">记录编号　' + rec.no + "</div>" +
       '<div class="info-line">三违行为：' + esc(rec.behavior) + "</div>" +
-      '<div class="info-line">违章人员：' + esc(rec.personName) + "</div>" +
+      '<div class="info-line">违章人员：' + esc(rec.personName || "未指定") + "</div>" +
       '<div class="info-line">状态：<span style="color:var(--danger);font-weight:600">未完成</span>　请到「巡查台账」继续整改</div>';
     $("#btn-done-home").onclick = () => { enterHome(); };
     showView("done");
@@ -2602,7 +2602,7 @@ function openEntry(go){
       recs.slice(0,5).forEach(r => {
         const row = document.createElement("div");
         row.className = "check-line"; row.style.cursor = "pointer";
-        row.innerHTML = "<span>" + esc(r.personName + " · " + r.behavior) + "</span>" + (r.status === "unfinished" ? '<span style="color:var(--danger);font-weight:600;font-size:var(--fs-sub)">未完成</span>' : '<span style="color:var(--success);font-weight:600;font-size:var(--fs-sub)">已完成</span>');
+        row.innerHTML = "<span>" + esc((r.personName || "未指定") + " · " + (r.behavior || "—")) + "</span>" + (r.status === "unfinished" ? '<span style="color:var(--danger);font-weight:600;font-size:var(--fs-sub)">未完成</span>' : '<span style="color:var(--success);font-weight:600;font-size:var(--fs-sub)">已完成</span>');
         row.onclick = () => renderDetail(r, "view-sub-checks");
         g.appendChild(row);
       });
@@ -2677,10 +2677,17 @@ function showAddHomeModal(){
     body.innerHTML = '点击下方「<b>添加到桌面</b>」按钮，浏览器会弹出「安装」对话框，确认即可。';
     doBtn.style.display = 'block';
   } else {
-    title.textContent = '添加到桌面';
-    body.innerHTML = '请用浏览器右上角 <span style="background:#F3F4F6;padding:2px 8px;border-radius:6px">⋮</span> 菜单里的' +
-      '「<b>安装应用</b>」或「<b>添加到主屏幕</b>」。<br><br>' +
-      '<span style="color:#6B7280">若菜单里没有这两项，通常是当前用的不是 Chrome/Edge 等支持安装的浏览器，或已在其他浏览器里打开本页。</span>';
+    // ⚠️ 这一支是生产环境里**绝大多数用户**第一次会走到的情况：
+    // Chrome 安卓要求「用户停留 ≥30s + 同域名访问 ≥2 次」才会触发 beforeinstallprompt；
+    // 没满足时浏览器不会给我们事件，所以这里只能用 ⋮ 菜单手动装。
+    // 文案必须给出**具体可点的菜单项**，不能只说"用浏览器菜单"。
+    title.textContent = '用浏览器菜单安装';
+    body.innerHTML =
+      '请按下面任一方式装到桌面：<br><br>' +
+      '<b>· Chrome 浏览器</b>：右上角 <span style="background:#F3F4F6;padding:2px 8px;border-radius:6px">⋮</span> → ' +
+      '「<b>添加到主屏幕</b>」（新版 Chrome 也叫「<b>安装应用</b>」，二选一即可）<br>' +
+      '<b>· 华为/小米/三星浏览器</b>：⋮ → 「<b>添加到桌面</b>」或「<b>桌面快捷方式</b>」<br><br>' +
+      '<span style="color:#6B7280">提示：第一次访问 Chrome 通常不会主动弹一键安装按钮，需要停留 30 秒以上、再来一次才会出现「安装应用」按钮（这是 Chrome 自己的策略，不是本页的问题）。</span>';
     doBtn.style.display = 'none';
   }
   // ⚠️ 用 style.display，不能用 classList：本元素有内联 display:none，class 移不掉它
