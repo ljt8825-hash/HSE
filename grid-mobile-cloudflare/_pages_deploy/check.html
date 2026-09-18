@@ -7,7 +7,7 @@
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-09-18.31">
+<meta name="hse-build" content="2026-09-18.32">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -332,6 +332,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
 #add-home-do:disabled{opacity:.6}
 #add-home-close:active{background:#F3F4F6;border-radius:12px}
 .hidden{display:none!important}
+/* 离线模式顶部提示（现场断网凭缓存身份进入时显示） */
+#offline-bar{position:fixed;top:0;left:0;right:0;z-index:9998;background:var(--warn-soft);color:#92400E;font-size:var(--fs-body);font-weight:600;text-align:center;padding:10px 16px calc(10px + env(safe-area-inset-top))}
 /* file input 专用：视觉隐藏但保持渲染。不能用 display:none —— 老版 X5/部分安卓 WebView
    会拒绝调起 display:none 的 file input（点了「从相册上传」没反应）；
    程序化 .click() 与 Playwright setInputFiles 均不受 pointer-events:none 影响 */
@@ -806,8 +808,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
      读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
    - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
    - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
-<script src="./config.js?v=2026-09-18.29"></script>
-<script src="./app.js?v=2026-09-18.29"></script>
+<script src="./config.js?v=2026-09-18.32"></script>
+<script src="./app.js?v=2026-09-18.32"></script>
 <script>
 /* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
 (function(){
@@ -1120,6 +1122,20 @@ function nextNo(){
 //   部门或职位含"公司" → 公司管理人员（搜全公司花名册 + 自己处理/转责任乡镇）
 //   其余 → fail-closed 降级页（不给权限）
 let session = null;   // 当前登录用户对象
+// ===== 离线兜底（CF-WPS-…）：本地缓存一次身份快照，/me 拿不到时直入，现场断网也能巡查 =====
+let offlineMode = false;              // true = 当前凭本机缓存身份进入（联网后会刷新）
+const H5_IDENTITY_KEY = "h5_identity_cache";
+function readCachedIdentity(){
+  try{
+    const s = JSON.parse(localStorage.getItem(H5_IDENTITY_KEY) || "null");
+    return (s && s.id && s.name && s.role) ? s : null;
+  }catch(e){ return null; }
+}
+function renderOfflineBar(){
+  const bar = $("#offline-bar");
+  if(!bar) return;
+  bar.classList.toggle("hidden", !offlineMode);
+}
 let gps = null;       // {lat,lng,addr}（不可命名 location：顶层 let location 会因 window.location 不可配置而 SyntaxError，整段脚本失效）
 let draft = {};       // 进行中的检查草稿
 
@@ -1233,6 +1249,17 @@ async function boot(){
   const r = await mobileApi("/api/mobile/me");
   if(r.status === 401){ redirectToLogin(); return; }  // mobileApi 内已清理失效会话
   if(r.status !== 200 || !r.body.success){
+    // 离线兜底（现场断网也要能巡查）：已登录过且本机有身份快照 → 直接进入，记录离线暂存、联网自动补传
+    const cached = readCachedIdentity();
+    if(cached){
+      offlineMode = true;
+      session = cached;
+      STORE_KEY = "hse_check_v1_" + session.id;
+      loadDB();
+      renderOfflineBar();
+      enterHome();
+      return;
+    }
     // 保留登录态：避免「后端抖动 → 清会话 → 自动重登 → 再抖动」的死循环
     $("#boot-msg").textContent = "身份服务暂不可用，请稍后重试。";
     const b = $("#btn-boot-login");
@@ -1242,6 +1269,10 @@ async function boot(){
     return;
   }
   session = buildSession(r.body.employee || {});
+  // 联机拿到最新身份：刷新本机快照（离线兜底用），并解除离线提示
+  offlineMode = false;
+  try{ localStorage.setItem(H5_IDENTITY_KEY, JSON.stringify(session)); }catch(e){}
+  renderOfflineBar();
   if(!session){
     $("#boot-msg").textContent = "当前账号不在网格长信息台账或分级未配置，请联系管理员在台账中维护（手机号+分级）。";
     $("#btn-boot-login").textContent = "退出登录";
@@ -2275,7 +2306,7 @@ function renderDetail(rec, from){
     '<div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:var(--fs-body);font-weight:600;color:var(--primary)">' + esc(rec.no) + "</span>" + statusChip(rec) + "</div>" +
     '<div style="font-size:var(--fs-h2);font-weight:700">' + esc(rec.type === "三违" ? rec.behavior : "普通巡查 · " + rec.patrolResult) + "</div>" +
     (rec.personName ? '<div style="font-size:var(--fs-body);color:var(--t3)">' + esc(rec.personName) + " · " + esc(rec.personJob || "—") + " · " + esc(rec.personTeam || "—") + "</div>" : "") +
-    '<div style="font-size:var(--fs-body);color:var(--t2);line-height:1.9">检查人：' + esc(rec.checkerName || "—") + "<br>检查时间：" + fmtTime(rec.time) + "<br>定位：" + esc(rec.location ? rec.location.addr : "—") + "</div></div>")));
+    '<div style="font-size:var(--fs-body);color:var(--t2);line-height:1.9">检查人：' + esc(rec.checkerName || "—") + "<br>检查时间：" + fmtTime(rec.time) + "<br>定位：" + esc(rec.location ? rec.location.addr : "—") + "</div></div>"));
   if(rec.personName){
     // 违章人员信息取记录快照（选人时从花名册写入），不依赖演示花名册
     const pc = mk('<div class="person-row" style="cursor:default"></div>');
@@ -2784,5 +2815,6 @@ if('serviceWorker' in navigator){
     <button id="add-home-close" style="margin-top:8px;width:100%;padding:12px;background:transparent;border:none;color:#6B7280;font-size:14px">我知道了</button>
   </div>
 </div>
+<div id="offline-bar" class="hidden">离线模式 · 已用本机缓存进入，记录先存本机，联网后自动上传</div>
 </body>
 </html>
