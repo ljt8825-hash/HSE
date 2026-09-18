@@ -7,7 +7,7 @@
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-09-18.30">
+<meta name="hse-build" content="2026-09-18.31">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -2364,6 +2364,18 @@ function submitRectify(){
 document.addEventListener("DOMContentLoaded", () => {
   // 启动：验证登录会话并自动识别角色
   boot();
+
+  // ===== 离线自动补传：有记录未同步时，网络一恢复 / 兜底轮询就自动上传（幂等安全，幂等键已在 makeRecord 固定）=====
+  let autoSyncBusy = false;
+  const tryAutoSync = async () => {
+    if(!db || autoSyncBusy) return;
+    if(navigator.onLine === false) return;
+    if(!db.records.some(r => r.syncState !== "synced")) return;
+    autoSyncBusy = true;
+    try { await retryPendingSync(); } finally { autoSyncBusy = false; }
+  };
+  window.addEventListener("online", tryAutoSync);   // 网络一恢复立即补传
+  setInterval(tryAutoSync, 40000);                  // 兜底：页面开着但网络悄然恢复（未触发 online）时，每 40s 试一次
 
   // 首页
   $("#btn-start").onclick = startCheck;
