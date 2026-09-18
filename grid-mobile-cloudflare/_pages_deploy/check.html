@@ -7,7 +7,7 @@
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-09-18.28">
+<meta name="hse-build" content="2026-09-18.29">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -129,6 +129,9 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
 .page{display:flex;flex-direction:column;padding:var(--pad-card);gap:var(--gap);
   flex:1 1 0%;min-height:0;overflow-y:auto;overflow-x:hidden;
   overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+/* 桌面端隐藏中间 .page 的内部滚动条（移动端触摸滚动本就不显示） */
+.page::-webkit-scrollbar{display:none}
+.page{scrollbar-width:none;-ms-overflow-style:none}
 .page.center{align-items:stretch}
 .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r-card);padding:var(--pad-card)}
 .btn-primary{display:flex;align-items:center;justify-content:center;height:var(--h-btn);border-radius:var(--r-btn);background:var(--primary);color:#fff;font-size:var(--fs-btn);font-weight:600;border:none;cursor:pointer;gap:var(--gap);box-shadow:0 6px 16px -2px rgba(29,78,216,.25)}
@@ -306,6 +309,28 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
 .seg .seg-item{flex:1;display:flex;align-items:center;justify-content:center;border-radius:calc(var(--h-btn-sm) / 2 - 4px);font-size:var(--fs-body);font-weight:500;color:var(--t3);cursor:pointer;border:none;background:none;font-family:inherit}
 .seg .seg-item.active{background:var(--primary);color:#fff;font-weight:600}
 .ro-tag{background:#F3F4F6;color:var(--t3);font-size:var(--fs-cap);font-weight:400;padding:5px 10px;border-radius:var(--r-pill)}
+/* ===== 「添加到手机桌面」：点击必须有**看得见**的动态反馈 =====
+   现场反馈：「点了这个按钮，完全没有动态，我怎么知道点没点中」。
+   三层反馈，缺一不可：
+     ① 按下瞬间：卡片压暗 + 微缩放（:active 在部分安卓 WebView 上不生效，
+        故 JS 同时加 .loading 类兜底改背景）
+     ② 加载中：右侧箭头换成转圈 spinner，副标题改成「正在打开…」
+     ③ 浮层：从底部滑入 + 遮罩淡入（不瞬间蹦出，视觉上确认操作已被接收） */
+#btn-add-home{transition:transform .12s ease,background-color .12s ease}
+#btn-add-home:active,#btn-add-home.loading{transform:scale(.985);background:#F3F4F6}
+#add-home-arrow,#add-home-spin{display:block}
+#add-home-spin{display:none;width:16px;height:16px;border:2px solid #D1D5DB;border-top-color:var(--primary);border-radius:50%;animation:hseSpin .7s linear infinite}
+#btn-add-home.loading #add-home-spin{display:block}
+#btn-add-home.loading #add-home-arrow{display:none}
+@keyframes hseSpin{to{transform:rotate(360deg)}}
+#add-home-modal{animation:hseFade .18s ease}
+#add-home-modal>div{animation:hseSlideUp .24s cubic-bezier(.2,.8,.3,1)}
+@keyframes hseFade{from{opacity:0}to{opacity:1}}
+@keyframes hseSlideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+#add-home-do{transition:transform .12s ease,opacity .12s ease}
+#add-home-do:active{transform:scale(.985);opacity:.88}
+#add-home-do:disabled{opacity:.6}
+#add-home-close:active{background:#F3F4F6;border-radius:12px}
 .hidden{display:none!important}
 /* file input 专用：视觉隐藏但保持渲染。不能用 display:none —— 老版 X5/部分安卓 WebView
    会拒绝调起 display:none 的 file input（点了「从相册上传」没反应）；
@@ -725,7 +750,11 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
     <div class="card" style="cursor:pointer" id="btn-add-home">
       <div style="display:flex;align-items:center;justify-content:space-between">
         <div style="font-size:var(--fs-title);font-weight:600">添加到手机桌面</div>
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 5l7 7-7 7" stroke="#9CA3AF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <!-- 右侧图标位：常态显示箭头，点击后由 CSS 换成转圈（见 #btn-add-home.loading） -->
+        <div style="display:flex;align-items:center;justify-content:center;width:18px;height:18px;flex:0 0 18px">
+          <svg id="add-home-arrow" width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 5l7 7-7 7" stroke="#9CA3AF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <div id="add-home-spin"></div>
+        </div>
       </div>
       <div style="font-size:var(--fs-sub);color:var(--t3);margin-top:2px" id="add-home-hint">点桌面图标直接进入，下次打开自动登录</div>
     </div>
@@ -777,8 +806,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
      读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
    - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
    - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
-<script src="./config.js?v=2026-09-18.27"></script>
-<script src="./app.js?v=2026-09-18.27"></script>
+<script src="./config.js?v=2026-09-18.28"></script>
+<script src="./app.js?v=2026-09-18.28"></script>
 <script>
 /* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
 (function(){
@@ -2665,20 +2694,49 @@ function showAddHomeModal(){
 document.addEventListener('click', (e) => {
   const t = e.target;
   if(!t || !t.id) return;
-  if(t.id === 'btn-add-home'){ showAddHomeModal(); return; }
+  if(t.id === 'btn-add-home'){ pressAddHome(t); return; }
   if(t.id === 'add-home-close'){ document.getElementById('add-home-modal').style.display = 'none'; return; }
-  if(t.id === 'add-home-do'){
-    (async () => {
-      if(!deferredPWAInstall) return;
-      try{
-        deferredPWAInstall.prompt();
-        const r = await deferredPWAInstall.userChoice;
-        if(r && r.outcome === 'accepted') document.getElementById('add-home-modal').style.display = 'none';
-      }catch(e){}
-      deferredPWAInstall = null;
-    })();
-  }
+  if(t.id === 'add-home-do'){ doAddHome(t); return; }
 });
+
+// 点击「添加到手机桌面」：先给一段**看得见**的加载态（转圈 + 副标题变化），
+// 再弹引导浮层。瞬时弹窗在手机上很容易被当成「没点上」，现场就是这么反馈的。
+let addHomeBusy = false;
+function pressAddHome(card){
+  if(addHomeBusy) return;
+  addHomeBusy = true;
+  const hint = document.getElementById('add-home-hint');
+  const oldHint = hint ? hint.textContent : '';
+  card.classList.add('loading');
+  if(hint) hint.textContent = '正在打开…';
+  setTimeout(() => {
+    card.classList.remove('loading');
+    if(hint) hint.textContent = oldHint;   // 已安装时的文案由下面统一维护
+    addHomeBusy = false;
+    showAddHomeModal();
+  }, 260);
+}
+// 点浮层里的「添加到桌面」：按钮进入 loading（文案 + 禁用），等系统安装框出结果再恢复
+async function doAddHome(btn){
+  if(!deferredPWAInstall || btn.disabled) return;
+  const oldText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '正在唤起…';
+  try{
+    deferredPWAInstall.prompt();
+    const r = await deferredPWAInstall.userChoice;
+    if(r && r.outcome === 'accepted'){
+      document.getElementById('add-home-modal').style.display = 'none';
+      const h = document.getElementById('add-home-hint');
+      if(h) h.textContent = '已装到桌面 · 点手机桌面图标进入';
+    }
+  }catch(e){}
+  finally{
+    btn.disabled = false;
+    btn.textContent = oldText;
+    deferredPWAInstall = null;
+  }
+}
 // 已安装时改下入口卡片的提示文案
 if(isInStandalone()){
   const h = document.getElementById('add-home-hint');
