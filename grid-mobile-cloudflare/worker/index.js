@@ -2374,9 +2374,10 @@ async function handlePatrolRecords(request, env) {
    存储：与主台账同表，新增 9 个文本列（TODO_FIELDS），由 ensureTodoFields() 幂等创建。
    一条巡查记录最多对应一条待办，语义一致、无需额外建表。
 
-   三个接口：
+   四个接口：
      POST /api/mobile/assign            指派（创建/覆盖待办）
      GET  /api/mobile/inbox             我的待办（按 整改接收人ID 过滤）
+     GET  /api/mobile/dispatched        我派发出去的未完成记录（按 指派人ID 过滤）
      POST /api/mobile/assign/complete   完成待办（仅接收人可操作）
    ============================================================================ */
 
@@ -2614,6 +2615,60 @@ async function handleInbox(request, env) {
   }, 200, corsHeaders(origin));
 }
 
+// ---- GET /api/mobile/dispatched（我派发出去的、尚未整改完成的记录）----
+// 口径（2026-09-19 用户定）：只列「我派出去、对方还没整改完」的，**不按自然月过滤** ——
+// 上个月派的到今天没整改完，这个月继续挂在列表里，直到整改完成才消失。
+// 与 /api/mobile/inbox 互为镜像：
+//   inbox      = 整改接收人ID == 我（别人派给我的）
+//   dispatched = 指派人ID     == 我（我派出去的）
+// 门槛在前端：只有实际会派发的角色（公司管理 / 乡镇作业中心经理）挂这个页签；
+// 管理员不转派（前端转派页对管理员直接跳过），列表恒空，故不给它挂。
+async function handleDispatched(request, env) {
+  const origin = corsOrigin(request, env);
+  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
+  if (request.method !== 'GET') return errRes('METHOD_NOT_ALLOWED', '不支持的请求方法', 405, corsHeaders(origin));
+  if (!env.WORKER_SESSION_SECRET) return errRes('SESSION_NOT_CONFIGURED', '会话密钥未配置', 503, corsHeaders(origin));
+  const payload = await verifyWorkerSession(bearerToken(request), env.WORKER_SESSION_SECRET);
+  if (!payload) return errRes('UNAUTHORIZED', '未认证或登录态失效', 401, corsHeaders(origin));
+
+  const adapter = getAdapter(env);
+  const cfg = await storageConfig(env);
+  const target = patrolTarget(env, cfg);
+  if (!target) return errRes('PATROL_TARGET_NOT_CONFIGURED', '巡查目标表未配置', 503, corsHeaders(origin));
+
+  const me = String(payload.sub || '');
+  await ensureTodoFields(env, cfg.fileId, target.sheetId);
+
+  // 与 inbox 同款取数：优先飞书原生 search（单次往返），失败再退回全表扫描兜底。
+  // 退路必须保留：指派人ID 列在极早的老数据上可能为空，search 不匹配时会返回空集而不是报错，
+  // 所以兜底只在**抛异常**时走（列不存在 / search 列不过滤）。
+  let sent;
+  try {
+    sent = await adapter.searchRecords(env, cfg.fileId, target.sheetId, {
+      field: TODO_FIELDS.assignerId, value: me, maxPages: 5,
+    });
+  } catch {
+    let recs;
+    try { recs = await adapter.scanRecords(env, cfg.fileId, target.sheetId); }
+    catch { return errRes('WPS_UPSTREAM_ERROR', '派发记录暂不可用，请稍后再试', 502, corsHeaders(origin)); }
+    sent = recs.filter((r) => fieldText(r.fields[TODO_FIELDS.assignerId]) === me);
+  }
+
+  // 列表只放未完成的；已完成的只报个数（页面顶部做上下文提示），不占列表。
+  const open = sent.filter((r) => fieldText(r.fields[TODO_FIELDS.status]) !== TODO_STATUS.done);
+  const sortKey = (r) => fieldText(r.fields[TODO_FIELDS.assignedAt]);
+  open.sort((a, b) => String(sortKey(b)).localeCompare(String(sortKey(a))));
+
+  return jsonRes({
+    success: true, code: 'OK',
+    me: { id: me, name: String(payload.name || ''), role: String(payload.role || '') },
+    pending_count: open.length,   // 未整改完成条数（页签红点可直接取这个）
+    done_count: sent.length - open.length,  // 我派出去且已整改完成的条数
+    total: sent.length,
+    records: open.slice(0, PATROL_LIST_LIMIT).map((r) => todoView(r, false)),
+  }, 200, corsHeaders(origin));
+}
+
 // ---- POST /api/mobile/assign/complete ----
 // body: { record_id, note, photo_tokens? }
 // 权限：**仅接收人**（整改接收人ID == 我）可完成 —— 别人不能替他结案。
@@ -2769,6 +2824,7 @@ export default {
     // CF-WPS-36：整改待办（跨账号指派）
     if (p === '/api/mobile/assign') return handleAssign(request, env);
     if (p === '/api/mobile/inbox') return handleInbox(request, env);
+    if (p === '/api/mobile/dispatched') return handleDispatched(request, env);
     if (p === '/api/mobile/assign/complete') return handleAssignComplete(request, env);
     // CF-WPS-41：微信推送绑定（GET 状态 / POST 绑定或解绑）
     if (p === '/api/mobile/wx/status') return handleWxStatus(request, env);

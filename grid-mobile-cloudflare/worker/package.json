@@ -5,7 +5,8 @@
   "type": "module",
   "description": "H5 网格长巡查 Cloudflare Worker：飞书多维表格为唯一后端（2026-09-18 起已弃 WPS）。表 ID 按表名契约解析，换 base 仅改 FS_APP_TOKEN。离线测试：微信端登录闭环 + 飞书字段变换回归。",
   "scripts": {
-    "test": "node test/cfwps11.test.mjs && node test/cfwps19.test.mjs && node test/cfwps21.test.mjs && node test/cfwps22.test.mjs && node test/cfwps28-town-list.test.mjs && node test/cfwps29-two-model.test.mjs && node test/cfwps29b-contract.test.mjs && node test/cfwps30-feishu-typing.test.mjs && node test/cfwps31-cascade.test.mjs && node test/cfwps31b-wiring.test.mjs && node test/cfwps44-inbox-monthly.test.mjs",
+    "test": "node test/cfwps11.test.mjs && node test/cfwps19.test.mjs && node test/cfwps21.test.mjs && node test/cfwps22.test.mjs && node test/cfwps28-town-list.test.mjs && node test/cfwps29-two-model.test.mjs && node test/cfwps29b-contract.test.mjs && node test/cfwps30-feishu-typing.test.mjs && node test/cfwps31-cascade.test.mjs && node test/cfwps31b-wiring.test.mjs && node test/cfwps44-inbox-monthly.test.mjs && node test/cfwps45-dispatched.test.mjs",
+    "test:e2e": "node test/cfwps44-rectified-stat.mjs && node test/cfwps45-dispatch-tab.mjs",
     "mkdeploy": "python _scratch/mkdeploy.py",
     "drift": "node test/_t6c-deploy-drift.mjs",
     "build": "python _scratch/mkdeploy.py && node test/_t6c-deploy-drift.mjs",

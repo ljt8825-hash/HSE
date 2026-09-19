@@ -7,7 +7,7 @@
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-09-18.58">
+<meta name="hse-build" content="2026-09-19.59">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -307,8 +307,14 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
   padding:8px 16px calc(16px + env(safe-area-inset-bottom));
   background:linear-gradient(180deg,rgba(245,244,241,0) 0%,var(--bg) 36%);pointer-events:none}
 .tabbar-wrap .tabbar{pointer-events:auto}
-.tabbar{height:var(--h-tabbar);background:var(--card);border:1px solid var(--line);border-radius:var(--r-card);display:flex;align-items:stretch;justify-content:space-evenly;padding:0 24px;box-shadow:0 6px 18px -8px rgba(0,0,0,.18)}
-.tab-item{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:var(--fs-cap);color:var(--t4);cursor:pointer;border:none;background:none;font-family:inherit;position:relative}
+/* CF-WPS-45：底部导航由 4 个 tab 增到 5 个（新增「派发记录」），左右内边距 24px→12px。
+   360px 窄屏下 5 个 tab 的内可用宽度 = 360-32(wrap)-24(tabbar) = 304px，
+   最宽的标签「派发记录 / 整改任务 / 巡查台账」4 字 ×11px = 44px 仍有余量，不会换行。
+   注意 .tab-item 是 flex 项、min-width:auto，不会被压到换行；角标 right:-6px 溢出可见。 */
+.tabbar{height:var(--h-tabbar);background:var(--card);border:1px solid var(--line);border-radius:var(--r-card);display:flex;align-items:stretch;justify-content:space-evenly;padding:0 12px;box-shadow:0 6px 18px -8px rgba(0,0,0,.18)}
+/* white-space:nowrap 是给现场安卓机留的余量：系统字体缩放会把 11px 渲染得更大，
+   一旦标签被压到换行，5 个 tab 的导航栏高度会被撑破。禁止换行是唯一安全解。 */
+.tab-item{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:var(--fs-cap);color:var(--t4);cursor:pointer;border:none;background:none;font-family:inherit;position:relative;white-space:nowrap}
 .tab-item.active{color:var(--primary);font-weight:600}
 .tab-item svg{width:var(--icon-glyph);height:var(--icon-glyph)}
 /* CF-WPS-40：底部 tab 红色未读角标。此前 setBadge() 调用的三个 id 在 DOM 里都不存在，
@@ -810,6 +816,20 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
   <div class="page" id="my-checks-list"></div>
 </section>
 
+<!-- ============ 派发记录（CF-WPS-45）============
+     口径（2026-09-19 定）：只列「我派出去、对方还没整改完」的记录，**不按自然月过滤** ——
+     上月派出去的今天没整改完，这个月继续挂在这里，直到整改完成才消失。
+     页签只挂给实际会派发的角色（公司管理 / 乡镇作业中心经理）；
+     管理员不转派（转派页对管理员直接跳过），列表恒空，故不挂（见 applyDispatchTabGate）。 -->
+<section class="view has-tab" id="view-dispatch">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" data-back="home"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">派发记录</div><div style="width:40px"></div>
+  </div>
+  <div class="page" id="dispatch-list"></div>
+</section>
+
 <!-- ============ 我的整改 ============ -->
 <section class="view has-tab" id="view-my-rectify">
   <div class="statusbar"></div>
@@ -937,6 +957,9 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
     <button class="tab-item active" data-tab="home">
       <svg viewBox="0 0 24 24" fill="none"><path d="M3 10.5L12 3l9 7.5V21a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1v-10.5z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>首页
     </button>
+    <button class="tab-item" data-tab="dispatch" id="tab-dispatch" style="display:none">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M21.5 2.5L10.5 13.5M21.5 2.5l-7 19-4-8-8-4 19-7z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="tab-dispatch-label">派发记录</span><span class="tab-badge" id="badge-dispatch"></span>
+    </button>
     <button class="tab-item" data-tab="my-rectify" id="tab-rectify">
       <svg viewBox="0 0 24 24" fill="none"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="tab-rectify-label">整改任务</span><span class="tab-badge" id="badge-rectify"></span>
     </button>
@@ -956,8 +979,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
      读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
    - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
    - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
-<script src="./config.js?v=2026-09-18.58"></script>
-<script src="./app.js?v=2026-09-18.58"></script>
+<script src="./config.js?v=2026-09-19.59"></script>
+<script src="./app.js?v=2026-09-19.59"></script>
 <script>
 /* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
 (function(){
@@ -1330,7 +1353,7 @@ const $$ = s => Array.from(document.querySelectorAll(s));
 const selPersonMode = u => u.role === "经理" ? "two-step" : (u.role === "管理员" ? "direct" : "search");
 
 // 底部导航常驻的四个主屏（与微信一致：二级页面不显示，返回主屏即恢复）
-const TAB_VIEWS = ["home", "my-checks", "my-rectify", "me"];
+const TAB_VIEWS = ["home", "dispatch", "my-checks", "my-rectify", "me"];
 function syncTabbar(view){
   const on = TAB_VIEWS.includes(view);
   $("#tabbar-wrap").classList.toggle("hidden", !on);
@@ -1554,6 +1577,7 @@ function renderIdentity(){
   // 经理：下属检查入口在「我的」页；公司管理人员整改任务 Tab 显示"任务反馈"
   $("#btn-me-sub").style.display = session.role === "经理" ? "" : "none";
   $("#tab-rectify-label").textContent = session.role === "公司管理" ? "任务反馈" : "整改任务";
+  applyDispatchTabGate();   // CF-WPS-45：「派发记录」页签只给会派发的角色（公司管理 / 经理）
   // 强制刷新按钮：解决「页面卡在旧 JS / 旧组织树缓存」—— 现场人员极少主动重开浏览器，
   //   加这个按钮等于「一键等价于关闭重开」。
   //   三重保险：
@@ -1757,6 +1781,7 @@ function refreshHomeStats(){
   $("#stat-pending").textContent = pending.length;
   $("#stat-done").textContent = done.length;
   updateRectifiedStat();   // CF-WPS-44：先按本机值占位，服务端计数到手后 refreshInboxStats 会再刷一次
+  refreshDispatchBadge();  // CF-WPS-45：让「派发记录」页签角标在首页就可见，不必点进去才知道有活挂着
   const unfinished = mine.filter(r => r.status === "unfinished");
   setBadge("badge-checks", unfinished.length);
   setBadge("badge-rectify", pending.length);
@@ -1779,6 +1804,11 @@ function refreshHomeStats(){
 }
 
 // 把服务端 inbox 的待整改数并入首页统计与红点（异步，失败静默不影响主渲染）
+// 页签角标（异步，失败静默）：派发方在首页就能看到还有几条挂着没整改完
+async function refreshDispatchBadge(){
+  if(!session || DISPATCH_TAB_ROLES.indexOf(session.role) < 0){ setBadge("badge-dispatch", 0); return; }
+  try{ await loadDispatched(false); setBadge("badge-dispatch", inboxDispatchPending); }catch(e){ /* 拉取失败：不亮角标，不打断首页 */ }
+}
 async function refreshInboxStats(localPending, baseLines){
   try{
     const inbox = await loadInbox(false);          // 60s 缓存，不会每次进首页都回源
@@ -1798,6 +1828,109 @@ async function refreshInboxStats(localPending, baseLines){
   }catch(e){ /* inbox 拉取失败：保留本机统计，不打断首页 */ }
 }
 function setBadge(id, n){ const el = document.getElementById(id); if(!el) return; el.classList.toggle("hidden", !n); el.textContent = n; }
+
+/* ================= CF-WPS-45：派发记录（派发方视角） =================
+   配套服务端 GET /api/mobile/dispatched：只列「我派出去、对方还没整改完」的记录，
+   **不按自然月过滤** —— 上月派的今天没整改完，这个月继续挂在这里，直到整改完成才消失。
+   数据**全部来自服务端**：派发动作可能发生在另一个账号的手机上（对方是接收人），
+   本机 db.records 里根本没有这条，所以这里不走本机口径，也不做本机/服务端合并去重。 */
+let dispatchRecs = null, dispatchAt = 0, dispatchErr = "";
+let inboxDispatchPending = 0, inboxDispatchDone = 0;
+
+/* 角色门槛：只有真的会派发的角色才挂这个页签。
+   建单即指派（CF-WPS-43）把「指派人ID」写成调用者本人，而能成为调用者的只有
+   公司管理（全公司可派）与乡镇作业中心经理（派本中心下级）；管理员在前端走「不转派」
+   分支（转派页对管理员直接跳过），不会产生派发记录 ⇒ 给它挂一个恒空页签只会让人白点。 */
+const DISPATCH_TAB_ROLES = ["公司管理", "经理"];
+function applyDispatchTabGate(){
+  const btn = document.getElementById("tab-dispatch");
+  if(!btn) return;
+  const allowed = !!session && DISPATCH_TAB_ROLES.indexOf(session.role) >= 0;
+  btn.style.display = allowed ? "" : "none";
+}
+
+function dispatchedToRec(t){
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/.exec(String(t.inspection_time || t.assigned_at || ""));
+  const time = m ? new Date(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0)).getTime() : 0;
+  return {
+    id: "dis_" + t.record_id,
+    no: String(t.record_id || "").slice(-8),
+    type: t.is_violation === "是" ? "三违" : "巡查",
+    behavior: t.violation_desc || t.description || "—",
+    personName: t.violation_people || "",
+    time: time,
+    assigneeName: t.assignee_name || "",
+    town: t.town || t.todo_town || "",
+    todoStatus: t.todo_status || "",
+    assignedAt: t.assigned_at || "",
+  };
+}
+/* 挂账天数：派发当天 → 今天的自然日差。这条页的核心用途是追未整改项，
+   跨月还挂着的会显出大数字（≥30 天标红），一眼看出哪几条拖最久。 */
+function hangDays(assignedAt){
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(assignedAt || ""));
+  if(!m) return 0;
+  const d0 = new Date(+m[1], +m[2] - 1, +m[3]).getTime();
+  const n = new Date(); const d1 = new Date(n.getFullYear(), n.getMonth(), n.getDate()).getTime();
+  return Math.max(0, Math.round((d1 - d0) / 86400000));
+}
+async function loadDispatched(force){
+  if(!force && dispatchRecs && Date.now() - dispatchAt < SERVER_RECS_TTL) return dispatchRecs;
+  const r = await mobileApi("/api/mobile/dispatched", null, "GET");
+  if(r.status !== 200 || !r.body || !r.body.success){
+    dispatchRecs = null; dispatchAt = 0;
+    dispatchErr = (r.body && r.body.message) || ("HTTP " + r.status);
+    inboxDispatchPending = 0; inboxDispatchDone = 0;   // 失败不残留旧值，避免角标骗人
+    return null;
+  }
+  dispatchErr = "";
+  inboxDispatchPending = Number(r.body.pending_count) || 0;
+  inboxDispatchDone = Number(r.body.done_count) || 0;
+  dispatchRecs = (r.body.records || []).map(dispatchedToRec);
+  dispatchAt = Date.now();
+  return dispatchRecs;
+}
+function dispatchCard(rec){
+  const card = document.createElement("div");
+  card.className = "record-card";
+  const days = hangDays(rec.assignedAt);
+  const daysChip = days >= 1
+    ? '<span class="chip" style="margin-left:6px;background:' + (days >= 30 ? '#FEE2E2;color:#B91C1C' : '#EEF2FF;color:#4338CA') + '" title="从派发当天算起">挂账 ' + days + ' 天</span>'
+    : "";
+  const who = rec.assigneeName ? "派给 " + rec.assigneeName + (rec.town ? " · " + rec.town : "") : "未指定接收人";
+  card.innerHTML =
+    '<div class="r-top"><span class="chip" style="background:#FEF3C7;color:#B45309">待整改</span>' + daysChip +
+      '<span style="font-size:var(--fs-sub);color:var(--t4)">' + esc(rec.assignedAt || "") + "</span></div>" +
+    '<div class="r-title">' + esc(rec.type === "三违" ? rec.behavior : "普通巡查") + "</div>" +
+    '<div class="r-sub">' + esc(who) + "</div>" +
+    (rec.personName ? '<div class="r-sub">涉及人员 ' + esc(rec.personName) + "</div>" : "");
+  // 只读页：不给任何写入口 —— 整改必须由接收人本人完成，派发方不能替他结案
+  return card;
+}
+async function renderDispatch(){
+  const el = document.getElementById("dispatch-list");
+  if(!el) return;
+  el.innerHTML = '<div class="empty-tip">加载中…</div>';
+  const recs = await loadDispatched(true);
+  setBadge("badge-dispatch", inboxDispatchPending);
+  if(recs === null){
+    el.innerHTML = '<div class="empty-tip">派发记录暂时拉不到<br><span style="font-size:var(--fs-sub)">' + esc(dispatchErr || "请稍后重试") + "</span></div>";
+    return;
+  }
+  el.innerHTML = "";
+  const head = document.createElement("div");
+  head.className = "section-label";
+  head.textContent = "未整改完成 " + inboxDispatchPending + " 条" + (inboxDispatchDone ? "（另有 " + inboxDispatchDone + " 条已整改完成）" : "");
+  el.appendChild(head);
+  if(!recs.length){
+    const empty = document.createElement("div");
+    empty.className = "empty-tip";
+    empty.innerHTML = '派出去的都整改完成了<br><span style="font-size:var(--fs-sub)">跨月未整改的会一直显示在这里，直到完成为止</span>';
+    el.appendChild(empty);
+    return;
+  }
+  recs.forEach(r => el.appendChild(dispatchCard(r)));
+}
 // 我的下级姓名（台账「直接上级」解析结果，boot 时预加载）。
 // 说明：检查记录目前按账号隔离存在各自手机上，跨账号查看需后端记录接口；
 // 此处用于「本机记录是否属于我下级」的判断。
@@ -3058,6 +3191,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function openTab(tab){
     // 底部导航 = 顶层入口：重复点击回到该主屏（微信式），高亮由 showView → syncTabbar 统一维护
     if(tab === "home"){ enterHome(); return; }
+    if(tab === "dispatch") openEntry("dispatch");
     if(tab === "my-checks") openEntry("my-checks");
     if(tab === "my-rectify") openEntry("my-rectify");
     if(tab === "me") openEntry("me");
@@ -3286,6 +3420,11 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 function openEntry(go){
+  if(go === "dispatch"){
+    // CF-WPS-45：派发记录（服务端按「指派人ID == 我」过滤，进页面强制拉最新）
+    showView("dispatch");
+    renderDispatch();
+  }
   if(go === "my-checks"){
     // 台账 = 服务端已上报 + 本机待补传（见 renderMyChecks）
     showView("my-checks");
