@@ -55,9 +55,10 @@
 - 生产放行项（Worker 计划任务 / AI Provider 切换 / 生产库迁移 / Ollama 服务化 / Nginx 托管）均需用户独立授权
 - 开发栈停止可用 `scripts\stop-hse-ai.ps1`
 - 生产 5876 端口未触碰，归 HSE-Backend 计划任务（SYSTEM）管理，AI 工具禁止启停/重启 5876
-- 分批提交纪律（2026-09-17 立规）：积压改动一律**按域分批提交**，每批显式 `git add <路径>`，**禁用 `git add -A`**；提交前必跑 `git diff --cached --name-only | grep -iE "\.env|\.pem|\.key|credential|secret|token|uploads/"`（须为空）；提交后用 `git show --name-only --format="" <sha> | grep -iE ...` 复核；**只本地提交，push 需独立授权**
+- 分批提交纪律（2026-09-17 立规）：积压改动一律**按域分批提交**，每批显式 `git add <路径>`，**禁用 `git add -A`**；提交前必跑 `git diff --cached --name-only | grep -iE "\.env|\.pem|\.key|credential|secret|token|uploads/"`（须为空）；提交后用 `git show --name-only --format="" <sha> | grep -iE ...` 复核；**只本地提交，push 需独立授权**（2026-09-19 已就 CF-WPS-44 批次取得授权并推送至 origin/main）
 - `.gitignore` 正式运行脚本例外清单（2026-09-17）：`_*.ps1/_*.js/_*.txt` 等宽泛规则会误伤正式脚本，故显式保留反向例外 `!scripts/hse-ai-health.ps1`、`!scripts/stop-hse-ai.ps1`、`!scripts/pdf_render_png.py`、`!start-hse-ai.ps1`、`!start-hse-ai.bat`、`!server/scripts/ai12_runtime_probe.cjs`。**新增正式脚本落在被 `_*` 规则覆盖的路径下时，必须同步补例外**，否则会被静默忽略而不入库
 - 提交完整性铁律（2026-09-17 教训）：**提交 route（含 require）时必须连带提交其 controller/service**。分批提交曾产生「能 commit 但不能运行」的中间态——`routes/hse-dashboard.js` 等已在 HEAD 中 require 目标模块，但目标文件未跟踪，导致 HEAD 检出后 module not found。判定手段：`git cat-file -e "HEAD:<path>"` 权威确认；或提交后用依赖扫描脚本核对已跟踪文件所 require 的本地模块是否齐全
+- 工作区即发布源（2026-09-19 补）：5876 与 Cloudflare Pages 直接运行工作区、不经 git ⇒「线上在跑 ≠ 库里有源」。提交前必跑 `node tools/check-repo-source-integrity.mjs`（A/B 类须为 0）；发现未入库文件须**当批判定并补入库**，不得只登记不处理
 
 ## Engineering Conventions
 - '安全文化建设'台账页面在切换到尚无台账的月份时，自动以上一个有台账的月份为基准复制生成台账数据
@@ -87,6 +88,10 @@
 - PowerShell env 边界（2026-09-17）：每条 Shell 命令独立进程，`$env:PORT` 等设置**不跨命令持久**；启动后端/前端必须「同一命令内先 set env 再 node」；拆分两步会导致 node 用默认端口（如 5666）启动且无 AI env
 - 老 OCR 环境不可用（2026-09-17 现状）：传统 /recognize（ocr_ledger.py Tesseract + PyMuPDF）在 `.workbuddy` python 3.13.12（server/.env PYTHON_PATH）缺 fitz/tesseract 全链路失败；`.env` 属生产配置禁改 → 培训台账导入请走 AI 识图
 - 生产 5876 常驻（PID 实测 Program Files nodejs app.js）：多次端口排查确认 5876 由生产进程持有，AI 开发端仅用 5888/5173
+- 网格长巡查台账 inspectionDate 输出统一 YYYY-MM-DD（2026-09-18 冻结）：PG 模式 `siteMgmtService.formatGridInspectionRow` 须经 `formatInspectionDate` 规范化输出字符串，禁止原样返回 node-pg 的 JS Date（`date` 列 JSON 序列化成 `...T16:00:00.000Z` 会回退一天，致选 09 月出现 08-31）；WPS 镜像 DTO 本就 `YYYY-MM-DD`，两模式保持对齐；前端 `formatDateShort` 对含 T/Z/空格/冒号/加号的 ISO 串按本地时区换算，纯 `YYYY-MM-DD` 原样，禁用盲目截前 10 位
+- H5 手机端登录唯一权威来源 = **H5移动端身份表**（2026-09-18 冻结，用户口径）：= `tbl58t9kjyDlacSw`（9月台账 base 飞书多维 `WX9TbTqJKa7sywsgrU4cVoKdnXb`），8 列：序号/姓名/直接上级/所属部门/职位/网格长等级/手机号/分级（「分级」「直接上级」已 lark-cli 实测存在）。登录账号=手机号（11 位唯一命中，列名即「手机号」）；密码=姓名拼音首字母（小写，含姓氏特殊读音覆盖）+手机号后 4 位（函数派生，不用 password_hash）。三级角色=公司管理 / 乡镇作业中心经理 / 管理员（来自「分级」列）。登录现状 `worker/index.js` 读的正是此表（`FS_LEDGER_TABLE_ID`）→ **无需改代码/补列**；注意 `tblCyjmcA8XAVTdn`（带 password_hash 的历史「H5移动端身份表」）在本 base **不存在**。明细见 `docs/191副/①规则口径/2026-09-18_H5登录身份与主台账口径冻结.md`、`grid-mobile-cloudflare/docs/H5环节与飞书各表关联.md`
+- H5 主台账（2026-09-18 实测冻结）：**主台账 = `tbl5QiCv5Qbal044`「H5员工日常不安全行为台账」（12 条，17 列）**，base `WX9TbTqJKa7sywsgrU4cVoKdnXb`。17 列=序号/片区|班组/网格等级/日期(自动)/违章人员姓名/性别/年龄/项目采取措施/违章行为/整改后照片(附件)/司龄/检查人姓名/违章照片(附件)/车辆类型|保洁员/描述/备注/惩罚数额。H5 提交按主台账列名填写：提交人姓名→检查人姓名；网格/片区→片区|班组；网格长等级→网格等级；三违照片→违章照片；整改后照片→整改后照片；三违行为→违章行为；涉及人员→违章人员姓名/性别/年龄；措施/罚款→项目采取措施/惩罚数额；未三违时违章行为=「无三违行为」。4字段映射：问题描述→描述(补充进备注)；问题类型→三违进违章行为、非三违(一般问题/环境卫生/现场正常)进描述；是否三违→用违章行为有无表达；巡查人员ID=手机号→姓名入检查人姓名、手机号需留存入备注。
+- ⚠️ H5 飞书 base 表 ID 核对（2026-09-18 lark-cli 实测）：`FEISHU_SCHEMA.md`/代码 env 里的 `tblh1MHy3yjJIyiO`(巡查生产)、`tblYa9aQD1lhDV8s`(测试)、`tblCyjmcA8XAVTdn`(身份表)、`tblO3A9wDnA9Lm74` 在 base `WX9TbTqJKa7sywsgrU4cVoKdnXb` **均不存在**（陈旧）。真实表：身份表`tbl58t9kjyDlacSw`(68)、花名册`tbl2ZHdXX5d8R12a`(1291)、**主台账`tbl5QiCv5Qbal044`(12)**、规则表`tblnfVLGDPdiVwOB`(5)、表格视图`tbl5hz1RyHlO3C3l`(339)。**生产 env `FS_PATROL_PRODUCTION_TABLE_ID` 若仍指 `tblh1MHy3yjJIyiO` 需对齐到 `tbl5QiCv5Qbal044`**，否则 H5 提交不落主台账。
 
 ## Lessons Learned
 - koa-connect wrapper caused subtle ctx.state data loss; native Koa rewrite is required instead of wrapping Express middleware
@@ -96,3 +101,7 @@
 - AI-01 报告中声称存在的 `ai_generation_records` 表经实际数据库检查不存在，需以实际数据库状态为准
 - Ollama 路由缺陷：aiService.chat/chatStream 原按全局 config.provider 选端点，导致显式 provider='ollama' 调用打到远程 Grok 地址；修复为尊重 options.provider，Provider 实现显式传 provider: this.name
 - CPU 大模型超时口径：qwen2.5:7b 冷启动/生成约 60~125s，worker AI_TIMEOUT_MS=60000 偏紧；需进程级覆盖验证，配置默认值待治理
+- WPS 同步仅存储 short-lived object links (via wpsDbsheetAdapter.normalizeAttachments) instead of downloading and storing image bytes, causing HTTP 404 errors when links expire; image display failures occur for 337 new records from September 2026 onwards
+- H5 违章人档案拆列映射（2026-09-18 冻结）：主台账「H5员工日常不安全行为台账」tbl5QiCv5Qbal044 违章人信息按列落库——姓名→违章人员姓名、性别→性别、年龄→年龄、职位→车辆类型|保洁员（取自花名册 name/sex/age/job）。前端 toPatrolBody 下发 violation_sex/violation_age/violation_job，后端 validatePatrolBody 读取（上限 PATROL_ATTR_MAX=50）+record 三列映射。禁止再把「姓名,职位,班组」拼进 违章人员姓名 或 描述 列；描述 列括号内仅保留「姓名·班组」（班组无独立列）。三目标列原已在 FEISHU_FIELD_WHITELIST。专属文件 docs/191副/②交付报告/2026-09-18_违章人年龄性别职位落库映射修复.md
+- H5 主台账历史三字段回填已执行（2026-09-18，生产 tbl5QiCv5Qbal044）：张风江2行(recvvzeA34tEX7/recvvzeAfzuwcj)已填 男68乡镇保洁员 且违章人员姓名脏值清理为张风江；谢俊章(recvvzOra8DGBo)已填 男67人工片区长。联查花名册唯一命中。遗留：3条违章人员姓名=未指定未回填、张风江req重复写入。执行记录 docs/191副/②交付报告/2026-09-18_H5主台账历史违章人三字段回填.md
+- H5 现场巡查页已改三段式布局（2026-09-18，微信式）：html/body overflow:hidden + #app height:100dvh/overflow:hidden，.view.active flex:1/min-height:0，.page flex:1/overflow-y:auto（唯一滚动容器），顶部 statusbar+navbar flex:none 固定、底部 tabbar-wrap 为 #app 末尾 flex 行贴底。JS 本就在切视图时重置 .page.scrollTop，无需改 JS。hse-build→28。待重建前端 Pages 生效。执行记录 docs/191副/②交付报告/2026-09-18_H5现场巡查页面三段式布局改造.md
