@@ -448,12 +448,13 @@ async function onEditClosed(payload: { row: any; column: any }) {
 }
 
 // ===================== 表格列 =====================
-/** 巡查日期展示：统一为 yyyy-MM-dd；优先截取原字符串首 10 位，避免时区偏移 */
+/** 巡查日期展示：统一为 yyyy-MM-dd。纯 YYYY-MM-DD 直接返回；含时间/时区（ISO/T/Z 等）按本地时区换算，避免把 UTC 串截成昨日 */
 function formatDateShort(v: any): string {
   if (v == null || v === '') return '';
   const s = String(v).trim();
-  const m = s.match(/^\d{4}-\d{2}-\d{2}/);
-  if (m) return m[0];
+  if (/^\d{4}-\d{2}-\d{2}/.test(s) && !/[TZ\s:+]/.test(s.slice(0, 60))) {
+    return s.slice(0, 10);
+  }
   const d = new Date(s);
   if (!Number.isNaN(d.getTime())) {
     const y = d.getFullYear();
