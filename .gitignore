@@ -441,5 +441,21 @@ server/ai06_route_test.cjs
 # 真实账号一律不写进源码：脚本走 test/e2e-account.mjs（环境变量 → 本机此文件 → 报错）
 grid-mobile-cloudflare/**/test/_e2e-creds.local.json
 **/_e2e-creds.local.json
+# ===== grid-mobile-cloudflare PII/凭据探针隔离（2026-09-19 补全） =====
+# 说明：worker/test/_t* 为开发期探针（含真实员工手机号、飞书 app_secret、真实姓名、
+#   真实花名册/台账缓存 _t5d-data.json），均非回归测试（正式回归是 cfwps*.test.mjs，
+#   已入库）；含 PII 禁止入库。例外保留 _t6c-deploy-drift.mjs：部署漂移检测，纯逻辑、无 PII、已入库。
+grid-mobile-cloudflare/worker/test/_t*
+!grid-mobile-cloudflare/worker/test/_t6c-deploy-drift.mjs
+# 含真实号的 E2E 截图探针（PROBE_PHONE 兜底真实号）⇒ 禁入库
+grid-mobile-cloudflare/tools/shot-*.mjs
+# 其他一次性探针（非 _t 前缀）
+grid-mobile-cloudflare/worker/test/_who.mjs
+# 含红线点名真实号（尾号 0679）的正式回归测试 ⇒ 隔离防误提交；
+#   如需保留，请把它改走 test/e2e-account.mjs（env→本机文件）后再入库。
+grid-mobile-cloudflare/worker/test/cfwps30-feishu-typing.test.mjs
+# 测试快照产物（非源码，可能含真实台账落点）→ 不入库
+grid-mobile-cloudflare/worker/test/*-snapshot.json
+
 # ===== 临时目录（任何会话的工作暂存，禁入库） =====
 /_tmp/
