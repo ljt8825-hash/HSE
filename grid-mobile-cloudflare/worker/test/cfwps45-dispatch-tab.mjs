@@ -99,15 +99,21 @@ await page.route('**/api/mobile/**', (route) => {
 });
 
 /* ---------- 夹具注入：/api/mobile/dispatched 全部走本地夹具，不打真实网络 ---------- */
-let dispatchMode = 'ok';        // ok | empty | fail
+let dispatchMode = 'ok';        // ok | empty | never | real | fail
 let dispatchHits = 0;
 await page.route('**/api/mobile/dispatched**', (route) => {
   dispatchHits++;
+  if (dispatchMode === 'real') return route.continue();   // 放行到**真实生产后端**（仅 GET，只读）
   if (dispatchMode === 'fail') {
     return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ success: false, code: 'WPS_UPSTREAM_ERROR', message: '派发记录暂不可用' }) });
   }
   if (dispatchMode === 'empty') {
+    // 派过 3 条、全部已整改完成（total>0 但 pending=0）
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, code: 'OK', me: { id: 'x', name: 'x', role: '经理' }, pending_count: 0, done_count: 3, total: 3, records: [] }) });
+  }
+  if (dispatchMode === 'never') {
+    // 从未派发过（total=0）—— 与「都整改完了」是两件事，文案必须不同
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, code: 'OK', me: { id: 'x', name: 'x', role: '经理' }, pending_count: 0, done_count: 0, total: 0, records: [] }) });
   }
   return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(FIXTURE) });
 });
@@ -179,8 +185,50 @@ try {
   await page.evaluate(() => renderDispatch());
   await page.waitForTimeout(400);
   const emptyTxt = await txt('#dispatch-list');
-  assert(/派出去的都整改完成了/.test(emptyTxt), '⑨ 空列表 → 空态文案（不白屏）', emptyTxt.slice(0, 60));
+  assert(/派出去的都整改完成了/.test(emptyTxt), '⑨ 派过 3 条且全部闭环 → 空态文案「都整改完成了」（不白屏）', emptyTxt.slice(0, 60));
   assert(/另有 3 条已整改完成/.test(emptyTxt), '⑨ 空态仍显示已完成条数（上下文不丢）', emptyTxt.slice(0, 60));
+
+  // ⑨b 「从未派发过」（total=0）必须与「都整改完了」文案不同 ——
+  //     2026-09-19 生产验证时发现：4 个真实账号 total 全为 0，却显示「派出去的都整改完成了」，
+  //     会让从未派过活的人以为自己的活都闭环了。
+  dispatchMode = 'never';
+  await page.evaluate(() => { dispatchRecs = null; dispatchAt = 0; });
+  await page.evaluate(() => renderDispatch());
+  await page.waitForTimeout(400);
+  const neverTxt = await txt('#dispatch-list');
+  assert(/你还没有派发过记录/.test(neverTxt), '⑨b 从未派发（total=0）→ 空态文案「你还没有派发过记录」', neverTxt.slice(0, 60));
+  assert(!/都整改完成了/.test(neverTxt), '⑨b 不与「都整改完成了」混用文案（二者是不同语义）', neverTxt.slice(0, 60));
+
+  /* ================= ⑨c 真实生产后端对照（GET，只读） =================
+     前面 ⑨ 用的是注入夹具；这一段**真的打生产 /api/mobile/dispatched**，
+     并按服务端**真实回传的计数**决定期望文案 —— 这样脚本既验证了真实链路，
+     又不会因为「账号今天有没有派发」而脆化（数据变了断言跟着变，不是假绿）。 */
+  dispatchMode = 'real';
+  const real = await page.evaluate(async () => {
+    const t = localStorage.getItem('h5_session_token');
+    const r = await fetch('/api/mobile/dispatched', { headers: { authorization: 'Bearer ' + t } });
+    return { status: r.status, body: await r.json().catch(() => ({})) };
+  });
+  assert(real.status === 200 && real.body.success === true,
+    '⑨c 生产 /api/mobile/dispatched 真实可达（200 + success）', `HTTP ${real.status} code=${real.body.code}`);
+  assert(typeof real.body.pending_count === 'number' && typeof real.body.total === 'number',
+    '⑨c 生产回传 pending_count / total（新 Worker 已生效）', `pending=${real.body.pending_count} total=${real.body.total}`);
+  await page.evaluate(() => { dispatchRecs = null; dispatchAt = 0; });
+  await page.evaluate(() => renderDispatch());
+  await page.waitForTimeout(700);
+  const realTxt = await txt('#dispatch-list');
+  const rTotal = Number(real.body.total) || 0;
+  const rPending = Number(real.body.pending_count) || 0;
+  if (rTotal === 0) {
+    assert(/你还没有派发过记录/.test(realTxt), '⑨c 真实数据 total=0 → 文案「你还没有派发过记录」', realTxt.slice(0, 60));
+  } else if (rPending === 0) {
+    assert(/派出去的都整改完成了/.test(realTxt), '⑨c 真实数据：派过且全部闭环 → 文案「都整改完成了」', realTxt.slice(0, 60));
+  } else {
+    const n = (await cardTexts()).length;
+    assert(n === rPending, '⑨c 真实数据：列表条数 = 服务端 pending_count', `${n} vs ${rPending}`);
+  }
+  await shot('05-real-backend-data');
+  dispatchMode = 'ok';
 
   dispatchMode = 'fail';
   await page.evaluate(() => { dispatchRecs = null; dispatchAt = 0; });

@@ -1835,7 +1835,7 @@ function setBadge(id, n){ const el = document.getElementById(id); if(!el) return
    数据**全部来自服务端**：派发动作可能发生在另一个账号的手机上（对方是接收人），
    本机 db.records 里根本没有这条，所以这里不走本机口径，也不做本机/服务端合并去重。 */
 let dispatchRecs = null, dispatchAt = 0, dispatchErr = "";
-let inboxDispatchPending = 0, inboxDispatchDone = 0;
+let inboxDispatchPending = 0, inboxDispatchDone = 0, inboxDispatchTotal = 0;
 
 /* 角色门槛：只有真的会派发的角色才挂这个页签。
    建单即指派（CF-WPS-43）把「指派人ID」写成调用者本人，而能成为调用者的只有
@@ -1880,12 +1880,13 @@ async function loadDispatched(force){
   if(r.status !== 200 || !r.body || !r.body.success){
     dispatchRecs = null; dispatchAt = 0;
     dispatchErr = (r.body && r.body.message) || ("HTTP " + r.status);
-    inboxDispatchPending = 0; inboxDispatchDone = 0;   // 失败不残留旧值，避免角标骗人
+    inboxDispatchPending = 0; inboxDispatchDone = 0; inboxDispatchTotal = 0;   // 失败不残留旧值，避免角标骗人
     return null;
   }
   dispatchErr = "";
   inboxDispatchPending = Number(r.body.pending_count) || 0;
   inboxDispatchDone = Number(r.body.done_count) || 0;
+  inboxDispatchTotal = Number(r.body.total) || 0;   // 我派出去过的总数（=0 表示**从未派发过**）
   dispatchRecs = (r.body.records || []).map(dispatchedToRec);
   dispatchAt = Date.now();
   return dispatchRecs;
@@ -1920,12 +1921,18 @@ async function renderDispatch(){
   el.innerHTML = "";
   const head = document.createElement("div");
   head.className = "section-label";
-  head.textContent = "未整改完成 " + inboxDispatchPending + " 条" + (inboxDispatchDone ? "（另有 " + inboxDispatchDone + " 条已整改完成）" : "");
+  // total=0 与「都改完了」是两件事：前者从没派过活，后者派过且全部闭环。
+  // 混用文案会让人误以为「我派出去的都整改完了」，因此分开措辞（2026-09-19 生产验证时发现）。
+  head.textContent = inboxDispatchTotal === 0
+    ? "还没有派发记录"
+    : "未整改完成 " + inboxDispatchPending + " 条" + (inboxDispatchDone ? "（另有 " + inboxDispatchDone + " 条已整改完成）" : "");
   el.appendChild(head);
   if(!recs.length){
     const empty = document.createElement("div");
     empty.className = "empty-tip";
-    empty.innerHTML = '派出去的都整改完成了<br><span style="font-size:var(--fs-sub)">跨月未整改的会一直显示在这里，直到完成为止</span>';
+    empty.innerHTML = inboxDispatchTotal === 0
+      ? '你还没有派发过记录<br><span style="font-size:var(--fs-sub)">把巡查发现的问题派给网格员整改后，这里会一直跟踪到整改完成</span>'
+      : '派出去的都整改完成了<br><span style="font-size:var(--fs-sub)">跨月未整改的会一直显示在这里，直到完成为止</span>';
     el.appendChild(empty);
     return;
   }
