@@ -122,11 +122,17 @@
    （文档页「⋯ → 更多 → 添加文档应用」）。✅ 已完成。
 2. **建表**：按 §2 在 base 内建 3 张表（身份/花名册/巡查生产）+ 复用测试表并补齐列，列名严格对齐 handler 真实键。
    ✅ 已完成：`setup-feishu-tables.mjs` 真实建表，`verify-feishu-tables.mjs` 校验 4 表全通过。
-   表 ID（已写入 `wrangler.toml`）：身份 `tblCyjmcA8XAVTdn` / 花名册 `tblO3A9wDnA9Lm74` /
-   测试 `tblYa9aQD1lhDV8s` / 生产 `tblh1MHy3yjJIyiO`，app_token `WX9TbTqJKa7sywsgrU4cVoKdnXb`。
-   ⬜ 仍待你做：**导入数据**（至少 1 个测试登录账号：手机号 + bcrypt 密码哈希 + employee_code + 花名册命中 + 负责区域）。
+   表 ID（已写入 `wrangler.toml`）：
+   - 身份 `tblCyjmcA8XAVTdn`
+   - 花名册 `tbl2ZHdXX5d8R12a`（**1291 人，正式花名册**）
+   - 网格长信息台账 `tbl58t9kjyDlacSw`（**68 人，登录唯一来源 + 转派乡镇推导数据源**）
+   - 巡查测试 `tblYa9aQD1lhDV8s` / 巡查生产 `tblh1MHy3yjJIyiO`
+   - app_token `WX9TbTqJKa7sywsgrU4cVoKdnXb`
+
+   ⚠️ 历史坑：同 base 内另有 `tblO3A9wDnA9Lm74`「H5花名册表」**只有 1 条测试数据，不是花名册**，勿再指向它。
+
 3. **凭据**：`cd grid-mobile-cloudflare/worker && wrangler secret put FS_APP_ID` / `wrangler secret put FS_APP_SECRET`
-   （App ID `cli_aa23e52bccb8dbeb`；Secret 用轮换后的新值，**旧 Secret 已暴露须重置**）。
+   （App ID `cli_aa23e52bccb8dbeb`；Secret 经 `secret put` 注入，**不落文件/Git/前端**）。
 4. **表 ID**：✅ 已预先填入 `wrangler.toml`（见上）。如要改 base/表，重跑 `setup-feishu-tables.mjs`。
 5. **切换后端**：`wrangler var put STORAGE_BACKEND feishu`（Worker 项目
    `grid-mobile-cloudflare-worker`）。
@@ -155,6 +161,128 @@ node test/cfwpsB-feishu-adapter-smoke.mjs
 
 `wrangler var put STORAGE_BACKEND wps` 即回退到 WPS 后端（wpsAdapter 完整保留）。
 两后端并存于代码，切换无风险。
+
+---
+
+## 5b. 网格长信息台账结构（`tbl58t9kjyDlacSw`）—— 2026-09-17 实测
+
+> 这是**登录唯一事实源**，也是「转给责任乡镇」的数据源。共 **68 人**，8 列：
+> 序号 / 姓名 / 直接上级 / 所属部门 / 职位 / 网格长等级 / 手机号 / 分级
+
+### 分级（决定角色）
+
+| 分级 | 人数 | 应用角色 |
+|---|---|---|
+| 公司管理 | 6 | `公司管理`（可用「转给责任乡镇」） |
+| 乡镇作业中心经理 | 11 | `经理` |
+| 管理员 | 51 | `管理员` |
+
+### 所属部门写法（⚠️ **不含「作业中心」三字**，勿按旧假设解析）
+
+| 类别 | 写法 | 例 |
+|---|---|---|
+| 乡镇经理 | `XX镇/乡/街道` + **片区** | `宁城街道片区`、`柴胡店镇片区`、`刘营伍乡片区` |
+| 乡镇管理员 | `XX镇/乡/街道` + **N班** | `宁城街道一班`、`杜集镇三四班`、`杜集镇六七班`、`杜集镇十班` |
+| 公司本部 | 部门名（**排除**） | `项目管理层`、`安环管理部`、`生产管理部`、`环卫作业中心`、`市政园林作业中心` |
+| 公园 | 公园名（**排除**） | `康宁湖公园`、`新河公园`、`中心公园`（是管理员但不属乡镇） |
+
+### 推导出的 12 个责任乡镇（与业务口径一致）
+
+| # | 乡镇 | 经理 | 管理员 |
+|---|---|---|---|
+| 1 | 保店镇 | 杨清华 | 4 |
+| 2 | 柴胡店镇 | 王臣祥 | 6 |
+| 3 | 大曹镇 | 孙建栋 | 3 |
+| 4 | 大柳镇 | 谢俊章 | 3 |
+| 5 | 杜集镇 | 张卫新 | 8 |
+| 6 | 津城街道 | ⚠️ **未配经理** | 3 |
+| 7 | 刘营伍乡 | 张和祥 | 3 |
+| 8 | 宁城街道 | 张万恒 | 1 |
+| 9 | 时集镇 | 郭志强 | 4 |
+| 10 | 相衙镇 | 李振恒 | 3 |
+| 11 | 张大庄镇 | 靳洪刚 | 3 |
+| 12 | 长官镇 | 张华平 | 4 |
+
+合计：**经理 11 人 / 管理员 45 人**。
+
+### 解析规则（`worker/index.js`）
+
+```js
+// 乡镇名 = 所属部门剥掉「片区」/「N班」后缀
+const TOWN_DEPT_SUFFIX_RE = /(片区|[\d一二三四五六七八九十百]+班)$/u;
+// 行政区划锚点：剥完后缀后必须以 镇/乡/街道 结尾 —— 这是排除公司本部与公园的关键
+const TOWN_ANCHOR_RE = /(镇|乡|街道)$/u;
+```
+
+**两条必须遵守的约束**：
+
+1. **不能只按「经理部门」推导乡镇** —— 津城街道只有 3 个管理员、**未配经理**，
+   若只扫 `分级=乡镇作业中心经理` 的部门会整镇漏掉。必须按「所属部门归镇」。
+2. **必须用行政区划锚点排除非乡镇** —— 公司本部（5 个）与公园（3 个）也是部门/有管理员，
+   但都不是责任乡镇；只靠后缀剥离不足以区分，需 `镇|乡|街道` 结尾把关。
+
+### 验证资产
+
+```bash
+cd grid-mobile-cloudflare/worker
+node test/cfwps28-town-list.test.mjs      # 45 条离线单测（基于真实台账快照）
+node test/cfwps28-e2e-real.mjs            # 真实台账端到端（模拟登录用户视角）
+# 刷新快照（需凭据）：
+FS_APP_ID=cli_xxx FS_APP_SECRET=xxx node test/_fetch-ledger-snapshot.mjs
+```
+
+---
+
+## 5c. 两套字段模型与巡查链路（CF-WPS-29，第四轮 2026-09-17）
+
+### 背景：H5 有**两类**记录，字段模型不同，不能直接映射到同一组列
+
+| | 三违记录 | 普通巡查记录 |
+|---|---|---|
+| 触发入口 | 「是三违」→ 选三违行为 → 选人 → 整改 | 「不是三违」→ 选巡查结果 |
+| `is_violation` | `是` | `否` |
+| `problem_type` | `三违` | `一般问题` / `现场正常` |
+| `violation_desc` | 三违库中的行为名（**必填**） | 不传 |
+| `violation_people` | 人员串（必填） | 不传 |
+| `description` | 行为名（+人员名） | `巡查结果：<结果>` |
+
+前端映射层 = `frontend/check.html` 的 `toPatrolBody(rec)`；
+后端校验层 = `worker/index.js` 的 `validatePatrolBody(body, problemTypes, violationLib)`。
+
+### 三违标准库（业务方下发 20 条）
+
+`patrol/meta.violation_types` 由后端**权威下发**，前端宫格不再硬编码 ——
+保证「前端可选」与「后端可收」永远一致。可用 `MOBILE_PATROL_VIOLATION_TYPES` 覆盖
+（逗号分隔；⚠️ 注意「脱岗、玩岗、替岗」本身含顿号，不能当分隔符）。
+
+```
+闯红灯 / 骑车不戴头盔 / 逆行 / 违章停车 / 超速行驶 / 违章掉头 / 违章变道 /
+驾车时抽烟 / 打电话 / 破坏车内监控设施 / 未穿工作服 / 横穿马路 / 翻越护栏 /
+不领取防暑物资 / 出车不三检 / 脱岗、玩岗、替岗 / 隐瞒身体不适状况上岗 /
+危险作业未按要求采取保护措施 / 机动车道作业未摆放路锥 / 背向来车方向作业
+```
+
+### ⚠️ 白名单必须同时收三类取值（三个已修复的静默失败点）
+
+`PATROL_DEFAULT_PROBLEM_TYPES` **必须**包含：
+
+1. `三违` —— 否则三违记录恒 400（is_violation=是 才是真判据，但 problem_type 先被校验）；
+2. `一般问题` / `现场正常` —— 否则**普通巡查主路径全断**（这是最常用入口）；
+3. 常规类型 `环境卫生 / 设施设备 / 安全隐患 / 秩序管理 / 其他`。
+
+`FEISHU_FIELD_WHITELIST` **必须**包含 `巡查时间` / `创建时间`（重映射源键）——
+白名单判断先于重映射执行，漏收会导致时刻被静默丢弃（接口返回 success，但「日期/提交时间」列恒空）。
+
+### 验证资产（新增）
+
+```bash
+cd grid-mobile-cloudflare/worker
+node test/cfwps29-two-model.test.mjs      # 38 条：三违库 + 两模型校验不变量
+node test/cfwps29b-contract.test.mjs      # 17 条：前端 toPatrolBody ↔ 后端校验 契约一致性
+node test/cfwps30-feishu-typing.test.mjs  # 25 条：飞书字段变换（防时刻静默丢失）
+node test/_t4-prod-probe.mjs              # 生产表列结构 ↔ 变换后写入键 比对（需凭据）
+node test/_t4-timeloss-proof.mjs          # 线上记录时刻列核查（需凭据）
+```
 
 ---
 

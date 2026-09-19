@@ -3,11 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<title>HSE 安全看板 · 现场巡查</title>
+<title>网格巡查 · 现场巡查</title>
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-09-18.32">
+<meta name="hse-build" content="2026-09-18.58">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -24,6 +24,45 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="网格巡查">
 <meta name="theme-color" content="#1D4ED8">
+<!-- ================= 致命故障兜底（CF-WPS-33） =================
+     背景：曾因主脚本出现一个多余的 `)` 导致整段 JS 无法解析 —— 页面不报错、
+     不跳转、永远停在「正在验证登录状态…」，现场只看到「卡在登录界面」。
+     这段脚本是独立的 script 块、不依赖主脚本（语法与主脚本互不影响），
+     8 秒内若主脚本没有把自己标记为已就绪（window.__hseAppReady），
+     判定为「脚本未执行/解析失败」，直接给出可点自救入口，而不是干等。 -->
+<script>
+(function(){
+  var SHOWN = false;
+  function fatal(){
+    if(SHOWN || window.__hseAppReady) return;
+    SHOWN = true;
+    var box = document.createElement('div');
+    box.style.cssText = 'position:fixed;inset:0;z-index:100000;background:#fff;display:flex;flex-direction:column;' +
+      'align-items:center;justify-content:center;padding:32px 24px;text-align:center;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
+    box.innerHTML =
+      '<div style="font-size:20px;font-weight:700;color:#1A1A1A;margin-bottom:12px">页面没能正常启动</div>' +
+      '<div style="font-size:14px;line-height:1.9;color:#6B7280;margin-bottom:24px">' +
+        '通常是手机还留着旧版本的缓存。<br>点下面按钮会清空缓存并重新加载最新版本。' +
+      '</div>' +
+      '<button id="hse-fatal-reload" style="width:100%;max-width:320px;padding:15px;border:none;border-radius:14px;' +
+        'background:#1D4ED8;color:#fff;font-size:16px;font-weight:600">清空缓存并重新加载</button>' +
+      '<div style="margin-top:14px;font-size:12px;color:#9CA3AF">版本 2026-09-18.50</div>';
+    (document.body || document.documentElement).appendChild(box);
+    document.getElementById('hse-fatal-reload').onclick = function(){
+      var btn = this; btn.disabled = true; btn.textContent = '正在清理…';
+      var done = function(){ location.replace(location.pathname + '?_cb=' + Date.now()); };
+      try{
+        if(window.caches && caches.keys){ caches.keys().then(function(ks){ return Promise.all(ks.map(function(k){ return caches.delete(k); })); }).then(done, done); }
+        else if(navigator.serviceWorker && navigator.serviceWorker.getRegistrations){
+          navigator.serviceWorker.getRegistrations().then(function(rs){ return Promise.all(rs.map(function(r){ return r.unregister(); })); }).then(done, done);
+        } else done();
+      }catch(e){ done(); }
+    };
+  }
+  setTimeout(fatal, 8000);
+  window.__hseFatalNow = fatal;
+})();
+</script>
 <style>
 :root{
   --bg:#F5F4F1; --card:#FFFFFF; --line:#E5E7EB;
@@ -72,7 +111,7 @@
   --fs-cap:11px;      /* 最小字号（底部导航标签） */
   --h-cta:190px;      /* 主操作大按钮（拍现场照片 / 拍整改后照片 / 开始检查）—— 三个同类按钮统一同高
                          （改版前：首页 190 / 现场拍照 150 / 整改后拍照 140，同类三值） */
-  --h-photo:180px;    /* 照片预览区（尚未拍摄时的占位高度）—— 同类三处统一
+  --h-photo:180px;    /* 照片预览区空框高度 —— 拍现场 / 拍整改后两处统一
                          （改版前：通用 180 / 现场照片 200 / 整改后照片 170） */
   --h-topbar:48px;    /* 首页顶栏 */
   --icon-btn:40px;    /* 圆形图标按钮（返回 / 头像位） */
@@ -129,6 +168,14 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
 .page{display:flex;flex-direction:column;padding:var(--pad-card);gap:var(--gap);
   flex:1 1 0%;min-height:0;overflow-y:auto;overflow-x:hidden;
   overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+/* .page 直接子元素强制 100% 宽：避免 button 类（.big-cta / .btn-row）作为 inline-flex
+   在 flex column 里不被 align-items:stretch 撑满，导致整改页等在桌面浏览器下
+   内容偏左、大片留白（CF-WPS-34c）。box-sizing 让 padding 不挤掉宽度。 */
+.page > *{width:100%;box-sizing:border-box}
+/* .page 里嵌套容器（#rf-pre / #rf-post / .btn-stack 等）内的按钮也得撑满：
+   `.page > *` 只匹配直接子，间接子里的 button 还得再补一刀（同样原因：button + display:flex
+   = inline-flex 不被 stretch 撑满）。 */
+.page button{width:100%;box-sizing:border-box}
 /* 桌面端隐藏中间 .page 的内部滚动条（移动端触摸滚动本就不显示） */
 .page::-webkit-scrollbar{display:none}
 .page{scrollbar-width:none;-ms-overflow-style:none}
@@ -160,6 +207,9 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
 .big-cta{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--cta-icon-gap);height:var(--h-cta);border-radius:var(--r-card);background:var(--primary);color:#fff;cursor:pointer;border:none;box-shadow:0 10px 24px -4px rgba(29,78,216,.3)}
 .big-cta:active{transform:scale(.985)}
 .big-cta:disabled{background:#B6C4E8;box-shadow:none}
+/* 「开始检查」专用：图标 + 文字左右排列（其他 big-cta 拍现场/拍整改后仍保持竖排）*/
+.big-cta-row{flex-direction:row;height:auto;min-height:68px;padding:14px 22px;gap:14px}
+.big-cta-row .cta-title{font-size:var(--fs-h2);font-weight:700;line-height:1.15;display:block}
 /* 标题去掉行盒上下多余留白，让「图标下沿→字面下沿」真正等于 --cta-icon-gap。
    否则 font-size 越大，行盒半leading 越大，视觉间距会被撑大且不受控。 */
 .big-cta .cta-title{font-size:var(--fs-h2);font-weight:700;line-height:1.15;display:block}
@@ -173,6 +223,23 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
 .chip.green{background:var(--success-soft);color:var(--success)} .chip.green .dot{background:var(--success)}
 .chip.yellow{background:var(--warn-soft);color:var(--warn)} .chip.yellow .dot{background:var(--warn)}
 .chip.blue{background:var(--primary-soft);color:var(--primary)}
+
+/* ---- 拍后动作行（CF-WPS-34b） ----
+   拍完照片后两个按钮改成上下两列的小型行按钮 —— 与「未完成 违章停车·王同池」
+   那一行视觉同量级：白底卡片 + 左侧圆形图标色块 + 右侧文字，整行可点。
+   比原 big-cta (190px) + btn-row (65px) × 2 紧凑得多，又不像胶囊按钮那样像开关。 */
+.rect-row{display:flex;align-items:center;justify-content:center;gap:12px;width:100%;
+  padding:12px var(--pad-card);border-radius:var(--r-card);
+  background:var(--card);border:1px solid var(--line);
+  font-size:var(--fs-body);font-weight:600;color:var(--t1);
+  cursor:pointer;transition:transform .15s ease;text-align:left;border:none}
+.rect-row:active{transform:scale(.985)}
+.rect-row .rect-icon{width:34px;height:34px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+.rect-row.primary .rect-icon{background:var(--primary-soft);color:var(--primary)}
+.rect-row.success .rect-icon{background:var(--success-soft);color:var(--success)}
+.rect-row svg{width:18px;height:18px}
+#rf-post{display:flex;flex-direction:column;gap:10px}
 /* 台账页待补传提示条：失败记录留本地但用户必须看得见，故用告警底色 + 可点击重试 */
 #sync-bar{display:flex;align-items:center;justify-content:space-between;gap:var(--gap);margin:0 20px 12px;padding:12px 16px;border-radius:var(--r-card);background:var(--warn-soft);color:var(--warn);font-size:var(--fs-body);cursor:pointer}
 #sync-bar:active{transform:scale(.99)}
@@ -241,15 +308,26 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
   background:linear-gradient(180deg,rgba(245,244,241,0) 0%,var(--bg) 36%);pointer-events:none}
 .tabbar-wrap .tabbar{pointer-events:auto}
 .tabbar{height:var(--h-tabbar);background:var(--card);border:1px solid var(--line);border-radius:var(--r-card);display:flex;align-items:stretch;justify-content:space-evenly;padding:0 24px;box-shadow:0 6px 18px -8px rgba(0,0,0,.18)}
-.tab-item{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:var(--fs-cap);color:var(--t4);cursor:pointer;border:none;background:none;font-family:inherit}
+.tab-item{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:var(--fs-cap);color:var(--t4);cursor:pointer;border:none;background:none;font-family:inherit;position:relative}
 .tab-item.active{color:var(--primary);font-weight:600}
 .tab-item svg{width:var(--icon-glyph);height:var(--icon-glyph)}
+/* CF-WPS-40：底部 tab 红色未读角标。此前 setBadge() 调用的三个 id 在 DOM 里都不存在，
+   等于角标从未生效——被指派人在首页看不到任何提示。现在挂到「整改任务 / 巡查台账」两个 tab 上。 */
+.tab-badge{position:absolute;top:-1px;right:-6px;min-width:17px;height:17px;padding:0 5px;border-radius:9px;
+  background:var(--danger);color:#fff;font-size:11px;font-weight:700;line-height:17px;text-align:center;
+  box-shadow:0 0 0 2px var(--card);pointer-events:none}
+.tab-badge:empty{display:none}
 .info-line{font-size:var(--fs-body);font-weight:500;color:var(--t2);line-height:1.9}
 .muted{font-size:var(--fs-sub);color:var(--t4);line-height:1.6}
 .section-label{font-size:var(--fs-body);font-weight:500;color:var(--t4)}
 .photo-box{width:100%;border-radius:var(--r-card);overflow:hidden;background:#E8E6E0;display:flex;align-items:center;justify-content:center;min-height:var(--h-photo)}
 .photo-box img{width:100%;display:block}
 .photo-box.clickable{cursor:pointer}
+/* CF-WPS：照片框只在「已经有照片」时显示；未拍时不再渲染那块空灰框
+   （原来空框里写「尚未拍摄」，去掉文字后剩一块纯灰框也很扎眼）。
+   :empty 自动生效——setScenePhoto/setAfterPhoto 写入 img 即显出，
+   resetScenePhotoUI / 拍整改后重置 innerHTML="" 即隐去，无需额外 JS 切换。 */
+.photo-box:empty{display:none}
 .photo-thumb{width:var(--icon-thumb);height:var(--icon-thumb);border-radius:var(--r-card);object-fit:cover;flex:none}
 .stat-row{display:flex;gap:var(--gap)}
 /* 统计卡与入口卡同高（原 78 / 76 两个值 → 统一 --h-entry） */
@@ -332,6 +410,21 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
 #add-home-do:disabled{opacity:.6}
 #add-home-close:active{background:#F3F4F6;border-radius:12px}
 .hidden{display:none!important}
+/* ===== 全局忙碌遮罩（CF-WPS-43）=====
+   现场反馈：「点乡镇经理/管理员的姓名，要等好几秒才跳下一页，我以为没点中」。
+   根因不是逻辑错，而是点击后要串行跑完「提交记录 + 写指派」两段网络请求（各 4~6s），
+   期间页面**完全没有变化**，用户无从判断是卡死还是没点中。
+   对策：按下瞬间同步弹出遮罩（不 await 任何东西），并把按钮锁成不可重复点。 */
+#hse-busy{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;
+  background:rgba(17,24,39,.38);animation:hseFade .14s ease}
+#hse-busy>div{background:#fff;border-radius:14px;padding:22px 26px;min-width:172px;
+  display:flex;flex-direction:column;align-items:center;gap:12px;
+  box-shadow:0 12px 32px rgba(0,0,0,.18);animation:hsePop .16s cubic-bezier(.2,.8,.3,1)}
+@keyframes hsePop{from{transform:scale(.94);opacity:0}to{transform:scale(1);opacity:1}}
+#hse-busy .busy-spin{width:26px;height:26px;border:3px solid #E5E7EB;border-top-color:var(--primary);
+  border-radius:50%;animation:hseSpin .7s linear infinite}
+#hse-busy .busy-txt{font-size:var(--fs-body);font-weight:600;color:var(--t1);text-align:center}
+#hse-busy .busy-sub{font-size:var(--fs-cap);color:var(--t3);text-align:center;margin-top:-4px}
 /* 离线模式顶部提示（现场断网凭缓存身份进入时显示） */
 #offline-bar{position:fixed;top:0;left:0;right:0;z-index:9998;background:var(--warn-soft);color:#92400E;font-size:var(--fs-body);font-weight:600;text-align:center;padding:10px 16px calc(10px + env(safe-area-inset-top))}
 /* file input 专用：视觉隐藏但保持渲染。不能用 display:none —— 老版 X5/部分安卓 WebView
@@ -347,6 +440,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
 </style>
 </head>
 <body>
+<!-- 全局忙碌遮罩容器（CF-WPS-43）：默认 hidden，showBusy 时填充并显示 -->
+<div id="hse-busy" class="hidden" role="status" aria-live="polite"></div>
 <div id="app">
 
 <!-- ============ 启动校验（身份来自网格长巡查登录会话） ============ -->
@@ -357,7 +452,7 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
       <div class="lg">
         <svg width="34" height="34" viewBox="0 0 24 24" fill="none"><path d="M12 2l8 3v6c0 5-3.5 9.5-8 11-4.5-1.5-8-6-8-11V5l8-3z" stroke="#fff" stroke-width="1.8" stroke-linejoin="round"/><path d="M8.5 12l2.5 2.5 4.5-4.5" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
-      <div style="font-size:var(--fs-hero);font-weight:700">HSE 安全看板</div>
+      <div style="font-size:var(--fs-hero);font-weight:700">网格巡查</div>
       <div class="muted" id="boot-msg">正在验证登录状态…</div>
     </div>
     <button class="btn-primary hidden" id="btn-boot-login" style="margin-top:20px">去登录</button>
@@ -369,7 +464,7 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
   <div class="statusbar"></div>
   <div class="page">
     <div class="topbar-home">
-      <div class="app-name">HSE 安全看板</div>
+      <div class="app-name">网格巡查</div>
       <div class="topbar-right">
         <div class="icon-btn" id="btn-refresh" aria-label="强制刷新" title="强制刷新（解决页面卡在旧逻辑）">
           <svg viewBox="0 0 24 24" fill="none"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v4h-4" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -381,14 +476,29 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
       <div class="role-tag" id="idc-role"></div>
       <div class="name" id="idc-name"></div>
       <div class="meta" id="idc-meta"></div>
-      <div class="gps-line" id="gps-bar" style="margin-top:2px"><span id="gps-addr">正在后台定位…</span><span id="gps-note">（经纬度仅后台保存，页面显示解析出的位置）</span></div>
+      <div class="gps-line" id="gps-bar" style="margin-top:2px"><span id="gps-addr">正在后台定位…</span><span id="gps-note"></span></div>
     </div>
-    <button class="big-cta" id="btn-start">
+    <button class="big-cta big-cta-row" id="btn-start">
       <svg viewBox="0 0 24 24" fill="none"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.5" stroke="#fff" stroke-width="1.6"/></svg>
       <div class="cta-title">开始检查</div>
     </button>
+    <!-- CF-WPS-42：断点续传入口。
+         低端安卓机调起系统相机时，浏览器页面常被系统回收（内存紧张），拍照返回后
+         页面已重新加载 → 直接落在首页，照片和已选内容全丢（用户反馈：「拍完点确定
+         应该还在拍现场照片，结果回到首页」）。桌面 Chrome 复现不了（_t43 全绿），
+         但现场机是高发场景。草稿落 localStorage，首页给一个「继续上次检查」入口。 -->
+    <div class="card" id="resume-card" style="display:none;cursor:pointer">
+      <div style="display:flex;align-items:center;gap:var(--gap)">
+        <img id="resume-thumb" alt="上次检查的照片" style="width:52px;height:52px;border-radius:var(--r-card);object-fit:cover;flex:0 0 52px;background:#E8E6E0">
+        <div style="flex:1">
+          <div style="font-size:var(--fs-title);font-weight:600">继续上次未完成的检查</div>
+          <div style="font-size:var(--fs-sub);color:var(--t3);margin-top:2px" id="resume-step"></div>
+        </div>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 5l7 7-7 7" stroke="#9CA3AF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+    </div>
     <div class="stat-row">
-      <div class="stat-card"><div class="num" style="color:var(--primary)" id="stat-month">0</div><div class="lab">本月上报</div></div>
+      <div class="stat-card"><div class="num" style="color:var(--primary)" id="stat-month">0</div><div class="lab" id="stat-month-lab">本月上报</div></div>
       <div class="stat-card"><div class="num" style="color:var(--warn)" id="stat-pending">0</div><div class="lab">待整改</div></div>
       <div class="stat-card"><div class="num" style="color:var(--success)" id="stat-done">0</div><div class="lab">已闭环</div></div>
     </div>
@@ -410,7 +520,7 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
   <div class="page">
     <div class="field-label">拍现场照片</div>
     <div class="field-sub">照片是检查记录的第一手证据</div>
-    <div class="photo-box" id="scene-photo-box" style="color:var(--t4);font-size:var(--fs-body)">尚未拍摄</div>
+    <div class="photo-box" id="scene-photo-box"></div>
     <div id="photo-actions" class="btn-stack">
       <button class="big-cta" id="btn-capture">
         <svg viewBox="0 0 24 24" fill="none"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.5" stroke="#fff" stroke-width="1.6"/></svg>
@@ -610,23 +720,46 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
     <div class="nav-title">整改</div><div style="width:40px"></div>
   </div>
   <div class="page">
-    <div class="card" style="display:flex;align-items:center;gap:var(--gap)">
-      <span class="chip red" id="rf-chip"><span class="dot"></span>未完成</span>
-      <span style="font-size:var(--fs-body);font-weight:600" id="rf-summary">未戴安全帽 · 张三</span>
+    <div class="photo-box" id="after-photo-box"></div>
+    <!-- 拍前：恢复原版大按钮（CF-WPS-34b 应用户要求改回） -->
+    <div id="rf-pre" class="btn-stack">
+      <button class="big-cta" id="btn-rf-capture">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.5" stroke="#fff" stroke-width="1.6"/></svg>
+        <div class="cta-title">拍整改后照片</div>
+        <div class="cta-sub">整改完成后，拍一张现场照片</div>
+      </button>
+      <button class="btn-ghost btn-row" id="btn-rf-album">
+        <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="3" stroke="#1A1A1A" stroke-width="1.8"/><circle cx="9" cy="9" r="2" stroke="#1A1A1A" stroke-width="1.8"/><path d="M3.5 17l5-5 4 4 3.5-3.5 4.5 4.5" stroke="#1A1A1A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        从相册上传
+      </button>
+      <button class="btn-primary btn-row" id="btn-submit-rectify" disabled>提交</button>
     </div>
-    <div class="photo-box" id="after-photo-box" style="color:var(--t4);font-size:var(--fs-body)">尚未拍摄</div>
-    <button class="big-cta" id="btn-rf-capture">
-      <svg viewBox="0 0 24 24" fill="none"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.5" stroke="#fff" stroke-width="1.6"/></svg>
-      <div class="cta-title">拍整改后照片</div>
-      <div class="cta-sub">整改完成后，拍一张现场照片</div>
-    </button>
-    <button class="btn-ghost btn-row" id="btn-rf-album">
-      <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="3" stroke="#1A1A1A" stroke-width="1.8"/><circle cx="9" cy="9" r="2" stroke="#1A1A1A" stroke-width="1.8"/><path d="M3.5 17l5-5 4 4 3.5-3.5 4.5 4.5" stroke="#1A1A1A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      从相册上传
-    </button>
-    <button class="btn-primary btn-row" id="btn-submit-rectify" disabled>提交</button>
+<!-- 拍后：与「拍现场照片 / 从相册上传」同款视觉（CF-WPS 整改页统一）
+     提交 = 大蓝主按钮（与拍现场照片一致）；重新拍照 = 白底幽灵行（与从相册上传一致） -->
+<div id="rf-post" class="btn-stack" style="display:none">
+  <button class="big-cta" id="btn-submit-after">
+    <svg viewBox="0 0 24 24" fill="none"><path d="M5 12.5l4.5 4.5L19 7" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <div class="cta-title">提交</div>
+    <div class="cta-sub">整改完成，提交台账</div>
+  </button>
+  <button class="btn-ghost btn-row" id="btn-rf-recapture">
+    <svg viewBox="0 0 24 24" fill="none"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.5" stroke="currentColor" stroke-width="1.8"/></svg>
+    重新拍照
+  </button>
+</div>
     <input type="file" accept="image/*" capture="environment" class="file-ghost" id="file-camera-2">
     <input type="file" accept="image/*" class="file-ghost" id="file-album-2">
+    <!-- CF-WPS-41：经理转派。
+         经理打开「收到的指派」进的就是本页（openRecord → openRectify），
+         以前这里只有「自己拍整改后照片」一条路，想交给本镇管理员去现场就只能打电话。
+         现在给它一条并列的第二条路：转派给本作业中心下级。 -->
+    <div id="rf-delegate" style="display:none">
+      <div class="section-label">或者，转派给本作业中心</div>
+      <div class="card" style="display:flex;flex-direction:column;gap:8px">
+        <div style="font-size:var(--fs-sub);color:var(--t3)" id="rf-delegate-msg">选一位下级接手这条整改</div>
+        <div id="rf-delegate-list" class="btn-stack"></div>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -653,19 +786,6 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
   <div class="page">
     <div class="photo-box"><img id="patrol-photo" alt="现场照片"></div>
     <div class="field-label">这不是三违</div>
-    <div class="field-sub">请选择本次巡查结果</div>
-    <div class="opt-group" role="radiogroup" aria-label="本次巡查结果">
-      <div class="opt-card selectable" data-patrol="一般问题" role="radio" aria-checked="false" tabindex="0">
-        <div class="opt-title">一般问题</div>
-        <div class="opt-sub">已通知相关人员尽快处理</div>
-        <div class="opt-mark" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M5 12.5l4.5 4.5L19 7" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-      </div>
-      <div class="opt-card selectable" data-patrol="现场正常" role="radio" aria-checked="false" tabindex="0">
-        <div class="opt-title">现场正常</div>
-        <div class="opt-sub">无异常情况，完成本次巡查</div>
-        <div class="opt-mark" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M5 12.5l4.5 4.5L19 7" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-      </div>
-    </div>
     <button class="btn-primary" id="btn-patrol-done" disabled>完成检查</button>
   </div>
 </section>
@@ -760,6 +880,25 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
       </div>
       <div style="font-size:var(--fs-sub);color:var(--t3);margin-top:2px" id="add-home-hint">点桌面图标直接进入，下次打开自动登录</div>
     </div>
+    <!-- CF-WPS-41：微信提醒（WxPusher）。
+         未绑定 → 引导关注 + 填 UID；已绑定 → 显示开启状态 + 可关闭。
+         绑定后，上级指派你整改时会收到一条微信（服务端已接 wxSend）。 -->
+    <div class="card" id="wx-card">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div style="font-size:var(--fs-title);font-weight:600">微信提醒</div>
+        <div class="town-badge warn" id="wx-state">未开启</div>
+      </div>
+      <div style="font-size:var(--fs-sub);color:var(--t3);margin-top:2px" id="wx-hint">开启后，上级指派你整改时会收到微信通知</div>
+      <div id="wx-unbound" style="margin-top:10px">
+        <a id="wx-follow" href="#" target="_blank" rel="noopener" class="btn-primary" style="display:flex;justify-content:center;text-decoration:none">① 点此关注推送应用</a>
+        <div style="font-size:var(--fs-sub);color:var(--t3);margin-top:8px;line-height:1.6">关注后在微信里进「WxPusher」公众号 → 菜单「我的」→「我的UID」，复制后填到下面。</div>
+        <input id="wx-uid" type="text" inputmode="text" autocomplete="off" placeholder="粘贴你的 UID（UID_ 开头）" style="width:100%;box-sizing:border-box;height:44px;margin-top:8px;padding:0 12px;border:1px solid var(--line);border-radius:var(--r-card);font-size:var(--fs-body);font-family:inherit;background:var(--card);color:var(--t1)">
+        <button class="btn-primary" id="wx-bind" style="margin-top:8px;width:100%">② 绑定并开启</button>
+      </div>
+      <div id="wx-bound" style="margin-top:10px;display:none">
+        <button class="btn-ghost" id="wx-unbind" style="width:100%">关闭微信提醒</button>
+      </div>
+    </div>
     <div class="card">
       <div class="info-line" id="me-info"></div>
     </div>
@@ -790,10 +929,10 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
       <svg viewBox="0 0 24 24" fill="none"><path d="M3 10.5L12 3l9 7.5V21a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1v-10.5z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>首页
     </button>
     <button class="tab-item" data-tab="my-rectify" id="tab-rectify">
-      <svg viewBox="0 0 24 24" fill="none"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="tab-rectify-label">整改任务</span>
+      <svg viewBox="0 0 24 24" fill="none"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="tab-rectify-label">整改任务</span><span class="tab-badge" id="badge-rectify"></span>
     </button>
     <button class="tab-item" data-tab="my-checks">
-      <svg viewBox="0 0 24 24" fill="none"><rect x="3.5" y="3.5" width="6.5" height="6.5" rx="1" stroke="currentColor" stroke-width="1.8"/><rect x="14" y="3.5" width="6.5" height="6.5" rx="1" stroke="currentColor" stroke-width="1.8"/><rect x="3.5" y="14" width="6.5" height="6.5" rx="1" stroke="currentColor" stroke-width="1.8"/><rect x="14" y="14" width="6.5" height="6.5" rx="1" stroke="currentColor" stroke-width="1.8"/></svg>巡查台账
+      <svg viewBox="0 0 24 24" fill="none"><rect x="3.5" y="3.5" width="6.5" height="6.5" rx="1" stroke="currentColor" stroke-width="1.8"/><rect x="14" y="3.5" width="6.5" height="6.5" rx="1" stroke="currentColor" stroke-width="1.8"/><rect x="3.5" y="14" width="6.5" height="6.5" rx="1" stroke="currentColor" stroke-width="1.8"/><rect x="14" y="14" width="6.5" height="6.5" rx="1" stroke="currentColor" stroke-width="1.8"/></svg>巡查台账<span class="tab-badge" id="badge-checks"></span>
     </button>
     <button class="tab-item" data-tab="me">
       <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.8"/><path d="M4 21c1.5-3.5 4.5-5 8-5s6.5 1.5 8 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>我的
@@ -808,8 +947,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
      读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
    - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
    - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
-<script src="./config.js?v=2026-09-18.32"></script>
-<script src="./app.js?v=2026-09-18.32"></script>
+<script src="./config.js?v=2026-09-18.58"></script>
+<script src="./app.js?v=2026-09-18.58"></script>
 <script>
 /* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
 (function(){
@@ -996,6 +1135,8 @@ function toPatrolBody(rec){
     description: "",
     is_violation: isVio ? "是" : "否",
     client_request_id: rec.clientRequestId || newClientRequestId(),
+    // 派发 / 上报：公司管理与乡镇作业中心经理建的记录了算「派发」（CF-WPS 派发/上报区分）
+    source: rec.source || "上报",
     photo_taken: !!rec.scenePhoto,
   };
   // 现场照片：已上传成功的 file_token 随提交落入主台账「违章照片」附件列
@@ -1022,13 +1163,20 @@ function toPatrolBody(rec){
 }
 
 // 提交一条记录到后端。返回 {ok, recordId, deduplicated, code, message}
-async function submitRecordToBackend(rec){
-  const r = await mobileApi("/api/mobile/patrol/submit", toPatrolBody(rec));
+/* assignTo 可选：{assignee_id, assignee_name, town, note}
+   CF-WPS-43「建单即指派」——服务端在一次 create 里把指派字段一并写入，
+   省掉「先 submit 拿 id → 再 /assign 回写」的第二段 3s 往返。 */
+async function submitRecordToBackend(rec, assignTo){
+  const body = toPatrolBody(rec);
+  if(assignTo && assignTo.assignee_id) body.assign_to = assignTo;
+  const r = await mobileApi("/api/mobile/patrol/submit", body);
   const ok = r.status === 200 && r.body && r.body.success;
   return {
     ok: ok,
     deduplicated: !!(r.body && r.body.deduplicated),
     recordId: (r.body && r.body.recordIds && r.body.recordIds[0]) || null,
+    assigned: !!(r.body && r.body.assigned),
+    notify: (r.body && r.body.notify) || "",
     code: (r.body && r.body.code) || ("HTTP " + r.status),
     message: (r.body && r.body.message) || "",
   };
@@ -1239,10 +1387,50 @@ window.addEventListener("popstate", (ev) => {
 });
 
 /* ================= 启动：复用网格长巡查登录会话 ================= */
+/* 启动看门狗（CF-WPS-33）：弱网 / Worker 冷启动时登录接口可能十几秒才回，
+   原实现会让人**无限期**停在启动页且没有任何出口。15s 后给出「重试」按钮，
+   网络恢复即可自救；正常进首页时由 enterHome() 撤销。 */
+let bootWatchdogTimer = null;
+function armBootWatchdog(){
+  clearTimeout(bootWatchdogTimer);
+  bootWatchdogTimer = setTimeout(() => {
+    const b = $("#btn-boot-login");
+    const vb = document.querySelector("#view-boot");
+    if(!b || !vb || !vb.classList.contains("active")) return;   // 已进首页就别打扰
+    if(b && !b.classList.contains("hidden")) return;             // 已经有按钮了（失败态）
+    $("#boot-msg").textContent = "网络较慢，启动超时。可稍等，或点下方重试。";
+    b.textContent = "重试";
+    b.classList.remove("hidden");
+    b.onclick = () => { b.classList.add("hidden"); boot(); };
+  }, 15000);
+}
+function clearBootWatchdog(){
+  clearTimeout(bootWatchdogTimer);
+  bootWatchdogTimer = null;
+}
+
+// 离线进入：现场断网/弱网超时时，凭本机身份快照照样能开工，
+// 记录先落本机，联网后由补传队列自动上传（见 retryPendingSync / tryAutoSync）。
+function enterOffline(){
+  const cached = readCachedIdentity();
+  if(!cached) return false;
+  offlineMode = true;
+  session = cached;
+  STORE_KEY = "hse_check_v1_" + session.id;
+  loadDB();
+  renderOfflineBar();
+  enterHome();
+  return true;
+}
+
 async function boot(){
   // CF-WPS-23 免登录：①本地会话仍有效 → 直入；②失效但有「记住我」凭据 → 静默重登；③都不行 → 回登录页
+  armBootWatchdog();
   $("#boot-msg").textContent = "正在验证登录状态…";
   if(!(await ensureSession())){
+    // CF-WPS-33：网络不通（非凭据被拒）时不要干等也不要直接踢到登录页 ——
+    // 上次登录过、本机有身份快照就先离线进去干活，网络恢复后自动补传。
+    if((window.lastAuthFail === "network" || navigator.onLine === false) && enterOffline()) return;
     clearSession(); redirectToLogin(); return;
   }
   $("#boot-msg").textContent = "正在获取身份信息…";
@@ -1250,16 +1438,7 @@ async function boot(){
   if(r.status === 401){ redirectToLogin(); return; }  // mobileApi 内已清理失效会话
   if(r.status !== 200 || !r.body.success){
     // 离线兜底（现场断网也要能巡查）：已登录过且本机有身份快照 → 直接进入，记录离线暂存、联网自动补传
-    const cached = readCachedIdentity();
-    if(cached){
-      offlineMode = true;
-      session = cached;
-      STORE_KEY = "hse_check_v1_" + session.id;
-      loadDB();
-      renderOfflineBar();
-      enterHome();
-      return;
-    }
+    if(enterOffline()) return;
     // 保留登录态：避免「后端抖动 → 清会话 → 自动重登 → 再抖动」的死循环
     $("#boot-msg").textContent = "身份服务暂不可用，请稍后重试。";
     const b = $("#btn-boot-login");
@@ -1308,7 +1487,7 @@ function gpsSetBar(text, warn, withRetry){
   if(!bar || !addr) return;
   bar.classList.toggle("warn", !!warn);
   addr.textContent = text;
-  if(note) note.innerHTML = "（经纬度仅后台保存，页面显示解析出的位置）" + (withRetry ? ' · <a href="#" id="gps-retry">重试定位</a>' : "");
+  if(note) note.innerHTML = (withRetry ? ' · <a href="#" id="gps-retry">重试定位</a>' : "");
   const r = document.getElementById("gps-retry");
   if(r) r.onclick = e => { e.preventDefault(); gpsTry = 0; startBackgroundGPS(); };
 }
@@ -1400,12 +1579,93 @@ function renderIdentity(){
   }
 }
 function enterHome(){
+  clearBootWatchdog();
   renderIdentity();
   renderGPSBar();      // 后台定位结果（可能已回填 / 仍在重试）
   refreshHomeStats();
   showView("home");
+  renderResumeCard();   // CF-WPS-42：有未完成的草稿就在首页挂「继续上次检查」
   retryPendingSync();  // 回到首页顺带补传（幂等；失败静默，台账页可见待补传条数）
   startPrefetch();     // 幂等；boot 里已经发过，这里兜底防止从别处进首页时漏掉
+  migrateTransferIds(); // CF-WPS-41：历史转派回填（只跑一次，见函数内注释）
+
+  // CF-WPS-42：只在**本次页面加载的第一次进首页**时判断自动续传。
+  // 若草稿是 5 分钟内刚存的，说明用户正拍到一半被系统打断（相机回收页面）→ 直接送回拍照页；
+  // 之后的 enterHome（含用户主动按返回键回到首页）只显示卡片，绝不强行跳回去
+  // —— 否则返回键就失效了。
+  if(!autoResumeChecked){
+    autoResumeChecked = true;
+    const d0 = loadDraft();
+    if(d0 && d0.draft.scenePhoto && Date.now() - d0.at < 5 * 60 * 1000) resumeCheck(d0.draft);
+  }
+}
+let autoResumeChecked = false;   // 每次页面加载重置（模块级变量，reload 后重新为 false）
+
+/* ===== CF-WPS-41：历史 transferAdminId 回填（姓名 → 手机号） =====
+   背景：旧版 pick() 写的是 `transferAdminId: node.phone || node.name`，
+   phone 缺失时就把**姓名**存了进去。而下游三处判断
+     · refreshHomeStats 的 pending 统计
+     · openRecord 的 canRectify
+     · renderMyRectify 的「我的整改」
+   一律拿 transferAdminId 跟**手机号**比 → 姓名永远比不上 →
+   这批记录「转派出去了、但对方永远看不到」，而且本机统计还是 0。
+
+   本函数在进首页时异步跑一次（不阻塞渲染）：
+     ① 用组织树缓存把姓名解析成手机号（找不到就下次再试，最多 3 次）
+     ② 回填本机 db.records
+     ③ 对「已上报服务端但从未送达」的历史转派补发一次 /api/mobile/assign，
+        让接收人终于能在自己的「整改任务」里看到它 —— 这才算真闭环。 */
+async function migrateTransferIds(){
+  const FLAG = "hse_migrate_transfer_v1";
+  try{
+    const attempts = Number(localStorage.getItem(FLAG + "_try") || "0");
+    if(localStorage.getItem(FLAG) || attempts >= 3) return;
+    const dirty = (db.records || []).filter(r => r.transferAdminId && !/^\d{6,20}$/.test(String(r.transferAdminId)));
+    if(!dirty.length){ localStorage.setItem(FLAG, "1"); return; }
+
+    let resolved = 0;
+    for(const rec of dirty){
+      const ph = phoneOfName(rec.transferAdminId);
+      if(!ph) continue;
+      rec.transferAdminId = ph;
+      resolved++;
+      if(rec.serverRecordId && !rec.assignedToServer && rec.status !== "done" && rec.status !== "reviewed"){
+        try{
+          const r = await mobileApi("/api/mobile/assign", {
+            record_id: rec.serverRecordId,
+            assignee_id: ph,
+            assignee_name: rec.transferAdminName || "",
+            town: rec.transferTown || "",
+            note: "历史转派补送",
+          });
+          rec.assignedToServer = !!(r.status === 200 && r.body && r.body.success);
+          rec.assignError = rec.assignedToServer ? "" : ((r.body && r.body.message) || "补送失败");
+        }catch(e){ rec.assignError = "补送异常"; }
+      }
+    }
+    if(resolved) saveDB();
+    if(resolved === dirty.length) localStorage.setItem(FLAG, "1");
+    else localStorage.setItem(FLAG + "_try", String(attempts + 1));
+  }catch(e){ /* 回填失败不影响使用：只是这批老记录仍按旧口径匹配 */ }
+}
+
+// 姓名 → 手机号（只用已缓存的组织树，绝不额外发起请求）
+function phoneOfName(name){
+  const n = String(name || "").trim();
+  if(!n) return "";
+  const pick = (arr) => (arr || []).find(x => x && x.name === n && x.phone);
+  try{
+    for(const k of Object.keys(orgCache || {})){
+      const o = orgCache[k]; if(!o) continue;
+      const hit = pick(o.managers) || pick(o.admins) || pick(o.others);
+      if(hit) return String(hit.phone);
+      for(const t of (o.towns || [])){
+        const h2 = pick(t.managers) || pick(t.admins) || pick(t.others);
+        if(h2) return String(h2.phone);
+      }
+    }
+  }catch(e){}
+  return "";
 }
 
 /* ---- 登录后预热队列 ----
@@ -1455,21 +1715,49 @@ function refreshHomeStats(){
   const pending = db.records.filter(r => r.status !== "done" && r.status !== "reviewed" && (r.rectifierId === session.id || r.transferAdminName === session.name));
   const done = mine.filter(r => r.status === "done" || r.status === "reviewed");
   $("#stat-month").textContent = monthCount;
+  // CF-WPS（派发/上报区分）：公司管理 / 乡镇作业中心经理 的主要动作是「派发任务」，文案相应调整
+  const labM = document.getElementById("stat-month-lab");
+  if(labM) labM.textContent = (session.role === "公司管理" || session.role === "经理") ? "本月派发" : "本月上报";
   $("#stat-pending").textContent = pending.length;
   $("#stat-done").textContent = done.length;
   const unfinished = mine.filter(r => r.status === "unfinished");
   setBadge("badge-checks", unfinished.length);
   setBadge("badge-rectify", pending.length);
-  const toReview = db.records.filter(r => (r.status === "done") && (r.checkerId === session.id || (session.role==="经理" && isMySubordinateRec(r))));
-  setBadge("badge-review", toReview.length);
+  // CF-WPS-40：原 setBadge("badge-review") 指向的 DOM 不存在，角标从未显示；
+  // 改为落进首页待办文案，让「已整改、待复查」的记录真正可见。
+  const toReview = db.records.filter(r => (r.status === "done") && (session.role === "经理" ? isMySubordinateRec(r) : r.checkerId === session.id));
   const todo = $("#todo-list");
   const lines = [];
   unfinished.slice(0,2).forEach(r => lines.push("· " + (r.personName || "未指定") + " " + (r.behavior || "") + "，尚未完成整改"));
-  pending.filter(r => r.transferAdminId === session.id).slice(0,2).forEach(r => lines.push("· 收到转派任务：" + r.behavior + "（来自 " + r.checkerName + "）"));
+  if(toReview.length) lines.push("· 有 " + toReview.length + " 条整改已提交，待复查");
   // 后端上报失败/未完成 → 必须让用户可见（记录还在本机，但尚未进飞书台账）
   const unsynced = db.records.filter(r => r.syncState && r.syncState !== "synced");
   if(unsynced.length) lines.push("· 有 " + unsynced.length + " 条记录待上报，进「巡查台账」可重试");
   todo.innerHTML = lines.length ? lines.map(l => "<div>" + esc(l) + "</div>").join("") : "<div>· 暂无待办，一切正常</div>";
+
+  // CF-WPS-36b：上级指派给我的待办存在**服务端**，不在本机 db。
+  // 不补这一步的话，被指派人登录后首页「待整改」是 0、红点也不亮，
+  // 只有主动点进「我的整改」才发现有人派了活给他 —— 等于没有提醒。
+  refreshInboxStats(pending.length, lines.slice());
+}
+
+// 把服务端 inbox 的待整改数并入首页统计与红点（异步，失败静默不影响主渲染）
+async function refreshInboxStats(localPending, baseLines){
+  try{
+    const inbox = await loadInbox(false);          // 60s 缓存，不会每次进首页都回源
+    const localIds = new Set((db.records || []).map(r => r.serverRecordId).filter(Boolean));
+    // 去重：本机已有的同一条记录不重复计数
+    const extra = (inbox || []).filter(r => r.todoStatus === "待整改" && r.status !== "done" && !localIds.has(r.serverRecordId));
+    const total = localPending + extra.length;
+    const sp = document.getElementById("stat-pending");
+    if(sp) sp.textContent = total;
+    setBadge("badge-rectify", total);
+    const todo = document.getElementById("todo-list");
+    if(!todo) return;
+    const lines = baseLines.slice();
+    extra.slice(0, 2).forEach(r => lines.unshift("· 收到指派：" + (r.behavior || "整改") + "（来自 " + (r.assignerName || "上级") + (r.assignerDept ? " · " + r.assignerDept : "") + "）"));
+    todo.innerHTML = lines.length ? lines.map(l => "<div>" + esc(l) + "</div>").join("") : "<div>· 暂无待办，一切正常</div>";
+  }catch(e){ /* inbox 拉取失败：保留本机统计，不打断首页 */ }
 }
 function setBadge(id, n){ const el = document.getElementById(id); if(!el) return; el.classList.toggle("hidden", !n); el.textContent = n; }
 // 我的下级姓名（台账「直接上级」解析结果，boot 时预加载）。
@@ -1485,30 +1773,74 @@ function isMySubordinateRec(rec){
 }
 function esc(s){ return String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
 
+/* ================= CF-WPS-42：检查草稿「断点续传」 =================
+   真机问题：低端安卓机调起系统相机时页面常被系统回收，拍照返回后页面已重载 →
+   落在首页，照片与已选内容全丢。桌面 Chrome 复现不了（_t43 P1–P5 全绿），
+   但现场机是高发场景，必须兜住。
+   做法：草稿（照片 + 已选行为/人员）落 localStorage；首页出现「继续上次检查」卡片，
+        一点即带着草稿回到拍照页，照片与已选项都在，「下一步」直接可见。 */
+const DRAFT_KEY = "hse_draft_v1";
+const DRAFT_TTL_MS = 2 * 3600 * 1000;   // 超过 2 小时视为放弃，不长期占着入口
+function saveDraft(){
+  try{
+    if(!draft || !draft.scenePhoto) return;   // 没拍照不值得续（避免空草稿占位）
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({ at: Date.now(), draft }));
+  }catch(e){ /* 配额不足：宁可不续，也绝不能让拍照流程崩 */ }
+}
+function clearDraft(){ try{ localStorage.removeItem(DRAFT_KEY); }catch(e){} }
+function loadDraft(){   // 返回 { at, draft } 或 null
+  try{
+    const o = JSON.parse(localStorage.getItem(DRAFT_KEY) || "null");
+    if(!o || !o.draft || !o.at || Date.now() - o.at > DRAFT_TTL_MS) return null;
+    return o;
+  }catch(e){ return null; }
+}
+// 带着草稿回到拍照页（照片 + 已选项都在，「下一步」直接可见）
+function resumeCheck(d){
+  draft = Object.assign({ scenePhoto: null, behavior: null, person: null, patrolResult: null, afterPhoto: null,
+                          coTown: null, coTeamDept: null, coTeamMgr: "", coTeamAdmins: [] }, d);
+  resetScenePhotoUI();
+  renderPatrolChoice();          // 依据草稿恢复选中高亮
+  setScenePhoto(d.scenePhoto);   // 重新展示照片 + 露出「下一步」
+  showView("photo");
+}
+function draftStepText(d){
+  if(d.person) return "已选人员：" + (d.person.name || "—") + "，继续确认";
+  if(d.behavior) return "已选三违行为：" + d.behavior + "，继续";
+  if(d.patrolResult) return "已选巡查结果：" + d.patrolResult + "，继续";
+  return "照片已拍，继续下一步";
+}
+function renderResumeCard(){
+  const card = $("#resume-card"); if(!card) return;
+  const d0 = loadDraft();
+  if(!d0 || !d0.draft.scenePhoto){ card.style.display = "none"; return; }
+  card.style.display = "";
+  const th = $("#resume-thumb"); if(th) th.src = d0.draft.scenePhoto;
+  const st = $("#resume-step"); if(st) st.textContent = draftStepText(d0.draft);
+  if(!card._wired){ card._wired = true; card.onclick = () => resumeCheck(d0.draft); }
+}
+
 /* ================= 检查流程 ================= */
 function startCheck(){
   // 定位不再是前置门槛（乡镇信号差）。本次记录的定位取「创建记录那一刻」的最新值，
   // 后台定位若在此期间成功即会自动带上，失败则该条记录定位留空（不影响记录本身）。
   draft = { scenePhoto: null, behavior: null, person: null, patrolResult: null, afterPhoto: null,
             coTown: null, coTeamDept: null, coTeamMgr: "", coTeamAdmins: [] };  // co*：级联选人的三层状态
+  clearDraft();      // CF-WPS-42：开新检查即作废旧草稿，避免两个草稿互相打架
   resetScenePhotoUI();
   renderPatrolChoice();   // 清掉上一次的选中高亮，避免「看着选过了、其实没选」
   showView("photo");
 }
-// 普通巡查结果是单选：把「草稿值」与「可见的选中态」绑成一件事，只此一处渲染。
-// 之前只改了草稿与按钮 disabled，卡片本身没有任何变化 ⇒ 用户点完看不出选了哪个。
+/* 巡查结果不再让用户选：点「不是三违」即视为「现场正常」（见 #opt-no），
+   所以这里只负责把「完成检查」按钮的可用态与草稿值对齐。
+   原实现还负责给「一般问题 / 现场正常」两张卡片打选中高亮 —— 那两张卡片已移除。 */
 function renderPatrolChoice(){
-  const cards = $$("[data-patrol]");
-  cards.forEach(el => {
-    const on = el.dataset.patrol === draft.patrolResult;
-    el.classList.toggle("selected", on);
-    el.setAttribute("aria-checked", on ? "true" : "false");
-  });
-  $("#btn-patrol-done").disabled = !draft.patrolResult;
+  const btn = $("#btn-patrol-done");
+  if(btn) btn.disabled = !draft.patrolResult;
 }
 // 拍照前：显示拍照入口；拍完后：收起入口、露出「下一步」，照片本身即重拍入口
 function resetScenePhotoUI(){
-  $("#scene-photo-box").innerHTML = "尚未拍摄";
+  $("#scene-photo-box").innerHTML = "";
   $("#scene-photo-box").classList.remove("clickable");
   $("#photo-actions").classList.remove("hidden");
   $("#btn-photo-next").classList.add("hidden");
@@ -1536,6 +1868,7 @@ function setScenePhoto(dataUrl){
   $("#photo-actions").classList.add("hidden");   // 出片后收起按钮；点照片区可重新展开（拍现场照片 / 从相册上传）
   $("#btn-photo-next").classList.remove("hidden");
   $("#photo-tip").textContent = "点击上方照片可重拍，或改从相册上传";
+  saveDraft();   // CF-WPS-42：拍到照片这一刻就落盘 —— 后面页面被系统回收也能续上
 }
 
 /* ---- 三违库加载（服务端权威清单，一次加载 + 缓存） ---- */
@@ -1691,6 +2024,7 @@ function renderVioGrid(){
    统一入口，保证「选行为」这一步对所有角色都是必经的。 */
 function selectViolation(name){
   draft.behavior = name;
+  saveDraft();   // CF-WPS-42
   if(session.role === "公司管理"){ renderHandle(); showView("handle"); }
   else goPersonSelect();
 }
@@ -2006,6 +2340,7 @@ function renderCoSearch(q){
 }
 function pickPerson(p){
   draft.person = p;
+  saveDraft();   // CF-WPS-42
   const lines = ["姓名：" + esc(p.name)];
   const meta = [p.sex, p.age ? p.age + "岁" : "", p.job].filter(Boolean).join("　");
   if(meta) lines.push(esc(meta));
@@ -2028,6 +2363,30 @@ function pickPerson(p){
 }
 function maskTel(t){ const s = String(t || ""); return s.length >= 8 ? s.slice(0,3) + "****" + s.slice(-4) : s; }
 
+/* ---- 忙碌遮罩（CF-WPS-43）----
+   注意：showBusy 必须是**同步**的（内部不 await），否则在第一个 await 之前
+   浏览器可能还没绘制，用户依旧觉得「点了没反应」。 */
+let busyDepth = 0;
+function showBusy(text, sub){
+  const el = document.getElementById("hse-busy");
+  if(!el) return;
+  busyDepth++;
+  el.innerHTML = '<div><div class="busy-spin"></div><div class="busy-txt">' + esc(text || "处理中…") + "</div>" +
+    (sub ? '<div class="busy-sub">' + esc(sub) + "</div>" : "") + "</div>";
+  el.classList.remove("hidden");
+}
+function hideBusy(){
+  busyDepth = Math.max(0, busyDepth - 1);
+  if(busyDepth) return;
+  const el = document.getElementById("hse-busy");
+  if(el){ el.classList.add("hidden"); el.innerHTML = ""; }
+}
+// 串行执行一段异步任务，期间始终显示遮罩；无论成功失败都保证收起
+async function withBusy(text, sub, fn){
+  showBusy(text, sub);
+  try { return await fn(); } finally { hideBusy(); }
+}
+
 /* ---- 创建记录 ---- */
 function makeRecord(extra){
   const rec = Object.assign({
@@ -2046,6 +2405,8 @@ function makeRecord(extra){
     scenePhoto: draft.scenePhoto,
     afterPhoto: null,
     checkerId: session.id, checkerName: session.name, checkerRole: session.roleTag,
+    // 来源：公司管理 / 乡镇作业中心经理 建的记录了是「派发任务」，其余角色是「上报」（CF-WPS 派发/上报区分）
+    source: (session.role === "公司管理" || session.role === "经理") ? "派发" : "上报",
     time: Date.now(),
     status: "unfinished",
     rectifyMode: null, rectifyTime: null,
@@ -2066,7 +2427,7 @@ function makeRecord(extra){
 
 /* ---- 上报后端（后台执行，不阻塞用户看到「完成」页） ----
    幂等键已在 makeRecord 固定 → 重复调用只落一条，安全重试。 */
-async function syncRecord(rec){
+async function syncRecord(rec, assignTo){
   if(!rec || rec.syncState === "synced") return rec;
   try {
     // ── 提交前置校验：把「必然被服务端 400 拒掉」的情况拦在本地 ──────────────
@@ -2101,12 +2462,13 @@ async function syncRecord(rec){
       }
     }
 
-    const res = await submitRecordToBackend(rec);
+    const res = await submitRecordToBackend(rec, assignTo);
     if(res.ok){
       rec.syncState = "synced";
       rec.syncError = null;
       rec.serverRecordId = res.recordId;
       rec.deduplicated = !!res.deduplicated;
+      if(assignTo && assignTo.assignee_id) rec.assignedToServer = res.assigned;   // CF-WPS-43 建单即指派
     } else {
       rec.syncState = "failed";
       rec.syncError = patrolSubmitHint(res);
@@ -2121,6 +2483,7 @@ async function syncRecord(rec){
 // 提交并同步（页面跳转前调用；失败不阻断，记录留在本地待重试）
 function makeAndSync(extra){
   const rec = makeRecord(extra);
+  clearDraft();    // CF-WPS-42：记录已生成，草稿使命完成（不然首页一直挂着「继续上次检查」）
   syncRecord(rec);
   return rec;
 }
@@ -2168,7 +2531,15 @@ function showDone(rec, title){
   rows.push(lineKV("现场照片", rec.scenePhoto ? "已拍摄" : "—"));
   rows.push(lineKV("定位", rec.location && rec.location.addr ? rec.location.addr : "未获取"));
   if(rec.type === "三违") rows.push(lineKV("整改照片", rec.afterPhoto ? "已拍摄" : "—"));
-  if(rec.rectifyMode === "transfer") rows.push('<div class="info-line">已转责任乡镇：' + esc(rec.transferTown) + " · " + esc(rec.transferAdminName) + "</div>");
+  if(rec.rectifyMode === "transfer"){
+    rows.push('<div class="info-line">已转责任乡镇：' + esc(rec.transferTown) + " · " + esc(rec.transferAdminName) + "</div>");
+    // CF-WPS-36：指派是否已真正送达服务端（对方能否收到，全看这一步）
+    if(rec.assignedToServer){
+      rows.push('<div class="info-line" style="color:var(--success)">✓ 已送达 ' + esc(rec.transferAdminName) + ' 的待办</div>');
+    } else if(rec.assignError){
+      rows.push('<div class="info-line" style="color:var(--danger)">⚠ 指派未送达：' + esc(rec.assignError) + "</div>");
+    }
+  }
   c.innerHTML = rows.join("");
   $("#btn-done-home").onclick = () => { enterHome(); };
   showView("done");
@@ -2196,8 +2567,17 @@ function recordCard(rec, opts){
   const card = document.createElement("div");
   card.className = "record-card" + (rec.status === "unfinished" ? " unfinished" : "");
   const goLine = opts.goLine || (rec.status === "unfinished" && rec.checkerId === session.id ? "点击继续整改" : null);
+  // CF-WPS-36：上级指派来的待办要带「来自 XXX」来源标签，
+  // 否则被指派人分不清哪条是别人派给自己的、哪条是自己建的（三级账号测试 D2）。
+  const fromTag = rec.fromServer && rec.assignerName
+    ? '<span class="chip blue" style="margin-left:6px">来自 ' + esc(rec.assignerName) + (rec.assignerDept ? " · " + esc(rec.assignerDept) : "") + "</span>"
+    : "";
+  // CF-WPS：来源标签 —— 公司管理 / 乡镇作业中心经理 建的记录了是「派发」，其余是「上报」，台账卡片一眼区分
+  const srcTag = rec.source === "派发"
+    ? '<span class="chip" style="margin-left:6px;background:#FEF3C7;color:#B45309" title="派发任务">派发</span>'
+    : '<span class="chip" style="margin-left:6px;background:#EEF2FF;color:#4338CA" title="上报记录">上报</span>';
   card.innerHTML =
-    '<div class="r-top">' + statusChip(rec) + syncChip(rec) + '<span style="font-size:var(--fs-sub);color:var(--t4)">' + fmtTime(rec.time).slice(11) + "</span></div>" +
+    '<div class="r-top">' + statusChip(rec) + syncChip(rec) + srcTag + fromTag + '<span style="font-size:var(--fs-sub);color:var(--t4)">' + fmtTime(rec.time).slice(11) + "</span></div>" +
     '<div class="r-title">' + esc(rec.type === "三违" ? rec.behavior : "普通巡查 · " + rec.patrolResult) + "</div>" +
     '<div class="r-sub">' + (rec.personName ? esc(rec.personName) + " · " + esc(rec.personJob || "—") + "　" : "") + esc(rec.no) + "</div>";
   if(rec.scenePhoto){
@@ -2217,8 +2597,13 @@ function recordCard(rec, opts){
 function openRecord(rec, opts){
   opts = opts || {};
   // 未完成 & 本人检查 & 三违 → 直接进入继续整改
-  if(rec.type === "三违" && rec.status === "unfinished" && (rec.checkerId === session.id || rec.transferAdminId === session.id)){
-    openRectify(rec, rec.checkerId === session.id ? "my-checks" : "my-rectify");
+  // CF-WPS-36：服务端指派来的待办（fromServer，status=transferred）也要能直接整改
+  const canRectify = rec.type === "三违" && (
+    (rec.status === "unfinished" && (rec.checkerId === session.id || rec.transferAdminId === session.id))
+    || (rec.fromServer && rec.todoStatus === "待整改")
+  );
+  if(canRectify){
+    openRectify(rec, rec.fromServer ? "my-rectify" : (rec.checkerId === session.id ? "my-checks" : "my-rectify"));
     return;
   }
   renderDetail(rec, opts.from);
@@ -2243,6 +2628,69 @@ function renderListInto(elId, records, opts){
      ① 待上报：本机 syncState !== synced，还没进飞书
      ② 已上报：服务端 patrol/records，权威、跨设备一致
    两段各有各的状态，绝不混在一张卡里假扮成同一条记录。 */
+/* ---- 我的待办（上级指派给我的，来自服务端 /api/mobile/inbox）----
+   CF-WPS-36：指派关系现在写在服务端台账上，被指派人才能真正收到。
+   这些记录**不在本机 db 里**（是别人建的），所以必须单独拉并转成卡片形状渲染。 */
+let inboxRecs = null, inboxAt = 0, inboxPending = 0;
+function todoToRec(t){
+  // "2026-09-19 06:59" → Date（用于分组与排序；解析失败退到当前时间）
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/.exec(String(t.inspection_time || t.assigned_at || ""));
+  const time = m ? new Date(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0)).getTime() : Date.now();
+  return {
+    id: "srv_" + t.record_id,
+    no: String(t.record_id).slice(-8),
+    type: t.is_violation === "是" ? "三违" : "巡查",
+    behavior: t.violation_desc || t.description || "—",
+    personName: t.violation_people || "",
+    personJob: "",
+    time: time,
+    status: t.todo_status === "已完成" ? "done" : "transferred",
+    fromServer: true,
+    serverRecordId: t.record_id,
+    // 必须给一个幂等键：整改后照片上传要用它。留空会让上传接口报错，
+    // 进而**中断**后面的完成回写（照片失败不该连状态也不回写）。
+    clientRequestId: "srv_" + String(t.record_id),
+    assignerName: t.assigner_name || "",
+    // 指派人**所属单位**（如 公司管理=安环管理部）——「来自 XXX · 单位」用它，不用责任单位
+    assignerDept: t.assigner_dept || "",
+    source: "派发",          // 收件箱里的都是「上级指派给我的」，归属派发任务
+    todoTown: t.todo_town || "",
+    todoStatus: t.todo_status || "",
+    assignedAt: t.assigned_at || "",
+    doneAt: t.done_at || "",
+    todoNote: t.todo_note || "",
+  };
+}
+async function loadInbox(force){
+  if(!force && inboxRecs && Date.now() - inboxAt < SERVER_RECS_TTL) return inboxRecs;
+  const r = await mobileApi("/api/mobile/inbox", null, "GET");
+  if(r.status !== 200 || !r.body || !r.body.success){ inboxRecs = []; inboxAt = Date.now(); return inboxRecs; }
+  inboxPending = Number(r.body.pending_count) || 0;
+  inboxRecs = (r.body.todos || []).map(todoToRec);
+  inboxAt = Date.now();
+  return inboxRecs;
+}
+// 「待整改」= 本机自建的 + 服务端指派给我的（去重：服务端已有 serverRecordId 的本机记录不再重复显示）
+async function renderMyRectify(){
+  const mine = db.records.filter(r => (r.rectifierId === session.id || r.transferAdminName === session.name) && r.status !== "done" && r.status !== "reviewed");
+  renderListInto("my-rectify-list", mine, { from: "view-my-rectify", goLine: "点击开始整改" });
+  const inbox = await loadInbox(true);
+  // CF-WPS：去重用「全量本机 serverRecordId」（不只 mine），避免「已完成+待上报」的本机
+  // 记录与服务端 inbox 同一条重复出现；服务端已完成的（todoStatus=已完成）也直接排除，
+  // 让「我的整改」列表与角标「待整改」口径一致 —— 否则用户整改完了仍占着坑。
+  const srvIds = new Set((db.records || []).map(r => r.serverRecordId).filter(Boolean));
+  const extra = inbox.filter(r => r.todoStatus === "待整改" && r.status !== "done" && r.status !== "reviewed" && !srvIds.has(r.serverRecordId));
+  const all = mine.concat(extra).sort((a, b) => (b.time || 0) - (a.time || 0));
+  renderListInto("my-rectify-list", all, { from: "view-my-rectify", goLine: "点击开始整改" });
+  if(extra.length){
+    const el = document.getElementById("my-rectify-list");
+    const tip = document.createElement("div");
+    tip.className = "section-label";
+    tip.textContent = "其中 " + extra.length + " 条为上级指派（带「来自 XXX」标签）";
+    el.insertBefore(tip, el.firstChild);
+  }
+}
+
 let serverRecs = null, serverRecsAt = 0, serverRecsErr = "";
 const SERVER_RECS_TTL = 60000;   // 60s 内不重复拉；进页面时强制刷新
 async function loadServerRecs(force){
@@ -2348,26 +2796,126 @@ function renderDetail(rec, from){
     }
     b.appendChild(rc);
   }
+  // CF-WPS-41：乡镇作业中心经理的**对称派活**能力。
+  //   以前只有「公司管理」能派活，经理只能收不能派 —— 收到指派后若发现该找本镇某个
+  //   管理员去现场，他没有任何办法把活转下去，只能靠打电话。
+  //   现在：经理收到指派 → 可转派给「台账里直接上级 = 他本人」的下级。
+  //   服务端 handleAssign 会二次校验接收人确实在其直属下级内（此处只是 UI 收敛）。
+  if(session.role === "经理" && rec.fromServer && rec.todoStatus === "待整改"){
+    const box = mk('<div class="card" style="display:flex;flex-direction:column;gap:8px"></div>');
+    box.appendChild(mk('<div style="font-size:var(--fs-body);font-weight:600">转派给本作业中心</div>'));
+    box.appendChild(mk('<div style="font-size:var(--fs-sub);color:var(--t3)" id="rt-msg">选一位下级接手这条整改</div>'));
+    const subs = mySubordinatePeople();
+    if(!subs.length){
+      box.appendChild(mk('<div style="font-size:var(--fs-sub);color:var(--t3)">台账里你没有登记下级，无法转派</div>'));
+    }else{
+      subs.forEach(p => {
+        const btn = mk('<button class="btn-ghost btn-row" style="justify-content:space-between">' +
+          "<span>" + esc(p.name) + '</span><span style="color:var(--t4);font-size:var(--fs-sub)">' + esc(p.grade || "下级") + "</span></button>");
+        btn.onclick = async () => {
+          const msg = $("#rt-msg");
+          btn.disabled = true;
+          const r = await mobileApi("/api/mobile/assign", {
+            record_id: rec.serverRecordId, assignee_id: String(p.phone), assignee_name: p.name,
+            town: rec.todoTown || session.dept || "", note: "经理转派",
+          });
+          btn.disabled = false;
+          if(r.status === 200 && r.body && r.body.success){
+            btn.textContent = "✓ 已转派给 " + p.name;
+            if(msg){
+              msg.textContent = (r.body.notify === "no_uid")
+                ? "已转派（对方未开微信提醒，仅在 App 内可见）"
+                : (r.body.notify === "sent" ? "已转派，并已发微信通知对方" : "已转派");
+              msg.style.color = "var(--success)";
+            }
+            await loadInbox(true); renderMyRectify();
+          }else{
+            if(msg){ msg.textContent = (r.body && r.body.message) || "转派失败，请稍后再试"; msg.style.color = "var(--danger)"; }
+          }
+        };
+        box.appendChild(btn);
+      });
+    }
+    b.appendChild(box);
+  }
   $("#dt-back").onclick = () => { from ? showView(from) : showView("home"); };
   showView("detail");
+}
+
+// 我的直属下级（台账解析结果，boot 时已预热进 orgCache；无电话的无法被指派）
+function mySubordinatePeople(){
+  const o = orgCache["__me__"];
+  if(!o) return [];
+  const me = String((session && session.phone) || "");
+  return [].concat(o.admins || [], o.managers || [], o.others || [])
+    .filter(x => x && x.phone && String(x.phone) !== me);
 }
 
 /* ---- 整改 ---- */
 let rectifying = null, rectifyFrom = null;
 function openRectify(rec, from){
   rectifying = rec; rectifyFrom = from || "view-home";
-  $("#rf-chip").className = "chip " + (rec.status === "transferred" ? "yellow" : "red");
-  $("#rf-chip").innerHTML = '<span class="dot"></span>' + (rec.status === "transferred" ? "已转整改" : "未完成");
-  $("#rf-summary").textContent = (rec.behavior || "—") + " · " + (rec.personName || "未指定");
-  $("#after-photo-box").innerHTML = "尚未拍摄";
+  // 顶部「未完成 · 行为 · 人名」信息卡已删（CF-WPS 整改页统一），无需再设 rf-chip / rf-summary
+  $("#after-photo-box").innerHTML = "";
+  // 拍前用大按钮三件套（big-cta + 从相册上传 + 提交）；拍后才切到两列轻量行
+  $("#rf-pre").style.display = "";
+  $("#rf-post").style.display = "none";
   $("#btn-submit-rectify").disabled = true;
   $("#rf-back").onclick = () => showView(rectifyFrom);
+  renderDelegateBlock(rec);   // CF-WPS-41：经理可把这条转派给本作业中心下级
   showView("rectify");
+}
+
+/* CF-WPS-41：整改页的「转派给本作业中心」区块（仅乡镇作业中心经理 + 上级指派来的待办可见）。
+   服务端 handleAssign 会二次校验接收人确实在其直属下级内，这里只是 UI 收敛。 */
+function renderDelegateBlock(rec){
+  const box = $("#rf-delegate"); if(!box) return;
+  const canDelegate = session.role === "经理" && !!rec.fromServer && rec.todoStatus === "待整改";
+  if(!canDelegate){ box.style.display = "none"; return; }
+  box.style.display = "";
+  const list = $("#rf-delegate-list"), msg = $("#rf-delegate-msg");
+  list.innerHTML = "";
+  if(msg){ msg.textContent = "选一位下级接手这条整改"; msg.style.color = "var(--t3)"; }
+  const subs = mySubordinatePeople();
+  if(!subs.length){
+    list.innerHTML = '<div style="font-size:var(--fs-sub);color:var(--t3)">台账里你没有登记下级，无法转派</div>';
+    return;
+  }
+  subs.forEach(p => {
+    const b = document.createElement("button");
+    b.className = "btn-ghost btn-row";
+    b.style.justifyContent = "space-between";
+    b.innerHTML = "<span>" + esc(p.name) + '</span><span style="color:var(--t4);font-size:var(--fs-sub)">' + esc(p.grade || "下级") + "</span>";
+    b.onclick = async () => {
+      b.disabled = true; b.textContent = "转派中…";
+      const r = await mobileApi("/api/mobile/assign", {
+        record_id: rec.serverRecordId, assignee_id: String(p.phone), assignee_name: p.name,
+        town: rec.todoTown || session.dept || "", note: "经理转派",
+      });
+      if(r.status === 200 && r.body && r.body.success){
+        b.textContent = "✓ 已转派给 " + p.name;
+        if(msg){
+          msg.textContent = (r.body.notify === "no_uid")
+            ? "已转派（对方未开微信提醒，仅在 App 内可见）"
+            : (r.body.notify === "sent" ? "已转派，并已发微信通知对方" : "已转派");
+          msg.style.color = "var(--success)";
+        }
+        await loadInbox(true); renderMyRectify();
+        setTimeout(() => showView(rectifyFrom || "my-rectify"), 1200);
+      }else{
+        b.disabled = false; b.textContent = "重试 · " + p.name;
+        if(msg){ msg.textContent = (r.body && r.body.message) || "转派失败，请稍后再试"; msg.style.color = "var(--danger)"; }
+      }
+    };
+    list.appendChild(b);
+  });
 }
 function setAfterPhoto(dataUrl){
   draft.afterPhoto = dataUrl; rectifying.afterPhoto = dataUrl;
   $("#after-photo-box").innerHTML = '<img alt="整改后照片" src="' + dataUrl + '">';
-  $("#btn-submit-rectify").disabled = false;
+  // 拍后切到两列轻量行（与「未完成 违章停车·王同池」那行视觉同量级）
+  $("#rf-pre").style.display = "none";
+  $("#rf-post").style.display = "flex";
 }
 function submitRectify(){
   rectifying.status = "done";
@@ -2378,7 +2926,30 @@ function submitRectify(){
   // 整改后照片：这条记录**早已提交**，提交时不可能带上现在才拍的照片，
   // 只能上传后 PUT 补挂回同一条（见 attachPhotoToRecord）。后台执行，不挡「整改完成」页。
   const done = rectifying;
-  if(done.afterPhoto && !done.rectifyPhotoToken && done.serverRecordId){
+  // CF-WPS-36：上级指派来的待办，完成后必须回写服务端 —— 否则公司管理看到的
+  // 状态永远是「待整改」，闭环断在最后一公里（三级账号测试 C2）。
+  if(done.fromServer && done.serverRecordId){
+    (async () => {
+      let tokens = [];
+      // 照片上传失败**不能**连状态回写一起断掉：整改做完了却因为照片传不上去
+      // 一直显示「待整改」，比少一张照片严重得多。
+      if(done.afterPhoto){
+        try{
+          const tk = await uploadPhotoToken(done.afterPhoto, "after", done.clientRequestId || done.serverRecordId);
+          if(tk){ tokens = [tk]; done.rectifyPhotoToken = tk; saveDB(); }
+        }catch(e){ /* 忽略：照片可后续补传，状态必须照常回写 */ }
+      }
+      const r = await mobileApi("/api/mobile/assign/complete", {
+        record_id: done.serverRecordId,
+        note: "已现场整改完成",
+        photo_tokens: tokens,
+      });
+      done.completedToServer = r.status === 200 && r.body && r.body.success;
+      done.completeError = done.completedToServer ? "" : ((r.body && (r.body.message || r.body.code)) || ("HTTP " + r.status));
+      saveDB();
+    })();
+  } else if(done.afterPhoto && !done.rectifyPhotoToken && done.serverRecordId){
+    // 本人自建的记录：只补挂整改后照片
     (async () => {
       done.rectifyPhotoToken = await uploadPhotoToken(done.afterPhoto, "after", done.clientRequestId);
       if(done.rectifyPhotoToken){
@@ -2408,6 +2979,26 @@ document.addEventListener("DOMContentLoaded", () => {
   window.addEventListener("online", tryAutoSync);   // 网络一恢复立即补传
   setInterval(tryAutoSync, 40000);                  // 兜底：页面开着但网络悄然恢复（未触发 online）时，每 40s 试一次
 
+  // CF-WPS：被指派后实时刷新（无需退出重登）。
+  // 之前只在进首页/进 my-rectify 才拉 inbox + 算角标，停留在页面上的用户
+  // 收不到新指派的红点，必须手动切 tab 或重登才知道 —— 现在后台轮询。
+  let inboxPollerBusy = false;
+  const syncInboxView = async (force) => {
+    if(inboxPollerBusy) return;
+    if(!session || !localStorage.getItem("h5_session_token")) return;
+    inboxPollerBusy = true;
+    try{
+      await loadInbox(!!force);   // 先把 inbox 拉下来，refreshHomeStats 里的 loadInbox(false) 会走 60s 缓存
+      refreshHomeStats();          // 顺手把首页统计 / 待办文案 / 角标全部对齐
+      const v = document.getElementById("view-my-rectify");
+      if(v && !v.classList.contains("hidden")) renderMyRectify();   // 停在「我的整改」页时直接重渲染
+    }catch(e){ /* 静默：轮询失败不影响主功能 */ }
+    finally{ inboxPollerBusy = false; }
+  };
+  setInterval(() => { if(!document.hidden) syncInboxView(true); }, 25000);  // 25s 一次，标签页隐藏时不打
+  document.addEventListener("visibilitychange", () => { if(!document.hidden) syncInboxView(true); });  // 切回前台立即补拉
+  setTimeout(() => syncInboxView(true), 2000);   // 启动后跑一次，把首次进入时的红点补齐
+
   // 首页
   $("#btn-start").onclick = startCheck;
   $$(".entry-card").forEach(c => c.onclick = () => openEntry(c.dataset.go));
@@ -2435,7 +3026,9 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#btn-photo-next").onclick = () => showView("classify");
 
   // 分类
-  $("#opt-no").onclick = () => { $("#patrol-photo").src = draft.scenePhoto; draft.patrolResult = null; renderPatrolChoice(); showView("patrol"); };
+  // 「不是三违」即现场无异常 ⇒ 直接按「现场正常」归档。
+  // 原来这里把 patrolResult 置 null、让用户再选「一般问题 / 现场正常」，那个二选一已取消。
+  $("#opt-no").onclick = () => { $("#patrol-photo").src = draft.scenePhoto; draft.patrolResult = "现场正常"; renderPatrolChoice(); showView("patrol"); };
   /* 「是三违」→ **所有角色都必须先选三违行为**，选中后再按角色分流（见 selectViolation）。
      ⚠️ 缺陷修复（第十四轮）：此前公司管理被单独写成直接 showView("handle")，
         跳过了「选择三违行为」这一步 —— 于是 draft.behavior 从未赋值，
@@ -2467,6 +3060,7 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#opt-transfer").onclick = () => { draft.transferTown = null; draft.transferDepartment = ""; showView("transfer"); renderTownList(); };
 
   // 转乡镇（数据源：台账「直接上级」——我的下级片区经理 → 该片区下的管理员）
+  let pickLock = false;   // CF-WPS-43：pick() 串行锁，防连点重复建单
   async function renderTownList(){
     const list = $("#tf-list");
     const choosingAdmin = !!draft.transferTown;
@@ -2528,13 +3122,48 @@ document.addEventListener("DOMContentLoaded", () => {
       list.appendChild(back0);
       return;
     }
-    const pick = (node, kind) => {
-      const rec = makeAndSync({ rectifyMode: "transfer", status: "transferred",
-        transferTown: draft.transferTown, transferDepartment: draft.transferDepartment || cur.department || "",
-        transferAdminId: node.name, transferAdminName: node.name,
-        transferAdminJob: node.position || node.grade || "",
-        transferAdminRole: kind });
-      showDone(rec, "已发送整改任务");
+    // CF-WPS-36：转派必须把「派给谁」写到**服务端**，对方才收得到。
+    // 旧实现只 makeAndSync 打本机标记 → 被指派人手机上永远是空的（三级账号测试 B3/B4）。
+    const pick = async (node, kind) => {
+      if(pickLock) return;                 // 防连点：一段网络请求未完成前不再受理第二次点击
+      pickLock = true;
+      // 同步弹遮罩 —— 下面的 await 可能要好几秒，没有即时反馈就等于「点了没反应」
+      showBusy("正在发送给 " + node.name + "…", "正在写入台账并生成整改待办");
+      try {
+        const rec = makeRecord({ rectifyMode: "transfer", status: "transferred",
+          transferTown: draft.transferTown, transferDepartment: draft.transferDepartment || cur.department || "",
+          transferAdminId: node.phone || node.name, transferAdminName: node.name,
+          transferAdminJob: node.position || node.grade || "",
+          transferAdminRole: kind });
+        // CF-WPS-43：一次 submit 同时完成「建单 + 指派」（服务端合并写入），
+        // 原来要串行跑 submit(4s) → assign(3s) 两段，用户干等 7~8 秒。
+        const assignTo = node.phone ? {
+          assignee_id: node.phone, assignee_name: node.name,
+          town: draft.transferTown || "", note: (rec.behavior || "三违") + " · 请限期整改",
+        } : null;
+        await syncRecord(rec, assignTo);
+        let assigned = rec.assignedToServer === true, why = "";
+        if(!rec.serverRecordId) why = "记录尚未同步到服务端，请到「巡查台账」补传后重新指派";
+        else if(!node.phone) why = "「" + node.name + "」在台账中没有手机号，无法作为接收人（请先在网格长信息台账补全）";
+        // 兜底：老版本 Worker 不认识 assign_to（会返回 assigned:false），退回两段式 /assign，
+        // 否则「转派」会静默失效——对方永远收不到。
+        if(rec.serverRecordId && node.phone && !assigned && rec.syncState === "synced"){
+          const r = await mobileApi("/api/mobile/assign", {
+            record_id: rec.serverRecordId, assignee_id: node.phone, assignee_name: node.name,
+            town: draft.transferTown || "", note: (rec.behavior || "三违") + " · 请限期整改",
+          });
+          assigned = r.status === 200 && r.body && r.body.success;
+          if(!assigned) why = (r.body && (r.body.message || r.body.code)) || ("HTTP " + r.status);
+        }
+        rec.assignedToServer = assigned;
+        rec.assignError = assigned ? "" : why;
+        saveDB();
+        showDone(rec, assigned ? "已发送整改任务" : "已保存，但指派未送达");
+        renderSyncBar();
+      } finally {
+        hideBusy();
+        pickLock = false;
+      }
     };
     const addGroup = (title, arr, kind) => {
       if(!arr.length) return;
@@ -2584,19 +3213,16 @@ document.addEventListener("DOMContentLoaded", () => {
     showView("done");
   };
 
-  // 整改拍照
+  // 整改拍照：拍前用大按钮（现场拍 + 从相册上传），拍后切到两列轻量行
   $("#btn-rf-capture").onclick = () => $("#file-camera-2").click();
   $("#btn-rf-album").onclick = () => $("#file-album-2").click();
+  $("#btn-rf-recapture").onclick = () => $("#file-camera-2").click();
   $("#file-camera-2").onchange = e => { if(e.target.files[0]) compressImage(e.target.files[0], setAfterPhoto); e.target.value = ""; };
   $("#file-album-2").onchange = e => { if(e.target.files[0]) compressImage(e.target.files[0], setAfterPhoto); e.target.value = ""; };
-  $("#btn-submit-rectify").onclick = submitRectify;
+  $("#btn-submit-rectify").onclick = submitRectify;  // 拍前：禁用态的提交按钮
+  $("#btn-submit-after").onclick = submitRectify;    // 拍后：两列行的提交行
 
-  // 巡查结果（单选）：点哪个哪个高亮；键盘 Enter/Space 等价
-  $$("[data-patrol]").forEach(el => {
-    const pick = () => { draft.patrolResult = el.dataset.patrol; renderPatrolChoice(); };
-    el.onclick = pick;
-    el.onkeydown = e => { if(e.key === "Enter" || e.key === " "){ e.preventDefault(); pick(); } };
-  });
+  // 巡查结果不再需要用户选择（见 #opt-no），这里只保留「完成检查」的提交逻辑
   $("#btn-patrol-done").onclick = () => {
     const rec = makeAndSync({ type: "巡查", patrolResult: draft.patrolResult, behavior: null, personId: null, personName: "" });
     showDone(rec, "检查完成");
@@ -2617,9 +3243,8 @@ function openEntry(go){
     retryPendingSync();       // 进入台账即尝试补传（幂等，安全重试）
   }
   if(go === "my-rectify"){
-    const mine = db.records.filter(r => (r.rectifierId === session.id || r.transferAdminName === session.name) && r.status !== "done" && r.status !== "reviewed");
-    renderListInto("my-rectify-list", mine, { from: "view-my-rectify", goLine: "点击开始整改" });
     showView("my-rectify");
+    renderMyRectify();   // 本机自建 + 服务端指派的待办（异步合并，见该函数）
   }
   if(go === "my-review"){
     const toReview = db.records.filter(r => r.status === "done" && (r.checkerId === session.id || isMySubordinateRec(r)));
@@ -2660,6 +3285,58 @@ function openEntry(go){
     $("#me-meta").innerHTML = "网格长等级　" + esc(session.grid) + "<br>所属部门　" + esc(session.dept) + "<br>所属班组　" + esc(session.team);
     $("#me-info").innerHTML = "职位：" + esc(session.roleTag) + "<br>直接上级：" + esc(session.superior || "—") + "<br>手机：" + esc(session.phone ? maskTel(session.phone) : "—");
     showView("me");
+    wireWxCard(); refreshWxCard();   // CF-WPS-41：进「我的」时刷新微信提醒状态
+  }
+}
+
+/* ===== CF-WPS-41：微信提醒（WxPusher 绑定） =====
+   绑定后才会在「被指派整改」时收到微信。UID 存在服务端身份表，换手机登录依然有效。 */
+function wxMsg(text, isErr){
+  const h = $("#wx-hint"); if(!h) return;
+  h.textContent = text;
+  h.style.color = isErr ? "var(--danger)" : "var(--t3)";
+}
+async function refreshWxCard(){
+  const card = $("#wx-card"); if(!card) return;
+  const st = $("#wx-state"), un = $("#wx-unbound"), bd = $("#wx-bound");
+  const r = await mobileApi("/api/mobile/wx/status");
+  if(!r.status || !r.body || r.body.enabled === false){
+    st.textContent = "未开通"; st.className = "town-badge warn";
+    wxMsg("管理员尚未开通微信推送通道，暂无法开启");
+    un.style.display = "none"; bd.style.display = "none";
+    return;
+  }
+  const bound = !!r.body.bound;
+  st.textContent = bound ? "已开启" : "未开启";
+  st.className = "town-badge" + (bound ? "" : " warn");
+  if(bound) wxMsg("上级指派你整改时，会收到一条微信");
+  un.style.display = bound ? "none" : "";
+  bd.style.display = bound ? "" : "none";
+  const f = $("#wx-follow");
+  if(f && r.body.follow_url) f.href = r.body.follow_url;
+}
+function wireWxCard(){
+  const b = $("#wx-bind");
+  if(b && !b._wired){ b._wired = true;
+    b.onclick = async () => {
+      const uid = String(($("#wx-uid") || {}).value || "").trim();
+      if(!uid){ wxMsg("请先粘贴你的 UID（UID_ 开头）", true); return; }
+      b.disabled = true; b.textContent = "绑定中…";
+      const r = await mobileApi("/api/mobile/wx/bind", { uid });
+      b.disabled = false; b.textContent = "② 绑定并开启";
+      if(r.status === 200 && r.body && r.body.bound){ wxMsg("微信提醒已开启"); await refreshWxCard(); }
+      else wxMsg((r.body && r.body.message) || "绑定失败，请确认已关注并填对 UID", true);
+    };
+  }
+  const u = $("#wx-unbind");
+  if(u && !u._wired){ u._wired = true;
+    u.onclick = async () => {
+      u.disabled = true;
+      const r = await mobileApi("/api/mobile/wx/bind", { unbind: true });
+      u.disabled = false;
+      if(r.status === 200){ wxMsg("已关闭微信提醒"); await refreshWxCard(); }
+      else wxMsg("关闭失败，请稍后再试", true);
+    };
   }
 }
 // 下属检查分段切换
@@ -2800,6 +3477,10 @@ if('serviceWorker' in navigator){
     navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});
   });
 }
+
+// 主脚本已成功解析并执行 → 解除 head 里的「致命故障兜底」倒计时。
+// 这行必须留在本脚本**最后**：任何语法错误都会让它跑不到，兜底才会生效。
+window.__hseAppReady = true;
 </script>
 
 <!-- 添加到桌面引导浮层（底部 sheet） -->

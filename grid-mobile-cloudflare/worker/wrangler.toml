@@ -1,5 +1,5 @@
 name = "grid-mobile-cloudflare-worker"
-main = "index.js"
+main = "deploy.js"
 compatibility_date = "2024-09-23"
 # ES Module 格式（index.js 使用 export default）
 
@@ -46,8 +46,11 @@ IDENTITY_ROSTER_SHEET_ID = "11"
 #   · 所属部门 = 班组名（「宁城街道一班」），与登录台账口径一致 → 选人按此收敛
 #   · 负责区域（在职）= 网格串（「郑庄村」「专业队」）→ 巡查网格按 员工编码 精确命中
 #   ⚠️ 同 base 内另一张「H5花名册表」（tblO3A9wDnA9Lm74）只有 1 条测试数据，不是花名册，勿再指向它。
-# 花名册进程内缓存 TTL（毫秒；1291 人 ≈ 7 次上游分页，选人页反复调用；0 = 关闭）
-ROSTER_CACHE_TTL_MS = "120000"
+# 花名册进程内缓存 TTL（毫秒；1291 人 ≈ 7 次**串行**分页 ≈ 10.9s，0 = 关闭）
+# 2026-09-18：120000(2min) → 600000(10min)。
+#   实测（_t22）冷启动 10.9s / 命中缓存 0.26s，差 40 倍；TTL 太短会让用户每隔几分钟
+#   就重新吃一次 11 秒冷启动。花名册人员变动以天计，10 分钟 TTL 业务上无感知。
+ROSTER_CACHE_TTL_MS = "600000"
 # 身份激活状态（逗号分隔；仅这些「身份状态」可登录，其余统一 401）
 IDENTITY_ACTIVE_STATUS = "正常"
 # 移动端登录总开关（公网 E2E 需要真实登录链路）
@@ -56,10 +59,33 @@ MOBILE_LOGIN_ENABLED = "true"
 MOBILE_SESSION_TTL_SECONDS = "7200"
 
 # --- CF-WPS-13 巡查目标（fail-closed）---
-# 巡查测试目标 Sheet（H5提交测试）。生产三开关（MOBILE_PATROL_PRODUCTION_ENABLED /
-# MOBILE_PATROL_TARGET_SHEET_ID / WPS_PATROL_FIELDS_CONFIRMED）故意保持 unset →
-# patrolTarget() 永远回落本测试表，Sheet15 生产写入结构性不可能。
+# 巡查测试目标 Sheet（H5提交测试）。生产三开关见下方 CF-WPS-29 段；
+# 缺任一项 → patrolTarget() 回落本测试表。
 WPS_DBSHEET_TEST_SHEET_ID = "13"
+
+# --- CF-WPS-29（第四轮任务3）：巡查生产表放行 --------------------------------
+# ⚠️ 语义后果重：放行后 **真实 H5 提交流水将写入飞书生产表**（不再是隔离测试表）。
+#    patrolTarget() 三开关缺一即回落测试表，故三项必须同时配置才生效。
+#    放行前置条件（2026-09-17 已逐项核实，见 test/_t4-prod-probe.mjs）：
+#      ①生产表 tblh1MHy3yjJIyiO 表结构 32 列，与 worker 生产分支构建键（经 feishuTypedRecord
+#        变换后）完全对齐，无缺列、无类型不匹配；
+#      ②生产表当前 0 条记录（未污染存量）；
+#      ③已修复「巡查时间/创建时间 被白名单丢弃」缺陷（CF-WPS-30），时刻列能正常落值。
+# 回滚：把 MOBILE_PATROL_PRODUCTION_ENABLED 改回 "false"（或注释掉）即可回落测试表，
+#          已落生产表的记录需人工清理。
+# ⚠️ 2026-09-18 单主台账冻结：已删除测试分支（Q1），主台账 = H5员工日常不安全行为台账。
+#    取消以下三个两表 fail-closed 开关（代码 patrolTarget 已改为恒写主台账，见 index.js）。
+# MOBILE_PATROL_PRODUCTION_ENABLED = "true"
+# MOBILE_PATROL_TARGET_SHEET_ID = "tblh1MHy3yjJIyiO"   # 陈旧 ID，本 base 不存在
+# WPS_PATROL_FIELDS_CONFIRMED = "true"
+
+# --- CF-WPS-29：三违库（可选覆盖；unset = 用 index.js 内置 20 条）------------
+# 业务方 2026-09-17 下发 20 条标准三违行为。改由后端权威下发（patrol/meta.violation_types），
+# 前端宫格不再硬编码 —— 保证「前端可选」与「后端可收」永远一致。
+# 需要业务自助增删时取消注释，逗号分隔（注意「脱岗、玩岗、替岗」本身含顿号，不能当分隔符）。
+# MOBILE_PATROL_VIOLATION_TYPES = "闯红灯,骑车不戴头盔,逆行,违章停车,超速行驶"
+# 问题类型候选（含「三违」，H5 三违分支依赖它；unset = 用内置值）
+# MOBILE_PATROL_PROBLEM_TYPES = "三违,环境卫生,设施设备,安全隐患,秩序管理,其他"
 
 # --- CF-WPS-21：定位 → 地理位置（逆地理编码）---
 # 方案：离线优先。Worker 内置宁津县 12 个乡镇/街道边界（GCJ-02，DP 简化后 64KB），
@@ -80,11 +106,23 @@ STORAGE_BACKEND = "feishu"
 # 表 ID 为普通标识符（非凭据），已由 setup-feishu-tables.mjs 在 base WX9TbTqJKa7sywsgrU4cVoKdnXb 内建好。
 # ⚠️ FS_APP_SECRET 仍须经 `wrangler secret put FS_APP_SECRET` 注入（用轮换后的新值，旧值已暴露）。
 FS_APP_TOKEN = "WX9TbTqJKa7sywsgrU4cVoKdnXb"
-FS_IDENTITY_TABLE_ID = "tblCyjmcA8XAVTdn"
+FS_IDENTITY_TABLE_ID = "tbl58t9kjyDlacSw"  # 「H5移动端身份表」＝登录人员唯一来源（手机号=账号）
 FS_ROSTER_TABLE_ID = "tbl2ZHdXX5d8R12a"  # 「花名册」1291 人（选人 + 巡查网格解析的数据源）
-FS_PATROL_TEST_TABLE_ID = "tblYa9aQD1lhDV8s"
-FS_PATROL_PRODUCTION_TABLE_ID = "tblh1MHy3yjJIyiO"
-FS_LEDGER_TABLE_ID = "tbl58t9kjyDlacSw"  # 网格长信息台账：登录人员唯一来源（手机号=账号，密码=姓名首字母+手机号后4位，分级=角色）
+FS_PATROL_PRODUCTION_TABLE_ID = "tbl5QiCv5Qbal044"  # 「H5员工日常不安全行为台账」= 唯一主台账（2026-09-18 实测，单主台账口径）
+FS_LEDGER_TABLE_ID = "tbl58t9kjyDlacSw"  # 登录身份表（= H5移动端身份表，H5 登录唯一来源）
+
+# --- CF-WPS-41 微信推送（WxPusher）---
+# 通道：WxPusher 标准推送。用户在「我的」页点关注链接关注应用后，把自己的 UID 填回 App 完成绑定；
+#   绑定关系写在「H5移动端身份表」新增列「微信推送UID」（手机号即账号，一行一人）。
+# 接入步骤：
+#   ① 到 https://wxpusher.zjiecode.com/admin/ 建应用 → 拿 appToken 和 应用ID
+#   ② wrangler secret put WX_APP_TOKEN        # 敏感，绝不写入本文件
+#   ③ 把下面两个 URL 填成你自己的应用（非敏感，可直接写这里）
+# WX_APP_TOKEN 未配置时：全部推送静默降级（能派活，只是不发微信），不会报错、不会阻断业务。
+# 关注链接（type=1 = 应用；id = 应用ID；jump=auto = 已关注时自动跳回）
+WX_FOLLOW_URL = "https://wxpusher.zjiecode.com/app/#/follow?type=1&id=REPLACE_ME&jump=auto"
+# 微信消息里「查看详情」跳回的地址
+WX_APP_URL = "https://grid-mobile-cloudflare.pages.dev/check"
 
 # --- CF-WPS-22 增量：重名消歧「职位」白名单（可选，unset = 用代码内默认值）---
 # 业务口径：只有「乡镇作业中心经理 / 管理员及以上」才是网格长；同名里的非网格长（乡镇保洁员/司机等）无权占坑。
@@ -120,6 +158,12 @@ FS_LEDGER_TABLE_ID = "tbl58t9kjyDlacSw"  # 网格长信息台账：登录人员�
 # ⚠️ 部署注意（CPU 限制）：bcryptjs 为纯 JS，cost 10 校验约需 50-150ms CPU。
 #    Workers 免费计划 10ms CPU 上限会超时；付费计划须在部署时评估 [limits] cpu_ms 配置。
 #    本阶段未部署，此项列入报告待授权决策项。
+#
+# --- CF-WPS bcrypt CPU 预算（仅付费计划生效）---
+# bcryptjs cost 10 校验约 50-150ms CPU，超免费计划 10ms 上限会超时。
+# 若本 Worker 跑在付费计划，取消下方注释并设合理 cpu_ms（建议 ≥ 500）：
+# [limits]
+# cpu_ms = 500
 # ---------------------------------------------------------------------------
 
 # 说明：本 POC 仅做用户授权 + 用户信息读取，

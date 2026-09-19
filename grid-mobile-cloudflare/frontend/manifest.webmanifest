@@ -1,0 +1,19 @@
+{
+  "name": "网格巡查 · HSE 现场检查",
+  "short_name": "网格巡查",
+  "description": "网格化日常巡查、三违上报与整改跟踪。",
+  "start_url": "/check",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F5F4F1",
+  "theme_color": "#1D4ED8",
+  "lang": "zh-CN",
+  "icons": [
+    { "src": "./icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "./icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "./icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "./apple-touch-icon.png", "sizes": "180x180", "type": "image/png", "purpose": "any" }
+  ],
+  "categories": ["productivity", "business"]
+}

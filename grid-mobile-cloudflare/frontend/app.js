@@ -85,47 +85,76 @@ function clearLoginCreds() {
 // token 缺失/过期时，用已保存凭据换新 token（用户无感）。
 // force=true：忽略本地 exp 判断，直接换新 token（用于服务端返回 401 后重试）。
 // 返回 true = 已拿到可用会话；false = 需人工登录。
+// CF-WPS-33：失败原因，供调用方区分「网络不通」与「凭据被拒」
+//   'nocreds'  本机没有记住的凭据 → 必须人工登录
+//   'network'  超时/断网 → 可凭本机身份快照离线进入
+//   'rejected' 服务端明确拒绝（密码规则变更/账号停用）→ 必须人工登录
+let lastAuthFail = null;
 async function ensureSession(force) {
-  if (!force && getToken() && !sessionExpiredLocally()) return true;
+  if (!force && getToken() && !sessionExpiredLocally()) { lastAuthFail = null; return true; }
   const c = loadLoginCreds();
-  if (!c) return false;
+  if (!c) { lastAuthFail = 'nocreds'; return false; }
   try {
-    const res = await fetch(API_BASE + '/api/mobile/auth/login', {
+    const res = await fetchWithTimeout(API_BASE + '/api/mobile/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ phone: c.phone, password: c.password }),
-    });
+    }, H5_LOGIN_TIMEOUT_MS);
     let json = null;
     try { json = await res.json(); } catch { /* ignore */ }
     if (res.status === 200 && json && json.success && json.token) {
       setSession(json.token, json.expiresIn);
+      lastAuthFail = null;
       return true;
     }
     // 凭据已失效（密码规则变更 / 账号停用）→ 丢弃并回登录页
     clearLoginCreds();
     clearSession();
+    lastAuthFail = 'rejected';
     return false;
   } catch {
-    return false; // 网络异常：保留凭据，下次网络恢复再试
+    lastAuthFail = 'network';
+    return false; // 网络异常/超时：保留凭据，下次网络恢复再试
   }
+}
+
+/* ---------------- 超时保护（CF-WPS-33） ----------------
+   现场 4G/乡镇信号差，Worker 冷启动又要回源飞书，登录实测冷启 3s、弱网可达 10s+。
+   原实现 fetch 无超时：一旦请求悬挂，启动页会**永久停在「正在验证登录状态…」**。
+   统一走 fetchWithTimeout：超时按失败处理（status 0），调用方按未同步/稍后重试处理，
+   绝不再让界面无出口地干等。 */
+const H5_LOGIN_TIMEOUT_MS = 15000;   // 登录宽容一些（冷启动 + 飞书 token）
+const H5_API_TIMEOUT_MS = 20000;     // 业务接口（提交带照片时更慢）
+function fetchWithTimeout(url, opt, timeoutMs) {
+  if (typeof AbortController === 'undefined') return fetch(url, opt); // 老 WebView 无 AbortController：保持原行为
+  const ac = new AbortController();
+  const t = setTimeout(() => { try { ac.abort(); } catch { /* ignore */ } }, timeoutMs);
+  return fetch(url, Object.assign({}, opt, { signal: ac.signal })).finally(() => clearTimeout(t));
 }
 
 /* ---------------- 请求封装 ---------------- */
 async function mobileApi(path, body, method) {
   const isLogin = path.endsWith('/auth/login');
-  const send = (tk) => fetch(API_BASE + path, {
+  const send = (tk) => fetchWithTimeout(API_BASE + path, {
     method: method || (body ? 'POST' : 'GET'),
     headers: tk ? { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tk }
                 : { 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
-  });
+  }, H5_API_TIMEOUT_MS);
 
-  let res = await send(getToken());
+  let res;
+  try {
+    res = await send(getToken());
+  } catch (e) {
+    return { status: 0, body: {}, timeout: true };   // 超时/断网：调用方视为未成功，稍后重试
+  }
 
   // 401 = 登录态失效 → 先尝试静默重登并重试一次；仍失败才回登录页
   if (res.status === 401 && !isLogin) {
     const ok = await ensureSession(true);
-    if (ok) res = await send(getToken());
+    if (ok) {
+      try { res = await send(getToken()); } catch (e) { return { status: 0, body: {}, timeout: true }; }
+    }
     if (!ok || res.status === 401) {
       clearSession();
       redirectToLogin();
@@ -137,13 +166,13 @@ async function mobileApi(path, body, method) {
   return { status: res.status, body: json || {} };
 }
 
-// CF-WPS-12：照片上传（multipart；employee_code 由 Worker 从 Session 注入，前端不传）
+// 照片上传（multipart；employee_code 由 Worker 从 Session 注入，前端不传）
 async function mobileUpload(file, clientRequestId) {
   const token = getToken();
   const fd = new FormData();
   fd.append('file', file, file.name);
   if (clientRequestId) fd.append('client_request_id', clientRequestId);
-  const res = await fetch(API_BASE + '/wps/upload/image', {
+  const res = await fetch(API_BASE + '/api/mobile/upload', {
     method: 'POST',
     headers: token ? { 'Authorization': 'Bearer ' + token } : {},
     body: fd,

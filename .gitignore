@@ -384,6 +384,35 @@ grid-mobile-cloudflare/**/_*.log
 grid-mobile-cloudflare/**/test/_*_shots/
 grid-mobile-cloudflare/**/node_modules/
 
+# ===== 源码治理（2026-09-19）：生成物 / 一次性探针 / 截图 明确忽略 =====
+# deploy.js 由 index.js 经 worker/_scratch/mkdeploy.py 生成，属构建产物，勿入库；
+#   改 Worker 后必须 `npm run build`（mkdeploy + 漂移检测）再 deploy。
+grid-mobile-cloudflare/worker/deploy.js
+# 一次性探针 / 截图脚本（非回归测试，不入库）
+grid-mobile-cloudflare/worker/test/_probe*.mjs
+grid-mobile-cloudflare/worker/test/_shot-*.mjs
+grid-mobile-cloudflare/worker/test/_fetch-*.mjs
+grid-mobile-cloudflare/worker/test/_t*-shots/
+grid-mobile-cloudflare/tools/shots/
+# _scratch 目录内的垃圾（备份/调试/中间产物）；mkdeploy.py 是构建工具，单独保留
+grid-mobile-cloudflare/worker/_scratch/deploy.js.*
+grid-mobile-cloudflare/worker/_scratch/*.bak
+grid-mobile-cloudflare/worker/_scratch/*.log
+grid-mobile-cloudflare/worker/_scratch/names.json
+grid-mobile-cloudflare/worker/_scratch/names.txt
+grid-mobile-cloudflare/worker/_scratch/live-*
+grid-mobile-cloudflare/worker/_scratch/prod_check.html
+grid-mobile-cloudflare/worker/_scratch/wrangler.toml.bak
+grid-mobile-cloudflare/worker/_scratch/s[0-9].js
+grid-mobile-cloudflare/worker/_scratch/unify_*.py
+grid-mobile-cloudflare/worker/_scratch/fix_optcard.py
+grid-mobile-cloudflare/worker/_scratch/findleft.py
+grid-mobile-cloudflare/worker/_scratch/extract.py
+grid-mobile-cloudflare/worker/_scratch/dbg.*
+grid-mobile-cloudflare/worker/_scratch/chk*
+# mkdeploy.py 是部署生成器，必须入库（例外：受版本控制的正式运行脚本）
+!grid-mobile-cloudflare/worker/_scratch/mkdeploy.py
+
 # ===== 含个人信息的导出快照（禁止入库） =====
 # grid_record_sync_map.json 含 54 个真实手机号（wps_record_id 字段），属 PII，
 # 仅保留在本地；生产变更记录（SQL/回滚/报告）可入库，此文件不可。

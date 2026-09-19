@@ -1,393 +1,57 @@
 // ============================================================================
-// WPS OAuth POC-03-A —— Cloudflare Worker（仅 POC 测试，不接入生产 HSE 登录）
+// H5 移动端 Worker —— 网格长巡查业务（2026-09-18 起仅飞书多维表格后端，已弃 WPS）
 // ============================================================================
-// 阶段目标：基于「当前 WPS 官方开放平台文档」对 POC-03 做接口口径收敛，
-//   验证「真实 WPS 用户身份 + KSO-1 鉴权闭环」的代码层正确性（真实联调仍待业务方）。
+// 链路（同一份代码可在不同飞书 base 间切换，换 base 仅改 FS_APP_TOKEN；表 ID 按表名解析）：
+//   浏览器 → /api/mobile/auth/login     网格长信息台账手机号+派生密码登录 → Worker Session JWT
+//          → /api/mobile/patrol/meta    解析巡查网格 + 问题类型/三违库下发
+//          → /api/mobile/upload         飞书 drive media 上传照片 → file_token
+//          → /api/mobile/patrol/submit  规范校验 + client_request_id 幂等 → 写「H5员工日常不安全行为台账」主台账
+//   /wps/records/create                    历史路径名保留的最小 records create 代理（同样写飞书主台账）
 //
-// 链路：
-//   浏览器 → /wps/oauth/start → WPS 登录授权 → /wps/oauth/callback
-//         → code 换 access_token → KSO-1 签名 → GET /v7/users/current
-//         → 真实 WPS user_id / user_name / company_id / avatar
-//
-// 本阶段基于「当前 WPS 官方文档 + 生产 server/services/wpsClient.js」交叉核对（POC-03-A 修正）：
-//   1) OAuth 授权/Token 端点使用 WPS 365 标准：
-//       授权：GET  {WPS_AUTHORIZE_URL}  参数 client_id / response_type=code / redirect_uri / scope / state
-//       Token：POST {WPS_TOKEN_URL}     表单 grant_type=authorization_code&client_id&client_secret&code&redirect_uri
-//      （POC-02 的 /oauthapi/v1/oauth2/token + app_id/app_key 经官方文档核实为错误，POC-03 已改）
-//   2) Token 响应按 OAuth2 扁平结构解析（access_token/refresh_token/expires_in/token_type）。
-//   3) /v7/users/current 走 v7 {code,msg,data} 包裹解析，单独处理。
-//   4) KSO-1 签名按官方算法实现（HMAC-SHA256）。
-//      POC-03-A 关键修正：官方 /v7/users/current 文档明确要求 KSO-1 签名，
-//       → 删除 WPS_API_SIGNATURE 开关，对 userinfo 的正式调用固定为 Bearer + KSO-1；
-//         不再保留 Bearer-only 默认路径。
-//      token 端点（/oauth2/token）是标准 OAuth2，不加 KSO-1。
-//   5) scope 修正为 kso.user_base.read（官方用户授权流程与 /v7/users/current 权限要求一致）。
-//
-// 安全纪律（与任务书 §二 一致）：
-//   - WPS_CLIENT_ID / WPS_CLIENT_SECRET 仅存在于 Worker 服务端 Secret/Env。
-//   - access_token / refresh_token 绝不返回浏览器、绝不写入日志、绝不入数据库。
-//   - 本 Worker 不连接 PG / HSE / JWT，不修改任何生产登录、权限、WPS Grid 业务。
-//   - 本 POC 不把 WPS 身份映射到 employee_id，不写库（见任务书 §二.13）。
+// 存储装配见 worker/storage/index.js（仅飞书；表 ID 按表名契约解析，env 显式 ID 可覆盖）。
+// 安全纪律：
+//   - secret（FS_APP_SECRET / WORKER_SESSION_SECRET / JWT_VERIFY_SECRET）仅存于 Worker Secret。
+//   - Session JWT 绝不回传明文密码；日志/响应绝不泄露 密码明文、完整手机号、token、secret。
+//   - 本 Worker 不连接 PG / HSE，不修改生产登录、权限、HSE 后端任何业务。
 // ============================================================================
 
 // 2026-09 改版：密码改为派生规则（姓名首字母+手机号后4位）+常量时间比较，不再依赖 bcryptjs
 
-// ---- Phase B：存储后端适配层（WPS / 飞书 可切换，零行为变更）----
-import { getAdapter, storageConfig, findExistingByClientRequestId } from './storage/index.js';
+// ---- 存储后端（仅飞书；2026-09-18 起已放弃 WPS）----
+import { getAdapter, storageConfig, findExistingByClientRequestId, invalidateMainLedger, getIdentityRows, invalidateIdentity } from './storage/index.js';
 import { pinyinInitials } from './pinyin-init.js'; // 姓名拼音首字母（构建期压缩表，零依赖）
-// WPS 附件上传原语（handleUploadImage 的 WPS 分支）仍直接依赖 getAppToken
-import { getAppToken } from './storage/wpsAdapter.js';
 // CF-WPS-21：离线逆地理编码（宁津县乡镇/街道边界内置，零外部依赖）
 import { regeoNingjin, validLatLng, GEO_TOWNS } from './geo-regeo.js';
 
 
 
-// ---- 默认端点（均可通过 Cloudflare Var 覆盖；Secret 仅 WPS_CLIENT_ID/SECRET）----
-const DEFAULT_AUTHORIZE_URL = 'https://openapi.wps.cn/oauth2/auth';
-const DEFAULT_TOKEN_URL     = 'https://openapi.wps.cn/oauth2/token';
-const DEFAULT_USERINFO_URL  = 'https://openapi.wps.cn/v7/users/current';
-const DEFAULT_SCOPE        = 'kso.user_base.read'; // POC-03-A 修正：原 kso.user_current.read 非官方默认
-
 // ---- Web Crypto 助手（Worker 原生 crypto.subtle；Node 测试环境由 test 注入 globalThis.crypto）----
 const _enc = new TextEncoder();
 
+// 常量时间字符串比较复用 sha256Hex；此处保留 sha256Hex 供登录 fail-closed 使用
 async function sha256Hex(str) {
   const buf = await crypto.subtle.digest('SHA-256', _enc.encode(str));
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-async function hmacSha256Hex(key, msg) {
-  const keyBuf = await crypto.subtle.importKey(
-    'raw',
-    _enc.encode(key),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign']
-  );
-  const sig = await crypto.subtle.sign('HMAC', keyBuf, _enc.encode(msg));
-  return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, '0')).join('');
-}
-
 // ============================================================================
-// KSO-1 签名（纯函数，仅用于 /v7/users/current；官方要求强制签名）
+// CF-WPS-08 最小落地 —— Worker 业务代理（2026-09-18 起仅飞书后端）
 // ----------------------------------------------------------------------------
-// 官方算法（open.wps.cn/documents/app-integration-dev/wps365/.../signature-description.html，
-// 与本项目生产 server/services/wpsClient.js 的 kso1Sign 完全一致）：
-//   signStr = "KSO-1" + METHOD + RequestURI + ContentType + KsoDate + sha256(RequestBody)
-//   sig     = HMAC-SHA256(secretKey=APPKEY, signStr)
-//   请求头：X-Kso-Date: <RFC1123>
-//           X-Kso-Authorization: KSO-1 <APPID>:<sig>
-// 说明（POC-03-A 修正）：官方 /v7/users/current 文档明确要求 KSO-1 签名，
-//   故本 POC 对 userinfo 的正式调用路径固定为 Bearer + KSO-1，删除 WPS_API_SIGNATURE 开关。
-//   token 端点（/oauth2/token）是 OAuth2 标准，不加 KSO-1。
-// ============================================================================
-
-// 底层纯函数：给定确定输入，返回确定签名（便于测试断言）
-async function kso1Signature({ method, uri, contentType, ksoDate, bodyStr = '', secretKey }) {
-  const bodyHash = bodyStr ? await sha256Hex(bodyStr) : '';
-  const signStr = 'KSO-1' + method.toUpperCase() + uri + contentType + ksoDate + bodyHash;
-  return hmacSha256Hex(secretKey, signStr);
-}
-
-// 生成完整 KSO-1 请求头（供实际 fetch 使用；ksoDate 取当前时间）
-async function buildKso1Headers({ method, uri, contentType, appId, appSecret, bodyStr = '' }) {
-  const ksoDate = new Date().toUTCString(); // RFC1123
-  const signature = await kso1Signature({ method, uri, contentType, ksoDate, bodyStr, secretKey: appSecret });
-  return {
-    'X-Kso-Date': ksoDate,
-    'X-Kso-Authorization': `KSO-1 ${appId}:${signature}`,
-  };
-}
-
-// ----------------------------------------------------------------------------
-// Token 解析（OAuth2 扁平优先；兼容旧版 {result,token} 嵌套）
-// 注意：/oauth2/token 是 OAuth2 标准端点，响应是扁平 JSON，不是 v7 {code,data} 包裹。
-// ----------------------------------------------------------------------------
-function parseTokenResponse(json) {
-  if (!json || typeof json !== 'object') return { ok: false };
-
-  // WPS 365 oauth2/token 成功：扁平 { access_token, refresh_token, expires_in, token_type }
-  if (json.access_token) {
-    return {
-      ok: true,
-      accessToken: json.access_token,
-      refreshToken: json.refresh_token || null,
-      expiresIn: Number(json.expires_in || 0),
-      tokenType: String(json.token_type || 'Bearer'),
-      wpsCode: json.code ?? null,
-    };
-  }
-
-  // 旧版（oauthapi/v2/token）成功：{ result:0, token:{ access_token, ... } }
-  if (json.token && json.token.access_token) {
-    return {
-      ok: true,
-      accessToken: json.token.access_token,
-      refreshToken: json.token.refresh_token || null,
-      expiresIn: Number(json.token.expires_in || 0),
-      tokenType: 'Bearer',
-      wpsCode: json.result ?? null,
-    };
-  }
-
-  // 失败：{ code, msg } 或 { code, message }
-  return {
-    ok: false,
-    wpsCode: json.code ?? json.result ?? null,
-    wpsMsg: json.msg ?? json.message ?? null,
-  };
-}
-
-// ----------------------------------------------------------------------------
-// 用户信息解析（v7 {code,msg,data} 包裹 → 归一化字段）
-// ----------------------------------------------------------------------------
-function unwrapV7(body) {
-  if (body && typeof body === 'object' && 'data' in body && body.data && typeof body.data === 'object') {
-    return body.data;
-  }
-  return body; // 已是裸对象
-}
-
-// 仅以官方确认的字段为正式身份字段：id / user_name / company_id / avatar。
-// 保留同字段命名变体（user_id / userName / companyId）作为容错；
-// 不以 openid / unionid / nickname / company_uid / name 等未被当前接口确认的字段
-// 替代官方 id（POC-03-A §九）。
-function normalizeUser(raw) {
-  if (!raw || typeof raw !== 'object') return null;
-  return {
-    id: raw.id ?? raw.user_id ?? null,
-    userName: raw.user_name ?? raw.userName ?? null,
-    companyId: raw.company_id ?? raw.companyId ?? null,
-    avatar: raw.avatar ?? null,
-  };
-}
-
-// ---- 安全解析 JSON，失败返回 null（绝不抛未捕获异常带走 token）----
-async function safeJson(res) {
-  try {
-    return await res.json();
-  } catch {
-    return null;
-  }
-}
-
-// ---- 取 Cookie ----
-function getCookie(req, name) {
-  const h = req.headers.get('cookie');
-  if (!h) return null;
-  for (const part of h.split(';')) {
-    const idx = part.indexOf('=');
-    if (idx < 0) continue;
-    const k = part.slice(0, idx).trim();
-    const v = part.slice(idx + 1).trim();
-    if (k === name) return decodeURIComponent(v);
-  }
-  return null;
-}
-
-// ============================================================================
-// 路由：/wps/oauth/start —— 生成 state，重定向上 WPS 授权页
-// ============================================================================
-function handleStart(env) {
-  const state = crypto.randomUUID();
-  const redirectUri = env.WPS_REDIRECT_URI;
-  const scope = env.WPS_SCOPE || DEFAULT_SCOPE;
-  const authorizeUrl = env.WPS_AUTHORIZE_URL || DEFAULT_AUTHORIZE_URL;
-  const clientId = env.WPS_CLIENT_ID;
-
-  const url =
-    `${authorizeUrl}?client_id=${encodeURIComponent(clientId)}` +
-    `&response_type=code` +
-    `&redirect_uri=${encodeURIComponent(redirectUri)}` +
-    `&scope=${encodeURIComponent(scope)}` +
-    `&state=${encodeURIComponent(state)}`;
-
-  return new Response(null, {
-    status: 302,
-    headers: {
-      Location: url,
-      'Set-Cookie': `wps_oauth_state=${state}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=300`,
-      'Cache-Control': 'no-store',
-    },
-  });
-}
-
-// ============================================================================
-// 路由：/wps/oauth/callback —— code 换 token，再取用户信息
-// ============================================================================
-async function handleCallback(request, env) {
-  const u = new URL(request.url);
-  const code = u.searchParams.get('code');
-  const state = u.searchParams.get('state');
-
-  // ---- state 服务端校验（POC：cookie 双重提交模式）----
-  const expectedState = getCookie(request, 'wps_oauth_state');
-  const stateOk = !!code && !!expectedState && state === expectedState;
-  if (!code || !stateOk) {
-    return new Response(
-      JSON.stringify({
-        success: false,
-        stage: 'callback',
-        message: '缺少 code 或 state 校验失败',
-        stateReceived: !!state,
-        stateVerified: stateOk,
-      }),
-      { status: 400, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } }
-    );
-  }
-
-  const tokenUrl = env.WPS_TOKEN_URL || DEFAULT_TOKEN_URL;
-
-  // ---- 1) code → access_token（OAuth2 标准表单；不加任何签名）----
-  let tokenRes, tokenJson;
-  try {
-    tokenRes = await fetch(tokenUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'authorization_code',
-        client_id: env.WPS_CLIENT_ID,
-        client_secret: env.WPS_CLIENT_SECRET,
-        code,
-        redirect_uri: env.WPS_REDIRECT_URI,
-      }).toString(),
-    });
-    tokenJson = await safeJson(tokenRes);
-  } catch (e) {
-    return new Response(
-      JSON.stringify({ success: false, stage: 'token', message: 'token 请求异常', detail: String(e) }),
-      { status: 502, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } }
-    );
-  }
-
-  const token = parseTokenResponse(tokenJson);
-  if (!token.ok) {
-    return new Response(
-      JSON.stringify({
-        success: false,
-        stage: 'token',
-        httpStatus: tokenRes?.status,
-        wpsCode: token.wpsCode ?? null,
-        message: token.wpsMsg ?? 'token 获取失败',
-        tokenReceived: false,
-      }),
-      { status: 502, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } }
-    );
-  }
-  const accessToken = token.accessToken;
-
-  // ---- 2) access_token → /v7/users/current（官方要求：Bearer + KSO-1 强制签名）----
-  const userInfoUrl = env.WPS_USERINFO_URL || DEFAULT_USERINFO_URL;
-  const parsed = new URL(userInfoUrl);
-  const requestUri = parsed.pathname + parsed.search; // KSO-1 签名需含 query
-  const CONTENT_TYPE = 'application/json';
-
-  // KSO-1 始终附加（POC-03-A：删除 WPS_API_SIGNATURE 开关，按官方文档固定 Bearer + KSO-1）
-  const kso1 = await buildKso1Headers({
-    method: 'GET',
-    uri: requestUri,
-    contentType: CONTENT_TYPE,
-    appId: env.WPS_CLIENT_ID,
-    appSecret: env.WPS_CLIENT_SECRET,
-    bodyStr: '',
-  });
-  const userHeaders = {
-    Authorization: `Bearer ${accessToken}`,
-    'Content-Type': CONTENT_TYPE,
-    ...kso1, // X-Kso-Date + X-Kso-Authorization
-  };
-  const kso1Applied = true;
-
-  let userRes, userJson;
-  try {
-    userRes = await fetch(userInfoUrl, { method: 'GET', headers: userHeaders });
-    userJson = await safeJson(userRes);
-  } catch (e) {
-    return new Response(
-      JSON.stringify({
-        success: false,
-        stage: 'current_user',
-        httpStatus: userRes?.status ?? null,
-        wpsCode: userJson?.code ?? null,
-        message: userJson?.msg ?? '用户信息请求异常',
-        tokenReceived: true, // 已拿到 token，但绝不回传
-        kso1Applied,
-      }),
-      { status: 502, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } }
-    );
-  }
-
-  // 401/403/签名错误/权限不足/解析为空 —— 保留真实 HTTP 状态与 WPS code，不泄露 token
-  const user = normalizeUser(unwrapV7(userJson));
-  if (!userRes.ok || !user || !user.id) {
-    const status = userRes?.status;
-    const ksoErrMsg =
-      status === 401 ? '鉴权失败（401）：Bearer 或 KSO-1 签名无效' :
-      status === 403 ? '权限不足（403）：scope 或应用权限不足' :
-      userJson?.msg ?? '用户信息解析为空';
-    return new Response(
-      JSON.stringify({
-        success: false,
-        stage: 'current_user',
-        httpStatus: status ?? null,
-        wpsCode: userJson?.code ?? null,
-        message: ksoErrMsg,
-        tokenReceived: true,
-        kso1Applied,
-      }),
-      { status: 502, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } }
-    );
-  }
-
-  // ---- 3) 返回脱敏结果（无 token、无 secret）----
-  return new Response(
-    JSON.stringify({
-      success: true,
-      stage: 'completed',
-      oauth: { codeReceived: true, stateReceived: true },
-      token: {
-        received: true,
-        tokenType: token.tokenType,
-        expiresIn: token.expiresIn,
-        refreshTokenReceived: !!token.refreshToken,
-      },
-      user: {
-        id: user.id,
-        userName: user.userName,
-        companyId: user.companyId,
-        avatarReceived: !!user.avatar, // 头像为公开可访问 URL，非敏感凭据
-      },
-      security: {
-        accessTokenReturnedToBrowser: false,
-        refreshTokenReturnedToBrowser: false,
-        kso1Applied,
-      },
-    }),
-    { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } }
-  );
-}
-
-// ============================================================================
-// CF-WPS-08 最小落地 —— Worker v2 业务代理增量（在 POC OAuth 之上追加）
-// ----------------------------------------------------------------------------
-// 边界（CF-WPS-08 任务书 §十/§十七）：
-//   - 只做「安全代理 + WPS 缓冲层」，不做 HSE 后端、不连 PG、不重写认证。
-//   - POST /wps/records/create：最小 WPS record create 代理。
+// 边界（CF-WPS-08 任务书 §十/§十七；2026-09-18 已去 WPS）：
+//   - 只做「安全代理 + 飞书缓冲层」，不做 HSE 后端、不连 PG、不重写认证。
+//   - POST /wps/records/create：最小 records create 代理（历史路径名保留，后端即飞书主台账）。
 //       · 认证门：Bearer JWT —— 用与本地 HSE 后端相同的 JWT_SECRET（Secret 注入）
 //         做 HS256 验签（复用现有 JWT 体系，不新建认证；只验签，不签发）。
-//       · 写开关：env ALLOW_WPS_WRITE 必须 === 'true'（fail-closed，默认禁写）。
-//       · 字段白名单：仅放行移动端巡查提交相关列（对齐 wpsFieldMap）。
-//   - POST /wps/upload/image：WPS Attachment→URL 能力已实测不可用（CF-WPS-02：
-//     uploadId 无 URL / attachment/urls 404 / ksc-bj 签发端点未暴露）→ 显式 501，
-//     绝不假装可用、绝不引入第三方对象存储。
+//       · 字段白名单：仅放行移动端巡查提交相关列（对齐主台账）。原 ALLOW_WPS_WRITE 写开关已废除，
+//         写入目标一律为「H5员工日常不安全行为台账」主台账（Q1 单主台账口径）。
+//   - POST /api/mobile/upload：飞书 drive media 上传图片 → file_token（纯上传，不建记录；
+//     附件在巡查提交时随 body.photo_tokens 落入「三违照片」列）。
 //   - CORS：仅放行 env CF_ALLOWED_ORIGINS 白名单（逗号分隔），默认空 = 全部拒绝。
 //   - 错误归一化：统一 { success:false, code, message }；secret/token/密码绝不入响应与日志。
-//   - 本地验证：test/cfwps08.test.mjs（mock WPS upstream，不触碰真实 WPS 写）。
+//   - 本地验证：test/cfwps08.test.mjs（mock 上游，不触碰真实写）。
 // ============================================================================
 
-// ---- WPS record 字段白名单（CF-WPS-09 实测对齐 cn229thwalDs sheet 3「表格视图」30 字段）----
-// 注意：「员工编码」列存在于 sheet 11（员工信息维护），sheet 3 的身份快照列是「巡查人员ID」。
-// Attachment 列（三违照片：图片1/2/3）显式不入白名单：二段式上传→URL 能力未验证（CF-WPS-02/08/09）。
+// ---- record 字段白名单（移动端巡查提交相关列；仅用于 /wps/records/create 历史代理）----
 const RECORD_FIELD_WHITELIST = new Set([
   '姓名', '分组名称', '所属岗位', '网格等级', '日期',
   '三违行为', '违章人姓名', '违章人性别', '违章人年龄',
@@ -400,15 +64,6 @@ const RECORD_FIELD_WHITELIST = new Set([
 const PROTECTED_FIELDS = new Set([
   'grid_id', 'inspector_employee_id', 'attribution_status',
   'deduction', 'responsibility', 'review', 'employee_code',
-]);
-
-// ---- CF-WPS-10：隔离测试 Sheet 白名单（目标 Sheet「H5提交测试」，业务方 UI 人工创建）----
-// 与生产 Sheet 白名单严格分离：employee_code 在测试 Sheet 是业务身份验证列（§五），
-// 在生产巡查 Sheet 仍是内部归因字段（PROTECTED_FIELDS，禁止 H5 提交）。
-// 注意：此白名单只允许写入隔离测试 Sheet，生产巡查 Sheet（sheet 3）永不变更目标。
-const TEST_FIELD_WHITELIST = new Set([
-  '测试编号', 'employee_code', '姓名', '巡查时间', '网格',
-  '问题描述', '来源', '测试状态', 'client_request_id', '创建时间',
 ]);
 
 // 请求体元字段（非记录字段，取走后再进白名单过滤）
@@ -483,18 +138,17 @@ function b64urlToBytes(s) {
   return Uint8Array.from(bin, (c) => c.charCodeAt(0));
 }
 
-// ---- 应用 access_token / 记录归一化 / 分页扫描 / 幂等预查 / records create
-//      均已迁入 worker/storage/wpsAdapter.js（零行为变更），通过底部 re-export 供测试复用。----
+// ---- 分页扫描 / 幂等预查 / records create 均已迁入 worker/storage/index.js / feishuAdapter.js ----
 
-// ---- 最小 record create 代理（白名单 + fail-closed 写开关 + JWT 门）----
+// ---- 最小 record create 代理（白名单 + JWT 门；写飞书主台账）----
 async function handleRecordCreate(request, env) {
   const origin = corsOrigin(request, env);
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
 
   try {
-    // 存储后端装配（WPS / 飞书）
+    // 存储后端装配（飞书）
     const adapter = getAdapter(env);
-    const cfg = storageConfig(env);
+    const cfg = await storageConfig(env);
 
     // 门 1：JWT（现有体系验签；未配置 secret = 拒绝）
     if (!env.JWT_VERIFY_SECRET) return errRes('AUTH_NOT_CONFIGURED', '认证未配置', 503, corsHeaders(origin));
@@ -503,15 +157,11 @@ async function handleRecordCreate(request, env) {
     if (!(await verifyJwt(token, env.JWT_VERIFY_SECRET))) {
       return errRes('UNAUTHORIZED', '未认证或登录态失效', 401, corsHeaders(origin));
     }
-    // 门 2：写开关 fail-closed
-    if (String(env.ALLOW_WPS_WRITE || '') !== 'true') {
-      return errRes('WPS_WRITE_DISABLED', '写入未启用（ALLOW_WPS_WRITE）', 403, corsHeaders(origin));
-    }
-    // 门 3：目标文件配置
+    // 门 2：目标文件配置
     const fileId = cfg.fileId;
     if (!fileId) return errRes('STORAGE_NOT_CONFIGURED', '存储目标未配置', 503, corsHeaders(origin));
 
-    // 体：{ target?: 'test', records: [ {字段名: 值} ] }
+    // 体：{ records: [ {字段名: 值} ] }（历史 target='test' 分支已废弃）
     // 413：体超限（CF-WPS-10 §七.6）
     const contentLen = Number(request.headers.get('content-length') || '0');
     if (contentLen > MAX_BODY_BYTES) {
@@ -520,22 +170,10 @@ async function handleRecordCreate(request, env) {
     let body;
     try { body = await request.json(); } catch { return errRes('BAD_REQUEST', '请求体必须为 JSON', 400, corsHeaders(origin)); }
 
-    // 目标 Sheet 语义（CF-WPS-10）：target==='test' → 隔离测试 Sheet；缺省 → 生产巡查 Sheet
-    const target = body && typeof body.target === 'string' ? body.target : '';
-    let sheetId;
-    let fieldWhitelist;
-    let isTestTarget = false;
-    if (target === 'test') {
-      sheetId = cfg.testSheetId;
-      if (!sheetId) return errRes('TEST_SHEET_NOT_CONFIGURED', '测试 Sheet 未配置', 503, corsHeaders(origin));
-      fieldWhitelist = TEST_FIELD_WHITELIST;
-      isTestTarget = true;
-    } else {
-      // 通用写代理的生产目标：WPS=三违 Sheet3(WPS_DBSHEET_SHEET_ID)；飞书=FS_PATROL_PRODUCTION_TABLE_ID
-      sheetId = cfg.backend === 'feishu' ? env.FS_PATROL_PRODUCTION_TABLE_ID : env.WPS_DBSHEET_SHEET_ID;
-      if (!sheetId) return errRes('STORAGE_NOT_CONFIGURED', '生产目标 Sheet 未配置', 503, corsHeaders(origin));
-      fieldWhitelist = RECORD_FIELD_WHITELIST;
-    }
+    // 目标 Sheet 语义（2026-09-18 单主台账：原 test 分支已删，一律写主台账 prodSheetId）
+    const sheetId = cfg.prodSheetId;
+    if (!sheetId) return errRes('STORAGE_NOT_CONFIGURED', '主台账未配置', 503, corsHeaders(origin));
+    const fieldWhitelist = RECORD_FIELD_WHITELIST;
 
     const records = Array.isArray(body && body.records) ? body.records : [];
     if (!records.length || records.length > 50) {
@@ -545,30 +183,15 @@ async function handleRecordCreate(request, env) {
       const out = {};
       for (const [k, v] of Object.entries(r || {})) {
         if (BODY_META_FIELDS.has(k)) continue;
-        // employee_code 仅在测试目标放行（CF-WPS-10 §五 业务身份验证列）；生产通道仍无条件剥离
-        if (PROTECTED_FIELDS.has(k) && !(isTestTarget && k === 'employee_code')) continue;
+        if (PROTECTED_FIELDS.has(k)) continue; // 保护字段无条件剥离
         if (fieldWhitelist.has(k)) out[k] = typeof v === 'string' ? v : String(v);
       }
       return out;
     }).filter((r) => Object.keys(r).length > 0);
     if (!cleaned.length) return errRes('BAD_REQUEST', '无任何白名单内字段', 400, corsHeaders(origin));
 
-    // 幂等预查（CF-WPS-10 §六，仅测试目标）：扫描测试 Sheet 已有记录的 client_request_id，
-    // 命中则不再创建，返回既有记录 id（deduplicated:true）。
-    // 说明：扫描式幂等依赖全表扫描，仅适用于小体量测试 Sheet；生产通道幂等仍为 PENDING。
-    if (isTestTarget) {
-      const clientReqIds = cleaned.map((r) => r.client_request_id).filter(Boolean);
-      if (clientReqIds.length) {
-        const existing = await findExistingByClientRequestId(adapter, env, fileId, sheetId, clientReqIds);
-        if (existing) {
-          return jsonRes({ success: true, code: 'OK', deduplicated: true, recordIds: existing }, 200, corsHeaders(origin));
-        }
-      }
-    }
-
-    // 上游：存储后端 records create（适配器按后端转换端点/格式）
-    // 飞书后端：表已类型化，写入前做日期列（日期/提交时间）字符串→毫秒变换
-    const outCleaned = cfg.backend === 'feishu' ? cleaned.map(feishuTypedRecord) : cleaned;
+    // 写主台账（飞书表已类型化：日期列字符串→毫秒）
+    const outCleaned = cleaned.map(feishuTypedRecord);
     try {
       const recs = await adapter.createRecords(env, fileId, sheetId, outCleaned);
       return jsonRes({ success: true, code: 'OK', recordIds: recs }, 200, corsHeaders(origin));
@@ -596,7 +219,7 @@ async function handleRecordCreate(request, env) {
 //   - 不复用 JWT_VERIFY_SECRET 签发：否则 Worker 签出的 token 会被本地 HSE 后端
 //     接受（同 secret），形成跨系统信任升级。Worker 对 /wps/records/create 仍只验签。
 //   - 全部认证失败统一 401「手机号或密码错误」，不做账号枚举区分。
-//   - 密码明文/完整手机号/WPS token/secret 绝不入响应与日志。
+//   - 密码明文/完整手机号/secret 绝不入响应与日志。
 //   - Session 为无状态 JWT（不引入外部存储）；logout = 客户端丢弃 + 短 TTL 兜底，
 //     服务端无法主动吊销（限制如实写报告）。
 //   - 派生密码规则本身即业务约定（用户侧公示），台账即凭据源；规则变更须同步本实现。
@@ -693,16 +316,231 @@ function msToPatrolTime(v) {
 // 飞书类型化表（测试/生产两表统一结构）的字段映射：
 //   巡查时间→日期(ms)、创建时间→提交时间(ms)；其余键原样透传。
 // ⚠️ 白名单硬防护：飞书 bitable 写入「表里不存在的字段名」会自动补建文本列（列漂移）。
-//    因此 feishu 后端只允许写出白名单内的字段，未知键一律丢弃（WPS 后端不走此变换）。
+//    因此 feishu 后端只允许写出白名单内的字段，未知键一律丢弃。
+// ⚠️ 重映射键也必须进白名单：否则白名单先 `continue` 掉，重映射分支永远不执行。
+//    （2026-09-17 实测：巡查时间/创建时间被静默丢弃，9 条记录里 8 条「日期/提交时间」为空，
+//      接口却返回 success —— 典型静默数据丢失。见 test/_t4-timeloss-proof.mjs）
 const FEISHU_FIELD_WHITELIST = new Set([
   // Excel 19 列
   '序号', '昵称', '分组名称', '姓名', '所属岗位', '网格等级', '日期', '三违照片', '三违行为',
   '违章人姓名', '违章人性别', '违章人年龄', '整改后照片', '当日是否报名', '标记', '是否补交',
   '提交时间', '编号', '来源日期',
-  // H5 巡查链路列
-  '巡查人员ID', '网格', '问题描述', '问题类型', '是否三违', '涉及人员', '来源', 'client_request_id',
+  // 主台账「H5员工日常不安全行为台账」tbl5QiCv5Qbal044 真实列（2026-09-18 lark 实测 17 列）
+  // ⚠️ 这是 H5 巡查提交的**唯一**写入目标。此前白名单里只有「表格视图」的旧列名
+  //    （三违行为/违章人姓名/提交时间…）和一套主台账里根本不存在的列
+  //    （巡查人员ID/网格/问题描述/问题类型/是否三违/涉及人员/来源），
+  //    导致每一次提交都被飞书以 1254045 FieldNameNotFound 拒绝 → 前端只看到 502
+  //    「存储写入失败」（见 test/_t25-write-why.mjs、_t26-find-table.mjs）。
+  // ⚠️ 「日期」是 type=1001 创建时间**只读**列，绝不能写入。
+  '检查人姓名', '网格等级', '片区|班组', '违章照片', '违章人员姓名', '性别', '年龄',
+  '车辆类型|保洁员', '司龄', '违章行为', '项目采取措施', '惩罚数额', '整改后照片', '备注', '描述', '来源',
+  // H5 旧链路列（保留仅为兼容历史 /wps/records/create 调用，主台账无这些列，写了会 1254045）
+  '巡查人员ID', '网格', '问题描述', '问题类型', '是否三违', '涉及人员', 'client_request_id',
   'employee_code', '测试编号', '三违行为描述', '照片状态', '测试状态',
+  // 重映射源键（必须先过白名单，才能被下面的 if 改写成「日期」/「提交时间」）
+  '巡查时间', '创建时间',
+  // ── CF-WPS-36 整改待办（跨账号指派）新增列 ──────────────────────────────
+  // 指派关系必须落在**服务端**才能被被指派人读到（此前只写指派人本机 localStorage，
+  // 导致「转给责任乡镇」后对方永远收不到，见 docs/三级账号权限与流程测试报告.md）。
+  // 全部用文本列（type=1）：值域自由、不依赖单选选项，避免选项漂移导致写入失败。
+  '整改接收人ID', '整改接收人姓名', '整改责任单位', '整改状态',
+  '指派人ID', '指派人姓名', '指派人单位', '指派时间', '整改完成时间', '整改说明',
 ]);
+
+/* 整改待办列（CF-WPS-36）—— 与主台账同表存放：一条巡查记录最多一条待办，
+   语义一致、无需额外建表；新增列由 ensureTodoFields() 幂等创建。 */
+const TODO_FIELDS = {
+  assigneeId: '整改接收人ID',
+  assigneeName: '整改接收人姓名',
+  town: '整改责任单位',
+  status: '整改状态',
+  assignerId: '指派人ID',
+  assignerName: '指派人姓名',
+  assignerDept: '指派人单位',   // CF-WPS-57：指派人的**所属部门**（如 公司管理=安环管理部），
+                                // 与 town（整改责任单位=接收方单位）语义不同，不可混用：
+                                // 「来自 XXX」应显示指派人的单位，而非接收方的责任单位。
+  assignedAt: '指派时间',
+  doneAt: '整改完成时间',
+  note: '整改说明',
+};
+const TODO_STATUS = { pending: '待整改', done: '已完成' };
+
+// 幂等建列：表内缺哪列补哪列（同名已存在时飞书返回 duplicated，视为成功）。
+// 建列失败**不阻断业务**（降级：待办写入会失败但巡查提交照常），只记日志。
+async function ensureTodoFields(env, fileId, sheetId) {
+  if (todoFieldsReady) return todoFieldsReady;
+  const adapter = getAdapter(env);
+  try {
+    const existing = new Set((await adapter.listFields(env, fileId, sheetId)).map((f) => f.fieldName));
+    const missing = Object.values(TODO_FIELDS).filter((n) => !existing.has(n));
+    for (const n of missing) {
+      try { await adapter.ensureField(env, fileId, sheetId, n, 1); }
+      catch (e) { console.warn('[todo] ensureField failed: ' + n + ' ' + (e && e.fsMsg)); }
+    }
+    todoFieldsReady = { ok: true, missing: missing.length };
+  } catch (e) {
+    console.warn('[todo] listFields failed: ' + (e && e.message));
+    todoFieldsReady = { ok: false, err: String((e && e.message) || e) };
+  }
+  return todoFieldsReady;
+}
+let todoFieldsReady = null;   // 同一 isolate 内只建一次，避免每次请求都回源飞书
+
+/* ─────────────── 微信推送（WxPusher，CF-WPS-41）───────────────
+   通道选型（2026-09-19 与业务方确认）：WxPusher 标准推送。
+   - 个人微信即可接收，不需要企业微信/认证服务号，现场人员零门槛。
+   - 用户在「我的」页点关注链接 → 关注应用 → 把自己的 UID 填回 App 完成绑定。
+   绑定关系写在「H5移动端身份表」新增列「微信推送UID」：
+   该表一行一个人、手机号即账号 → 天然对齐，**不需要额外建表也不需要 KV**。
+   ⚠️ 未配置 WX_APP_TOKEN 时全部静默降级：可以没有推送，但不能因为没配推送就派不了活。 */
+const WX_FIELD = '微信推送UID';
+const WX_API = 'https://wxpusher.zjiecode.com/api';
+let wxFieldReady = null;
+
+/* ─────────────── 来源列（CF-WPS 派发/上报区分）───────────────
+   公司管理 / 乡镇作业中心经理 建的记录了算「派发任务」，其余角色算「上报」。
+   前端 toPatrolBody 会把 rec.source 透传进 body.source，Worker 落主台账「来源」列，
+   台账卡片据此显示 派发/上报 标签。列缺则幂等补建（文本列 type=1），
+   建列失败不阻断业务（降级：来源为空），只记日志。 */
+const SOURCE_FIELD = '来源';
+let sourceFieldReady = null;
+
+async function ensureSourceField(env, fileId, sheetId) {
+  if (sourceFieldReady) return sourceFieldReady;
+  const adapter = getAdapter(env);
+  try {
+    const existing = new Set((await adapter.listFields(env, fileId, sheetId)).map((f) => f.fieldName));
+    let present = existing.has(SOURCE_FIELD);
+    if (!present) {
+      try { await adapter.ensureField(env, fileId, sheetId, SOURCE_FIELD, 1); present = true; }
+      catch (e) { console.warn('[source] ensureField failed: ' + (e && e.fsMsg)); present = false; }
+    }
+    sourceFieldReady = { ok: present };
+  } catch (e) {
+    console.warn('[source] listFields failed: ' + (e && e.message));
+    sourceFieldReady = { ok: false };
+  }
+  return sourceFieldReady;
+}
+
+async function ensureWxField(env, fileId, sheetId) {
+  if (wxFieldReady) return wxFieldReady;
+  const adapter = getAdapter(env);
+  try {
+    const existing = new Set((await adapter.listFields(env, fileId, sheetId)).map((f) => f.fieldName));
+    if (!existing.has(WX_FIELD)) {
+      try { await adapter.ensureField(env, fileId, sheetId, WX_FIELD, 1); }
+      catch (e) { console.warn('[wx] ensureField failed: ' + (e && e.fsMsg)); }
+    }
+    wxFieldReady = { ok: true };
+  } catch (e) {
+    console.warn('[wx] listFields failed: ' + (e && e.message));
+    wxFieldReady = { ok: false };
+  }
+  return wxFieldReady;
+}
+
+// 发一条微信。全部 try/catch：推送失败绝不影响主流程。
+async function wxSend(env, uids, summary, content, url) {
+  const token = String(env.WX_APP_TOKEN || '').trim();
+  if (!token) return { ok: false, reason: 'not_configured' };
+  const list = (Array.isArray(uids) ? uids : [uids])
+    .filter((u) => typeof u === 'string' && /^UID_[A-Za-z0-9]+$/i.test(u.trim()));
+  if (!list.length) return { ok: false, reason: 'no_uid' };
+  try {
+    const res = await fetch(WX_API + '/send/message', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        appToken: token,
+        content: String(content || '').slice(0, 40000),
+        summary: String(summary || '').slice(0, 100),
+        contentType: 1,   // 1=纯文本：现场人员手机（含老旧 WebView）渲染最稳
+        uids: list.slice(0, 2000),
+        url: url ? String(url).slice(0, 1000) : undefined,
+      }),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (j && j.code === 1000) return { ok: true };
+    return { ok: false, reason: 'upstream', msg: String((j && j.msg) || res.status) };
+  } catch (e) {
+    return { ok: false, reason: 'network', msg: String((e && e.message) || e) };
+  }
+}
+
+// 手机号 → UID（身份表一行一人；找不到/未绑定返回空串）
+async function wxUidByPhone(env, cfg, phone) {
+  const p = String(phone || '').replace(/\D/g, '');
+  if (p.length < 6) return '';
+  // CF-WPS-43：60s 缓存身份表，wxPush 段从 2s 降到 ~0.3s
+  let rows;
+  try { rows = await getIdentityRows(getAdapter(env), env, cfg.fileId, cfg.ledgerSheetId); }
+  catch { return ''; }
+  const hit = rows.find((r) => phoneDigits((r.fields || {})['手机号']) === p);
+  return hit ? fieldText((hit.fields || {})[WX_FIELD]).trim() : '';
+}
+
+// 校验 UID 确实关注了本应用（防填错 / 填成别人的 UID）
+async function wxUidFollows(env, uid) {
+  const token = String(env.WX_APP_TOKEN || '').trim();
+  const u = String(uid || '').trim();
+  if (!token || !/^UID_[A-Za-z0-9]+$/i.test(u)) return false;
+  try {
+    const qs = new URLSearchParams({ appToken: token, uid: u, page: '1', pageSize: '100', type: '0' });
+    const res = await fetch(WX_API + '/fun/wxuser/v2?' + qs.toString());
+    const j = await res.json().catch(() => ({}));
+    const recs = (j && j.data && j.data.records) || [];
+    return recs.some((r) => String(r.uid || '').toUpperCase() === u.toUpperCase() && !r.reject);
+  } catch { return false; }
+}
+
+/*
+ * 指派成功后的微信通知（CF-WPS-43 抽成公共函数，供 /patrol/submit 的「建单即指派」
+ * 与 /assign 的「事后指派」复用）。
+ * 推送失败**绝不影响指派结果**（活已经派出去了），只回执状态给前端如实提示。
+ * 未配置 WX_APP_TOKEN 时直接短路返回 not_configured —— 不能因为没配推送就把「派活」拖慢。
+ */
+async function notifyAssign(env, cfg, o) {
+  const src = o || {};
+  if (!String(env.WX_APP_TOKEN || '').trim()) return 'not_configured';
+  try {
+    await ensureWxField(env, cfg.fileId, cfg.ledgerSheetId);
+    const uid = await wxUidByPhone(env, cfg, src.assigneeId);
+    if (!uid) return 'no_uid';
+    const r = await wxSend(
+      env, [uid], '收到一条整改待办',
+      [
+        '【网格巡查】' + String(src.assignerName || '上级') + ' 指派你整改：',
+        '问题：' + (src.problem || '（详见 App）'),
+        '责任单位：' + (src.town || '—'),
+        '指派时间：' + (src.assignedAt || ''),
+        '请打开「网格巡查」→「整改任务」处理。',
+      ].join('\n'),
+      String(env.WX_APP_URL || 'https://grid-mobile-cloudflare.pages.dev/check')
+    );
+    return r.ok ? 'sent' : (r.reason || 'failed');
+  } catch { return 'error'; }
+}
+
+// 主台账无「是否三违」布尔列、也无「问题类型」列 —— 沿用业务约定用「违章行为」有无表达：
+//   是三违 → 填具体三违行为；非三违 → 填「无三违行为」。
+const NO_VIOLATION_TEXT = '无三违行为';
+
+// 主台账既没有「巡查人员ID」列，也没有可写的日期列（日期=1001 只读），
+// 因此把「手机号 / 巡查时间 / 幂等键」三样结构化信息压进唯一的自由文本列「备注」
+// （docs/H5环节与飞书各表关联.md §5.3 即指定 备注 承载 H5 身份标识）。
+// 格式：`巡查人ID:<phone> · 巡查时间:<YYYY-MM-DD HH:mm> · req:<clientRequestId>`
+function buildPatrolNote(employeeCode, inspectionTime, clientRequestId) {
+  return ['巡查人ID:' + employeeCode, '巡查时间:' + inspectionTime, 'req:' + clientRequestId].join(' · ');
+}
+const NOTE_EMPLOYEE_RE = /巡查人ID:([^\s·]+)/;
+const NOTE_TIME_RE = /巡查时间:(\d{4}-\d{2}-\d{2}(?:[ \s]\d{2}:\d{2})?)/;
+const NOTE_REQ_RE = /req:([A-Za-z0-9_-]{8,64})/;
+function parsePatrolNote(note) {
+  const s = String(note || '');
+  const mE = s.match(NOTE_EMPLOYEE_RE), mT = s.match(NOTE_TIME_RE), mR = s.match(NOTE_REQ_RE);
+  return { employeeCode: mE ? mE[1] : '', inspectionTime: mT ? mT[1] : '', clientRequestId: mR ? mR[1] : '' };
+}
 
 function feishuTypedRecord(record) {
   const out = {};
@@ -755,9 +593,9 @@ async function handleMobileLogin(request, env) {
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
 
   try {
-    // 存储后端装配（WPS / 飞书）
+    // 存储后端装配（飞书）
     const adapter = getAdapter(env);
-    const cfg = storageConfig(env);
+    const cfg = await storageConfig(env);
 
     // 门 1：登录总开关（fail-closed，默认禁用）
     if (String(env.MOBILE_LOGIN_ENABLED || '') !== 'true') {
@@ -780,7 +618,7 @@ async function handleMobileLogin(request, env) {
     let body;
     try { body = await request.json(); } catch { return errRes('BAD_REQUEST', '请求格式不正确', 400, corsHeaders(origin)); }
     // 输入侧严格校验（fail-closed）：原始手机号必须是 11 位纯数字；注入串/全角/带格式一律 400。
-    // 数字归一化（phoneDigits）只用于 WPS 身份数据读取侧的比对，不用于放宽登录输入。
+    // 数字归一化（phoneDigits）只用于身份数据读取侧的比对，不用于放宽登录输入。
     const rawPhone = body && typeof body.phone === 'string' ? body.phone.trim() : '';
     const phone = phoneDigits(rawPhone);
     const password = body && typeof body.password === 'string' ? body.password : '';
@@ -916,24 +754,39 @@ async function handleMobileLogout(request, env) {
 // ============================================================================
 const ORG_MAX_DEPTH = 6;
 
-// 台账子节点（直接下级）
-function ledgerChildren(rows, name) {
-  return rows.filter((r) => r.superior && r.superior === name);
+// 台账子节点（直接下级）。
+// ⚠️ 同名保护：台账以「姓名」连接上下级（无稳定 ID 列）。若某姓名在台账中不唯一，
+//   它作为「直接上级」的值会把这批人**全部**挂过来，产生错挂组织。
+//   故仅当上级姓名在台账中唯一时才认这条边；上级查无此人（如「公司」等非人名占位）不设限。
+function ledgerChildren(rows, name, nameCount) {
+  const out = [];
+  for (const r of rows) {
+    if (!r.superior || r.superior !== name) continue;
+    if (nameCount && nameCount.get(name) > 1) continue; // 上级重名 → fail-closed
+    out.push(r);
+  }
+  return out;
 }
 
 // 本人子树（不含自己）。本人姓名在台账中不唯一 → null（fail-closed，避免错挂组织）
+// ⚠️ 去重键必须用「记录唯一标识」而非姓名：台账允许同名多记录（实测王五下有两名「周八」，
+//   属两个真实的人）。曾用 seen.has(child.name) 去重，会把第二个人静默吃掉
+//   （cfwps19 A7 长期红灯）。父边歧义已由 ledgerChildren 的 nameCount 把关，此处无需再按名去重。
 function ledgerSubtree(rows, meName) {
+  const nameCount = ledgerNameCount(rows);
   const mine = rows.filter((r) => r.name === meName);
   if (mine.length !== 1) return null;
-  const seen = new Set([meName]);
+  const keyOf = (r) => String(r.recordId || (r.name + '\u0000' + r.department + '\u0000' + r.position));
+  const seen = new Set([keyOf(mine[0])]);
   const out = [];
   let frontier = [meName];
   for (let d = 0; d < ORG_MAX_DEPTH && frontier.length; d++) {
     const next = [];
     for (const nm of frontier) {
-      for (const child of ledgerChildren(rows, nm)) {
-        if (seen.has(child.name)) continue; // 环 / 同名重复保护
-        seen.add(child.name);
+      for (const child of ledgerChildren(rows, nm, nameCount)) {
+        const ck = keyOf(child);
+        if (seen.has(ck)) continue; // 环 / 同一记录重复计入保护
+        seen.add(ck);
         out.push({ ...child, depth: d + 1 });
         next.push(child.name);
       }
@@ -941,6 +794,13 @@ function ledgerSubtree(rows, meName) {
     frontier = next;
   }
   return out;
+}
+
+// 姓名出现次数（重名保护用：被重名的姓名不得作为组织连接键）
+function ledgerNameCount(rows) {
+  const m = new Map();
+  for (const r of rows) m.set(r.name, (m.get(r.name) || 0) + 1);
+  return m;
 }
 
 function orgItem(r, depth) {
@@ -955,7 +815,7 @@ function orgItem(r, depth) {
   };
 }
 
-// 按「分级」分层（前端：经理先看 admins；只有 managers 时先下钻一层）
+// 按「分级」分层并稳定排序（前端：经理先看 admins；只有 managers 时先下钻一层）
 function splitOrg(descs) {
   const admins = [], managers = [], others = [];
   for (const d of descs) {
@@ -964,7 +824,308 @@ function splitOrg(descs) {
     else if (d.grade === '乡镇作业中心经理') managers.push(it);
     else others.push(it);
   }
+  const byDepthThenName = (a, b) => (a.depth - b.depth) || a.name.localeCompare(b.name, 'zh');
+  admins.sort(byDepthThenName);
+  managers.sort(byDepthThenName);
+  others.sort(byDepthThenName);
   return { admins, managers, others };
+}
+
+// ============================================================================
+// 作业中心清单 + 单位内接收人（公司管理转派 / 自己处理选人，两条链路共用）
+// ----------------------------------------------------------------------------
+// 【已用飞书真实台账核准，2026-09-17；口径修订 2026-09-18】
+// 台账 tbl58t9kjyDlacSw 共 68 人，字段：
+//   序号 / 姓名 / 直接上级 / 所属部门 / 职位 / 网格长等级 / 手机号 / 分级
+//
+// 「所属部门」真实写法：
+//   · 乡镇经理  → 「宁城街道片区」「柴胡店镇片区」「刘营伍乡片区」…（XX + 片区）
+//   · 乡镇管理员 → 「宁城街道一班」「杜集镇三四班」「杜集镇六七班」…（XX + N班/N九班）
+//   · 公司本部  → 「项目管理层」「安环管理部」「生产管理部」（职能部门，非作业中心，排除）
+//   · 作业中心  → 「环卫作业中心」「市政园林作业中心」（2026-09-18 起纳入）
+//   · 公园      → 「康宁湖公园」「新河公园」「中心公园」（2026-09-18 起纳入）
+//
+// 实测推导出 **17 个作业中心**（与 2026-09-18 业务口径一致）：
+//   12 个乡镇：保店镇/柴胡店镇/大曹镇/大柳镇/杜集镇/津城街道/刘营伍乡/宁城街道/
+//              时集镇/相衙镇/张大庄镇/长官镇
+//   3 个公园：康宁湖公园/新河公园/中心公园
+//   2 个作业中心：环卫作业中心/市政园林作业中心
+//   · 乡镇作业中心经理 11 人 + 管理员 51 人（其中 6 名管理员在公园）
+//   · ⚠️ 「津城街道」只有 3 个管理员、**未配经理** → 不能只按「经理部门」推导单位，
+//      必须按「所属部门归口」，否则会漏掉一个乡镇。
+//   · ⚠️ 公园与环卫/市政园林作业中心**没有**「乡镇作业中心经理」分级的人
+//      → 负责人必须走 fillUnitHead 三级兜底，否则这些单位恒显示「未配经理 / 待维护」。
+// ============================================================================
+
+// 乡镇名 = 所属部门剥掉「片区」/「N班」后缀。
+// 「N班」含中文数字与组合写法（一班/三四班/六七班/十班），用字符类一次覆盖。
+const TOWN_DEPT_SUFFIX_RE = /(片区|[\d一二三四五六七八九十百]+班)$/u;
+function townLabel(row) {
+  const dept = fieldText(row && row.department).trim();
+  const town = dept.replace(TOWN_DEPT_SUFFIX_RE, '').trim();
+  return { town, department: dept };
+}
+
+// 乡镇锚点：剥完后缀后以行政区划字结尾（镇/乡/街道）。
+// 仅用于**需要区分「行政区划 vs 其他作业中心」**的地方（如人员分级的兜底口径）。
+const TOWN_ANCHOR_RE = /(镇|乡|街道)$/u;
+function isTownName(town) {
+  return TOWN_ANCHOR_RE.test(String(town || ''));
+}
+
+// 作业中心锚点：行政区划（镇/乡/街道）+ 公园 + 作业中心。
+// ---------------------------------------------------------------------------
+// 【2026-09-18 业务口径变更】用户要求：公司管理必须能检查**全公司所有作业中心**，
+//   不止 12 个乡镇——公园与环卫/市政园林作业中心同样是作业中心，必须一并下发。
+//   原实现只认 (镇|乡|街道)，导致 3 个公园 + 2 个作业中心被静默排除
+//   （旧注释甚至写着「公园…须排除」，那是上一版口径，现已作废）。
+//
+// 归属判定（剥掉「片区」「N班」后缀后再匹配）：
+//   · 「宁城街道一班」→「宁城街道」  ✓ 乡镇
+//   · 「康宁湖公园」  →「康宁湖公园」 ✓ 公园
+//   · 「环卫作业中心」→「环卫作业中心」✓ 作业中心
+//   · 「安环管理部」  → 不匹配 ✗（公司本部职能部门，不是作业中心，正确排除）
+//   · 「项目管理层」  → 不匹配 ✗
+const UNIT_ANCHOR_RE = /(镇|乡|街道|公园|作业中心)$/u;
+function isUnitName(unit) {
+  return UNIT_ANCHOR_RE.test(String(unit || ''));
+}
+
+// 全部作业中心清单（按名称去重 + 中文排序）。
+// 口径：镇/乡/街道 + 公园 + 作业中心（见 UNIT_ANCHOR_RE）。
+// 只读推导，零额外配置表；数据源 = 网格长信息台账。
+// 负责人在本单位有登记时带上姓名/电话（津城街道无经理 → manager 为空，前端显示「未配经理」）。
+function ledgerTowns(rows) {
+  const seen = new Set();
+  const out = [];
+  for (const r of rows) {
+    const { town, department } = townLabel(r);
+    if (!town || !isUnitName(town) || seen.has(town)) continue;
+    seen.add(town);
+    out.push({ town, department, managerName: '', managerPhone: '' });
+  }
+  for (const t of out) fillUnitHead(rows, t);
+  out.sort((a, b) => a.town.localeCompare(b.town, 'zh'));
+  return out;
+}
+
+// 回填某作业中心的负责人。三级兜底，覆盖三类命名/分级写法：
+//   ① 本单位内 分级=乡镇作业中心经理 的人 —— 12 个乡镇走这条（杨清华/王臣祥…）
+//   ② 本单位内 分级=公司管理 且职位含「经理」 —— 环卫/市政园林作业中心走这条
+//      （刘菲/韩晓亮/黄元同：分级是「公司管理」，职位「经理」，本中心没有乡镇经理分级的人）
+//   ③ 本单位成员的「直接上级」中分级为负责人者 —— 3 个公园走这条
+//      （公园管理员本人所属部门=XX公园，但他们没有经理分级；其直接上级是黄元同，
+//        即市政园林作业中心经理。没有这条，公园会永远显示「未配经理」）
+function fillUnitHead(rows, unit) {
+  const inUnit = rows.filter((r) => townLabel(r).town === unit.town);
+
+  // ① 乡镇作业中心经理
+  for (const r of inUnit) {
+    if (r.grade === '乡镇作业中心经理') {
+      unit.managerName = r.name;
+      unit.managerPhone = r.phone || '';
+      return;
+    }
+  }
+  // ② 本公司管理且职位带「经理」
+  for (const r of inUnit) {
+    if (r.grade === '公司管理' && /经理/.test(String(r.position || ''))) {
+      unit.managerName = r.name;
+      unit.managerPhone = r.phone || '';
+      return;
+    }
+  }
+  // ③ 成员的直接上级 —— **仅对非行政区划单位（公园）生效**。
+  //    ⚠️ 乡镇绝不能走这条：津城街道确实「未配经理」，其 3 名管理员的直接上级
+  //    直接挂到了市政园林作业中心经理黄元同名下。若对乡镇也兜底，会把公司级经理
+  //    误报成乡镇负责人，掩盖真实的「未配经理」状态（2026-09-18 实测踩到）。
+  //    公园不同：公园本来就不设自己的经理，管理员的上级（黄元同）就是其负责人。
+  if (isTownName(unit.town)) return;
+  const superiors = new Set();
+  for (const r of inUnit) if (r.superior) superiors.add(r.superior);
+  for (const nm of superiors) {
+    const p = rows.find((r) => r.name === nm);
+    if (!p) continue;
+    if (p.grade === '乡镇作业中心经理' || p.grade === '公司管理') {
+      unit.managerName = p.name;
+      unit.managerPhone = p.phone || '';
+      return;
+    }
+  }
+}
+
+// 某乡镇的接收人 = 该镇的「乡镇作业中心经理」+「管理员」。
+// 判定口径：**按人自身的「所属部门」归镇**（不按上下级下钻）——
+//   ① 经理与管理员都是本镇成员，按部门归镇最稳；
+//   ② 「津城街道」无经理但有管理员，按上下级下钻会整镇漏掉。
+// 「直接上级」仅作补充：收本镇成员的直接下级（覆盖部门列填得不规范、但上下级挂对的情况）。
+// ⚠️ 越权防护（双重）：
+//   ① allowed = 本人子树白名单（公司管理 = 全公司），不在白名单的人一律不下发；
+//   ② nameCount 重名保护：重名姓名不得作为组织连接键。
+function ledgerTownPeople(rows, town, nameCount, allowed) {
+  const people = [];
+  const push = (r, depth) => {
+    if (!r || !r.name) return;
+    if (allowed && !allowed.has(r.name)) return; // ① 越权闸门
+    const it = orgItem(r, depth);
+    it.town = town;
+    people.push(it);
+  };
+
+  // (a) 本单位成员：按自身所属部门归口（只认能归到本单位的部门）
+  const members = rows.filter((r) => {
+    const t = townLabel(r);
+    return t.town === town && isUnitName(t.town);
+  });
+  for (const r of members) push(r, 1);
+  // (b) 补充：本单位成员的直接下级（部门列可能为空/不规范，但上下级挂对）
+  //    ⚠️ 2026-09-18 修正：下级若**自己就归属于另一个作业中心**，不得计入本单位。
+  //    典型事故：市政园林作业中心经理黄元同是全公司 20 人的直接上级（含 12 名乡镇经理、
+  //    津城街道 3 名管理员——该镇未配经理，人直接挂在他名下）。若不排除，市政园林作业中心
+  //    会被算成 21 人，等于把大半个公司的人塞进一个单位里。
+  for (const a of members) {
+    for (const child of ledgerChildren(rows, a.name, nameCount)) {
+      const ct = townLabel(child).town;
+      if (isUnitName(ct) && ct !== town) continue; // 该下级另有归属单位，跳过
+      push(child, 2);
+    }
+  }
+
+  // 去重（同一人可能同时被 (a) 与 (b) 命中）
+  const seen = new Set();
+  const uniq = [];
+  for (const p of people) {
+    const k = p.name + '|' + (p.department || '') + '|' + (p.position || '');
+    if (seen.has(k)) continue;
+    seen.add(k);
+    uniq.push(p);
+  }
+  let { admins, managers, others } = splitOrg(uniq);
+
+  // ⚠️ 非行政区划单位（公园 / 环卫·市政园林作业中心）的兜底：
+  //    这些单位里根本没有「乡镇作业中心经理」这个分级的人——
+  //    环卫作业中心只有刘菲/韩晓亮（分级=公司管理），市政园林作业中心只有黄元同（分级=公司管理）。
+  //    按老口径他们会落进 others，而 others 又被清空 → 这些单位 peopleCount=0 → 前端显示「待维护」。
+  //    公司管理分级本身就是负责人/经理，理应作为接收人下发。
+  if (!isTownName(town)) {
+    const promoted = others.filter((o) => o.grade === '公司管理');
+    others = others.filter((o) => o.grade !== '公司管理');
+    managers = managers.concat(promoted).sort((a, b) => (a.depth - b.depth) || a.name.localeCompare(b.name, 'zh'));
+  }
+
+  // 转派接收人只认「乡镇作业中心经理」与「管理员」两类（+ 上述非乡镇单位的公司管理负责人）；
+  // others（其他分级）不具整改权限，不进接收人清单，避免推错人。
+  return { admins, managers, others: [] };
+}
+
+// ============================================================================
+// 乡镇 → 班组 → 人员 三级级联（惰性加载）
+// ----------------------------------------------------------------------------
+// 动机：选人页原先一上来就拉全公司花名册（1291 人），既慢又浪费；
+//   改为「点到哪个乡镇、哪个班组，才加载哪个班组的姓名」。
+//
+// 【真实数据实测 2026-09-17】台账 68 人 / 花名册 1291 人，两级命名规律：
+//   · 片区  「大曹镇片区」   → 承载「乡镇作业中心经理」（花名册里也有这个班组）
+//   · 班组  「大曹镇一班」   → 承载「管理员」+ 作业人员
+//   · 公司本部「人力综合部/生产管理部/安环管理部/项目管理层/财务部」、
+//     「车队」→ **不是作业中心**，由 isUnitName（镇|乡|街道|公园|作业中心 收尾）排除。
+//     ⚠️ 2026-09-18 口径修订：「环卫作业中心」「市政园林作业中心」「XX公园」**属于**作业中心，
+//        不再排除（旧版把它们一并排除了，业务侧要求公司管理能检查全公司所有作业中心）。
+//
+// ⚠️ 三个必须处理的现实差异（否则会漏人）：
+//   ① 班组名里的数字**不是简单 1/2/3**：实测存在「杜集镇三四班」「杜集镇六七班」
+//      「杜集镇九班」「杜集镇十班」→ 排序不能按字符串，也不能假设只有个位数。
+//   ② **花名册有班组、台账没管理员**：大曹镇一班(15人)、大柳镇四班(28人)、
+//      宁城街道二班/三班 等 → 这些班必须照样可点，否则整班人无法选择。
+//   ③ **台账有管理员、花名册没有该班组**：个别一人班组 → 也要照样可点。
+//   故班组清单 = 花名册班组 ∪ 台账管理员所在班组（并集，不以一边为准）。
+// ============================================================================
+
+// 中文数字 → 数值（支持「十」「十二」「三四」这类组合写法）
+const CN_DIGIT = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
+function cnNum(s) {
+  const t = String(s || '');
+  if (/^\d+$/.test(t)) return Number(t);
+  if (t === '十') return 10;
+  // 「十二」= 12，「二十」= 20，「二十三」= 23
+  const m = t.match(/^(.)?十(.)?$/);
+  if (m) return (m[1] ? (CN_DIGIT[m[1]] || 0) : 1) * 10 + (m[2] ? (CN_DIGIT[m[2]] || 0) : 0);
+  return CN_DIGIT[t] || 0;
+}
+
+// 班组排序键：按班号升序，片区排最前（-1）。
+// ⚠️ 组合写法（「三四班」「六七班」）表示**多个班**，必须按其**首位**数字排序：
+//     六七班(6~7) 应排在 八班(8) 之前，而不是按两位数值 67 排到最后。
+//   实测杜集镇同时存在 一班/二班/五班/八班/九班/十班/三四班/六七班 ——
+//   若按两位数排序会出现「八班 → 九班 → 十班 → 三四班 → 六七班」这种反直觉顺序。
+function teamSortKey(dept, town) {
+  const tail = String(dept || '').replace(String(town || ''), '').trim();
+  if (/片区/.test(tail)) return [-1, 0, dept];
+  const m = tail.match(/^([\d一二三四五六七八九十百]+)班$/u);
+  if (!m) return [999, 0, dept];                 // 不符合「N班」的兜底排最后
+  const raw = m[1];
+  if (/^\d+$/.test(raw)) return [Number(raw), raw.length, dept];
+  // 取首位中文数字作为主序；「十班」特殊（首位=十 → 10）
+  const first = CN_DIGIT[raw[0]] || 0;
+  return [first, raw.length, dept];
+}
+function sortTeams(list, town) {
+  return list.slice().sort((a, b) => {
+    const ka = teamSortKey(a.dept, town), kb = teamSortKey(b.dept, town);
+    return (ka[0] - kb[0]) || (ka[1] - kb[1]) || String(ka[2]).localeCompare(String(kb[2]), 'zh');
+  });
+}
+
+// 某作业中心的班组清单（含片区）= 花名册班组 ∪ 台账管理员班组。
+// managerName 仅在片区行回填；其余班组带 maxAdmin / adminCount 供前端展示。
+function townTeams(ledgerRows, rosterRows, town) {
+  // 复用三级兜底（乡镇经理 → 公司管理职位带经理 → 成员的直接上级），
+  // 否则公园 / 环卫·市政园林作业中心永远取不到负责人。
+  const headStub = { town, department: '', managerName: '', managerPhone: '' };
+  fillUnitHead(ledgerRows, headStub);
+  const mgr = headStub.managerName
+    ? ledgerRows.find((r) => r.name === headStub.managerName) || null
+    : null;
+
+  const depts = new Set();
+  const adminsByDept = {};
+  for (const r of ledgerRows) {
+    const { town: t, department } = townLabel(r);
+    if (t !== town || !department) continue;
+    // 公园 / 作业中心没有「片区」也没有「N班」，其部门名本身就是单位名 —— 直接成一个组
+    if (r.grade === '管理员') {
+      depts.add(department);
+      (adminsByDept[department] = adminsByDept[department] || []).push(r);
+    }
+  }
+  // 花名册班组（仅在职，且能归到本镇）
+  const rosterCount = {};
+  for (const r of rosterRows || []) {
+    if (ROSTER_INACTIVE_RE.test(r.status)) continue;
+    const d = String(r.dept || '').trim();
+    if (!d) continue;
+    const t = d.replace(TOWN_DEPT_SUFFIX_RE, '').trim();
+    if (t !== town || !UNIT_ANCHOR_RE.test(t)) continue;
+    depts.add(d);
+    rosterCount[d] = (rosterCount[d] || 0) + 1;
+  }
+
+  const list = [...depts].map((dept) => {
+    const adm = adminsByDept[dept] || [];
+    const isArea = /片区$/.test(dept);
+    return {
+      dept,
+      town,
+      isManagerTeam: isArea,
+      managerName: isArea && mgr ? mgr.name : '',
+      managerPhone: isArea && mgr ? mgr.phone || '' : '',
+      admins: adm.map((a) => ({ name: a.name, phone: a.phone || '', position: a.position || a.grade || '管理员' })),
+      adminCount: adm.length,
+      rosterCount: rosterCount[dept] || 0,
+      peopleCount: rosterCount[dept] || 0,
+    };
+  });
+  return { mgr, teams: sortTeams(list, town) };
 }
 
 // ---- GET /api/mobile/org/subordinates?under=<姓名> ----
@@ -977,7 +1138,7 @@ async function handleOrgSubordinates(request, env) {
   if (!payload) return errRes('UNAUTHORIZED', '未认证或登录态失效', 401, corsHeaders(origin));
 
   const adapter = getAdapter(env);
-  const cfg = storageConfig(env);
+  const cfg = await storageConfig(env);
   if (!cfg.fileId || !cfg.ledgerSheetId) return errRes('IDENTITY_NOT_CONFIGURED', '台账未配置', 503, corsHeaders(origin));
 
   let rows;
@@ -1004,18 +1165,47 @@ async function handleOrgSubordinates(request, env) {
     return errRes('FORBIDDEN', '无权查看该人员的下级', 403, corsHeaders(origin));
   }
 
+  const nameCount = ledgerNameCount(rows);
   const selfRow = rows.find((r) => r.name === under) || {};
-  const direct = ledgerChildren(rows, under);
+  const direct = ledgerChildren(rows, under, nameCount);
   const { admins, managers, others } = splitOrg(direct);
-  const hasDeeper = direct.some((d) => ledgerChildren(rows, d.name).length > 0);
+  const hasDeeper = direct.some((d) => ledgerChildren(rows, d.name, nameCount).length > 0);
+
+  // 公司管理「转给责任乡镇」：只读下发全部责任乡镇 + 每镇接收人。
+  // 仅公司管理需要（其他人转派无意义），且仅在查询本人时下发，避免任意用户枚举全公司乡镇人员。
+  const role = String(payload.role || '');
+  let towns = [];
+  if (role === '公司管理' && under === meName && subtree) {
+    // ⚠️ 公司管理是**公司级**角色：转派目标必须覆盖全部责任乡镇，
+    //    不能按「登录人的直属下级子树」收敛。
+    //    原实现 allowed = subtree(me)，导致像「安环管理部经理」这类在台账里
+    //    没有直属下级的公司管理账号，拿到 12 个乡镇全部 peopleCount=0
+    //    （2026-09-18 线上复现：刘金涛 133****0822）。
+    //    越权防护已由「仅 role==='公司管理' 且 under===meName 才下发 towns」承担，
+    //    此处显式传 null 表示不做个人范围收敛。
+    const allowed = null;
+    towns = ledgerTowns(rows).map((t) => {
+      const { admins: ta, managers: tm, others: to } = ledgerTownPeople(rows, t.town, nameCount, allowed);
+      return {
+        town: t.town,
+        department: t.department,
+        manager: { name: t.managerName, phone: t.managerPhone },
+        admins: ta,
+        managers: tm,
+        others: to,
+        peopleCount: ta.length + tm.length + to.length,
+      };
+    });
+  }
 
   return jsonRes({
     success: true, code: 'OK',
-    me: { name: meName, department: String(payload.department || ''), position: String(payload.position || ''), role: String(payload.role || '') },
+    me: { name: meName, department: String(payload.department || ''), position: String(payload.position || ''), role },
     under: { name: under, department: selfRow.department || '', position: selfRow.position || '', grade: selfRow.grade || '', gridLevel: selfRow.gridLevel || '' },
     isSelf: under === meName,
     count: direct.length,
     hasDeeper,
+    towns,
     admins, managers, others,
   }, 200, corsHeaders(origin));
 }
@@ -1055,14 +1245,38 @@ function mapRosterRecord(rec) {
 }
 
 // ---- 花名册进程内缓存（best-effort，per-isolate）----
-// 1291 人 ≈ 7 次上游分页拉取，选人页会反复调用（每位管理员下钻一次），故允许短 TTL 缓存。
+// 1291 人 ≈ 7 次**串行**上游分页拉取（飞书 page_token 是链式的，无法并发），
+// 实测单次 ≈ 10.9s（2026-09-18 _t22 性能实测）。故必须缓存，且**所有调用点都要走缓存**。
+//
+// ⚠️ 缓存在「原始记录」层（未 map），因为花名册有两个不同的字段映射：
+//    · mapRosterRecord     （选人/搜索：code/name/job/dept/area/sex/age/phone/status）
+//    · mapRosterAreaRecord （网格解析：employeeCode/areaOnDuty/dept/superior/...）
+//    旧实现只在 mapRosterRecord 之后缓存，导致 resolvePatrolGrids 绕过缓存直接打飞书
+//    → patrol/meta（三违列表入口）恒定 11s 且冷热无差别。这是本缓存存在的根本原因。
 // 默认关闭（TTL=0）→ 单元测试天然确定性；生产由 wrangler var ROSTER_CACHE_TTL_MS 开启。
-let rosterCache = { key: '', at: 0, rows: null };
+let rosterCache = { key: '', at: 0, raw: null };
 function rosterCacheTtl(env) {
   const n = Number(env.ROSTER_CACHE_TTL_MS || 0);
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
-async function loadRosterRows(env, cfg) {
+
+// 第三层：Cache API（跨 isolate / 同 PoP 共享）
+// 进程内缓存只活在当前 isolate，Cloudflare 随时可能把请求调度到新 isolate，
+// 那时进程内缓存是空的 → 用户重新吃一次 ~10s 冷启动。
+// Cache API 在同一 PoP 内共享，能把**冷启动也压到毫秒级**。
+// 1800s（30 分钟）：花名册以天/周为单位变动，30 分钟陈旧度业务上无感知；
+// 每 30 分钟才可能有一次 ~6s 的冷拉取，且前端进首页时会后台预热，用户基本撞不上。
+const ROSTER_HTTP_CACHE_TTL = 1800; // 秒
+async function rosterHttpCache() {
+  try {
+    if (typeof caches === 'undefined' || !caches.default) return null;
+    return caches.default;
+  } catch { return null; }
+}
+
+// 原始记录（未 map）——所有花名册消费方的唯一入口
+// 三级缓存：① 进程内（最快）② Cache API（跨 isolate）③ 上游飞书（~10s）
+async function loadRosterRaw(env, cfg) {
   const adapter = getAdapter(env);
   if (!cfg.fileId || !cfg.rosterSheetId) {
     const e = new Error('roster not configured');
@@ -1072,10 +1286,39 @@ async function loadRosterRows(env, cfg) {
   const ttl = rosterCacheTtl(env);
   const key = `${cfg.backend}|${cfg.fileId}|${cfg.rosterSheetId}`;
   const now = Date.now();
-  if (ttl > 0 && rosterCache.rows && rosterCache.key === key && now - rosterCache.at < ttl) return rosterCache.rows;
-  const rows = (await adapter.scanRecords(env, cfg.fileId, cfg.rosterSheetId)).map(mapRosterRecord);
-  if (ttl > 0) rosterCache = { key, at: now, rows };
-  return rows;
+
+  // ① 进程内
+  if (ttl > 0 && rosterCache.raw && rosterCache.key === key && now - rosterCache.at < ttl) return rosterCache.raw;
+
+  // ② Cache API（同 PoP 跨 isolate 共享）
+  const httpCache = await rosterHttpCache();
+  const cacheUrl = `https://hse-roster-cache.internal/${encodeURIComponent(String(cfg.backend))}/${encodeURIComponent(String(cfg.fileId))}/${encodeURIComponent(String(cfg.rosterSheetId))}`;
+  if (httpCache && ttl > 0) {
+    const hit = await httpCache.match(cacheUrl).catch(() => null);
+    if (hit) {
+      const j = await hit.json().catch(() => null);
+      if (Array.isArray(j) && j.length) {
+        rosterCache = { key, at: now, raw: j }; // 回填进程内，后续连 Cache API 都省了
+        return j;
+      }
+    }
+  }
+
+  // ③ 上游（最慢：1291 人 → 3 次串行分页 ≈ 数秒～10s）
+  const raw = await adapter.scanRecords(env, cfg.fileId, cfg.rosterSheetId);
+  if (ttl > 0) rosterCache = { key, at: now, raw };
+  if (httpCache && ttl > 0) {
+    await httpCache.put(cacheUrl, new Response(JSON.stringify(raw), {
+      headers: {
+        'content-type': 'application/json',
+        'cache-control': `public, max-age=${ROSTER_HTTP_CACHE_TTL}`,
+      },
+    })).catch(() => {});
+  }
+  return raw;
+}
+async function loadRosterRows(env, cfg) {
+  return (await loadRosterRaw(env, cfg)).map(mapRosterRecord);
 }
 
 // 班组/网格匹配规则（2026-09-17 真机校准）：
@@ -1107,7 +1350,7 @@ async function handleRoster(request, env) {
   const scopedToSelf = !area && !q;
   if (scopedToSelf) area = meDept;
 
-  const cfg = storageConfig(env);
+  const cfg = await storageConfig(env);
   let all;
   try {
     all = await loadRosterRows(env, cfg);
@@ -1134,6 +1377,157 @@ async function handleRoster(request, env) {
     source: cfg.backend,
     filters: { q, area, scopedToSelf },
     items,
+  }, 200, corsHeaders(origin));
+}
+
+// ============================================================================
+// 乡镇 → 班组 → 人员 级联接口（惰性加载，「自己处理」选人页用）
+// ----------------------------------------------------------------------------
+//   GET /api/mobile/org/towns                   → 12 个责任乡镇（含经理姓名）
+//   GET /api/mobile/org/teams?town=大曹镇        → 该镇班组（片区在首，其后一班/二班…）
+//   GET /api/mobile/roster?area=<班组名>          → 该班组在职人员（复用 handleRoster）
+//
+// 权限与 /api/mobile/org/subordinates 同一套：
+//   · 本人子树（ledgerSubtree）作白名单；不在子树内的人不下发。
+//   · 「自己处理」在公司管理视角下需要跨乡镇选人 → 白名单 = 全公司（与转派口径一致）。
+//   · 非公司管理不暴露全公司乡镇清单（避免任意账号枚举组织）。
+// ============================================================================
+
+// 拉台账 + 花名册（两接口共用；花名册走 TTL 缓存）
+async function loadLedgerRows(env, cfg) {
+  const adapter = getAdapter(env);
+  if (!cfg.fileId || !cfg.ledgerSheetId) {
+    const e = new Error('ledger not configured');
+    e.notConfigured = true;
+    throw e;
+  }
+  return (await adapter.scanRecords(env, cfg.fileId, cfg.ledgerSheetId)).map(mapLedgerRecord).filter((r) => r.name);
+}
+
+// ---- GET /api/mobile/org/towns ----
+async function handleOrgTowns(request, env) {
+  const origin = corsOrigin(request, env);
+  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
+  if (request.method !== 'GET') return errRes('METHOD_NOT_ALLOWED', '不支持的请求方法', 405, corsHeaders(origin));
+  if (!env.WORKER_SESSION_SECRET) return errRes('SESSION_NOT_CONFIGURED', '会话密钥未配置', 503, corsHeaders(origin));
+  const payload = await verifyWorkerSession(bearerToken(request), env.WORKER_SESSION_SECRET);
+  if (!payload) return errRes('UNAUTHORIZED', '未认证或登录态失效', 401, corsHeaders(origin));
+
+  const cfg = await storageConfig(env);
+  let rows, rosterRows;
+  try {
+    rows = await loadLedgerRows(env, cfg);
+    rosterRows = await loadRosterRows(env, cfg).catch(() => []);
+  } catch (e) {
+    if (e && e.notConfigured) return errRes('IDENTITY_NOT_CONFIGURED', '台账未配置', 503, corsHeaders(origin));
+    return errRes('UPSTREAM_ERROR', '组织信息暂不可用，请稍后再试', 502, corsHeaders(origin));
+  }
+
+  const meName = String(payload.name || '').trim();
+  const subtree = ledgerSubtree(rows, meName);
+  if (!subtree) {
+    return jsonRes({
+      success: true, code: 'AMBIGUOUS_SELF',
+      message: '台账中你的姓名不唯一或未登记，无法解析组织，请联系管理员规范台账',
+      towns: [],
+    }, 200, corsHeaders(origin));
+  }
+  const allowed = new Set(subtree.map((r) => r.name));
+  allowed.add(meName);
+
+  // 乡镇清单只对公司管理下发全量；其他人仅下发「自己子树覆盖到的乡镇」
+  const isCompany = String(payload.role || '') === '公司管理';
+  const towns = ledgerTowns(rows)
+    .map((t) => {
+      const { mgr, teams } = townTeams(rows, rosterRows, t.town);
+      const visTeams = isCompany
+        ? teams
+        : teams
+            .map((x) => ({ ...x, admins: x.admins.filter((a) => allowed.has(a.name)) }))
+            .filter((x) => (x.admins.length || x.rosterCount) && (x.isManagerTeam ? (mgr && allowed.has(mgr.name)) : true));
+      const mgrVisible = !isCompany && mgr && !allowed.has(mgr.name) ? null : mgr;
+      const admTotal = visTeams.reduce((s, x) => s + x.adminCount, 0);
+      return {
+        town: t.town,
+        department: t.department,
+        managerName: mgrVisible ? mgr.name : '',
+        managerPhone: mgrVisible ? mgr.phone || '' : '',
+        teams: visTeams.map((x) => ({
+          dept: x.dept, isManagerTeam: x.isManagerTeam,
+          managerName: x.managerName, adminCount: x.adminCount,
+          rosterCount: x.rosterCount,
+        })),
+        teamCount: visTeams.length,
+        peopleCount: visTeams.reduce((s, x) => s + Math.max(x.rosterCount, x.adminCount), 0),
+        adminCount: admTotal,
+      };
+    })
+    .filter((t) => (isCompany ? true : t.teams.length > 0));
+
+  return jsonRes({
+    success: true, code: 'OK',
+    scope: isCompany ? 'company' : 'subtree',
+    towns,
+  }, 200, corsHeaders(origin));
+}
+
+// ---- GET /api/mobile/org/teams?town=大曹镇 ----
+// 返回该镇班组清单（片区在首，其后按班号升序）+ 每班管理员姓名。
+async function handleOrgTeams(request, env) {
+  const origin = corsOrigin(request, env);
+  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
+  if (request.method !== 'GET') return errRes('METHOD_NOT_ALLOWED', '不支持的请求方法', 405, corsHeaders(origin));
+  if (!env.WORKER_SESSION_SECRET) return errRes('SESSION_NOT_CONFIGURED', '会话密钥未配置', 503, corsHeaders(origin));
+  const payload = await verifyWorkerSession(bearerToken(request), env.WORKER_SESSION_SECRET);
+  if (!payload) return errRes('UNAUTHORIZED', '未认证或登录态失效', 401, corsHeaders(origin));
+
+  const url = new URL(request.url);
+  const town = (url.searchParams.get('town') || '').trim().slice(0, 40);
+  if (!town || !isUnitName(town)) return errRes('BAD_REQUEST', '作业中心参数不合法', 400, corsHeaders(origin));
+
+  const cfg = await storageConfig(env);
+  let rows, rosterRows;
+  try {
+    rows = await loadLedgerRows(env, cfg);
+    rosterRows = await loadRosterRows(env, cfg).catch(() => []);
+  } catch (e) {
+    if (e && e.notConfigured) return errRes('IDENTITY_NOT_CONFIGURED', '台账未配置', 503, corsHeaders(origin));
+    return errRes('UPSTREAM_ERROR', '组织信息暂不可用，请稍后再试', 502, corsHeaders(origin));
+  }
+
+  // 该乡镇必须真实存在（防任意字符串探测）
+  if (!ledgerTowns(rows).some((t) => t.town === town)) {
+    return errRes('NOT_FOUND', '未找到该乡镇', 404, corsHeaders(origin));
+  }
+
+  const meName = String(payload.name || '').trim();
+  const subtree = ledgerSubtree(rows, meName);
+  const isCompany = String(payload.role || '') === '公司管理';
+  const allowed = subtree ? new Set(subtree.map((r) => r.name)) : new Set([meName]);
+  allowed.add(meName);
+
+  const { mgr, teams } = townTeams(rows, rosterRows, town);
+  const out = teams.map((x) => {
+    const admins = isCompany ? x.admins : x.admins.filter((a) => allowed.has(a.name));
+    return {
+      dept: x.dept,
+      isManagerTeam: x.isManagerTeam,
+      managerName: x.isManagerTeam ? (isCompany || (mgr && allowed.has(mgr.name)) ? (mgr ? mgr.name : '') : '') : '',
+      managerPhone: x.isManagerTeam && (isCompany || (mgr && allowed.has(mgr.name))) ? (mgr ? mgr.phone || '' : '') : '',
+      admins,
+      adminCount: admins.length,
+      rosterCount: x.rosterCount,
+      peopleCount: x.rosterCount,
+    };
+  }).filter((x) => x.adminCount || x.rosterCount || x.isManagerTeam);
+
+  return jsonRes({
+    success: true, code: 'OK',
+    town,
+    managerName: mgr ? mgr.name : '',
+    managerPhone: mgr ? mgr.phone || '' : '',
+    managerMissing: !mgr,
+    teams: out,
   }, 200, corsHeaders(origin));
 }
 
@@ -1217,21 +1611,15 @@ async function handleGeoRegeo(request, env) {
 }
 
 // ============================================================================
-// CF-WPS-12 —— WPS 官方照片附件链路（真机三步上传实测通过后最小落地）
+// 移动端照片上传 —— 仅飞书 drive media（2026-09-18 已去 WPS 三步上传）
 // ----------------------------------------------------------------------------
-// 官方链路（2026-09-15 真机实证，权限 kso.documents.readwrite 须已开通）：
-//   ① POST /v7/documents/{file_id}/attachments/upload/address  {name,size,type}
-//        → data.request.{url,method,headers} + data.upload_id + data.send_back_params
-//   ② PUT data.request.url（携带 data.request.headers）传二进制
-//        → 响应头 ETag（去引号）+ newfilename
-//   ③ POST /v7/documents/{file_id}/attachments/upload/complete
-//        {upload_id, params:{etag,key}} → data.attachment_id
-//   ④ dbsheet record 字段值 = [{fileName,size,source:'upload_ks3',type,uploadId}]
+// 链路：multipart(file, client_request_id) → 飞书 drive media 上传 → file_token（纯上传，
+//   不建记录）。附件在巡查提交（/api/mobile/patrol/submit）时随 body.photo_tokens 落入
+//   「三违照片」附件列。
 // 安全纪律：
 //   - 只允许 image/jpeg / image/png；magic bytes 校验，不信 Content-Type。
 //   - employee_code 一律取自 Session.sub（服务端注入），前端传入的一律忽略。
-//   - 本阶段只写隔离测试 Sheet（WPS_DBSHEET_TEST_SHEET_ID）；生产 Sheet 3 永不触碰。
-//   - ALLOW_WPS_WRITE 门 + Session 门 fail-closed；secret/token 不入响应与日志。
+//   - Session 门 fail-closed；secret/token 不入响应与日志。
 // ============================================================================
 
 const UPLOAD_MAX_BYTES = 5 * 1024 * 1024; // ≤5MB（§十二）
@@ -1250,76 +1638,12 @@ function detectImageMagic(bytes) {
   return null;
 }
 
-// ---- WPS 三步上传原语（CF-WPS-12 实证；KSO-1 与 Bearer 并用）----
-async function wpsDocHeaders(env, method, path, bodyStr) {
-  const u = new URL(`${(env.WPS_OPENAPI_BASE || 'https://openapi.wps.cn').replace(/\/+$/, '')}${path}`);
-  return {
-    'Content-Type': 'application/json',
-    Authorization: `Bearer ${await getAppToken(env)}`,
-    ...(await buildKso1Headers({ method, uri: u.pathname + u.search, contentType: 'application/json', appId: env.WPS_CLIENT_ID, appSecret: env.WPS_CLIENT_SECRET, bodyStr })),
-  };
-}
-
-async function wpsGetUploadAddress(env, name, size, mime) {
-  const base = (env.WPS_OPENAPI_BASE || 'https://openapi.wps.cn').replace(/\/+$/, '');
-  const path = `/v7/documents/${encodeURIComponent(env.WPS_DBSHEET_FILE_ID)}/attachments/upload/address`;
-  const body = JSON.stringify({ name, size, type: mime });
-  const res = await fetch(`${base}${path}`, { method: 'POST', headers: await wpsDocHeaders(env, 'POST', path, body), body });
-  const json = await safeJson(res);
-  if (!res.ok || !json || json.code !== 0) {
-    throw Object.assign(new Error('wps upload address failed'), { wpsHttpStatus: res.status, wpsCode: json?.code, wpsMsg: json?.message || json?.msg });
-  }
-  const d = json.data || {};
-  return {
-    uploadId: d.upload_id,
-    url: d.request && d.request.url,
-    method: (d.request && d.request.method) || 'PUT',
-    headers: (d.request && d.request.headers) || {},
-    sendBackParams: d.send_back_params || null,
-  };
-}
-
-async function wpsUploadBinary(addr, buf) {
-  // 存储商 URL 可能带 host 头要求；部分运行时禁设 host 头 → 失败则剥离 host 重试一次
-  let res;
-  try {
-    res = await fetch(addr.url, { method: addr.method, headers: addr.headers, body: buf });
-  } catch {
-    const stripped = { ...addr.headers };
-    delete stripped.host;
-    res = await fetch(addr.url, { method: addr.method, headers: stripped, body: buf });
-  }
-  if (!res.ok) throw Object.assign(new Error('wps binary upload failed'), { wpsHttpStatus: res.status });
-  const headers = {};
-  res.headers.forEach((v, k) => {
-    const kl = k.toLowerCase();
-    if (kl === 'etag' || kl === 'newfilename') headers[kl] = v;
-  });
-  return { etag: (headers.etag || '').replace(/"/g, ''), key: headers.newfilename || '' };
-}
-
-async function wpsCompleteUpload(env, uploadId, etag, key) {
-  const base = (env.WPS_OPENAPI_BASE || 'https://openapi.wps.cn').replace(/\/+$/, '');
-  const path = `/v7/documents/${encodeURIComponent(env.WPS_DBSHEET_FILE_ID)}/attachments/upload/complete`;
-  const body = JSON.stringify({ upload_id: uploadId, params: { etag, key } });
-  const res = await fetch(`${base}${path}`, { method: 'POST', headers: await wpsDocHeaders(env, 'POST', path, body), body });
-  const json = await safeJson(res);
-  if (!res.ok || !json || json.code !== 0) {
-    throw Object.assign(new Error('wps upload complete failed'), { wpsHttpStatus: res.status, wpsCode: json?.code, wpsMsg: json?.message || json?.msg });
-  }
-  return { attachmentId: json.data && json.data.attachment_id };
-}
-
-// ---- POST /wps/upload/image（升级 CF-WPS-08 的 501 占位；不新建重复端点）----
+// ---- POST /api/mobile/upload（飞书 drive media 上传 → file_token）----
 async function handleUploadImage(request, env) {
   const origin = corsOrigin(request, env);
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
 
   try {
-    // 存储后端装配（WPS / 飞书）
-    const adapter = getAdapter(env);
-    const cfg = storageConfig(env);
-
     // 门 1：Session（employee_code 唯一来源=sub；不支持后端 JWT——上传属移动端会话语义）
     if (!env.WORKER_SESSION_SECRET) return errRes('SESSION_NOT_CONFIGURED', '会话密钥未配置', 503, corsHeaders(origin));
     const session = await verifyWorkerSession(bearerToken(request), env.WORKER_SESSION_SECRET);
@@ -1327,25 +1651,16 @@ async function handleUploadImage(request, env) {
     const employeeCode = String(session.sub || ''); // 服务端注入；前端传入的一律忽略
     if (!employeeCode) return errRes('UNAUTHORIZED', '会话身份缺失', 401, corsHeaders(origin));
 
-    // 门 2：写开关（fail-closed）
-    if (String(env.ALLOW_WPS_WRITE || '') !== 'true') {
-      return errRes('WPS_WRITE_DISABLED', 'WPS 写入未启用（ALLOW_WPS_WRITE）', 403, corsHeaders(origin));
-    }
-    // 门 3：只允许隔离测试 Sheet（本阶段禁止生产 Sheet 3）
-    const fileId = cfg.fileId;
-    const testSheetId = cfg.testSheetId;
-    if (!fileId || !testSheetId) return errRes('TEST_SHEET_NOT_CONFIGURED', '测试 Sheet 未配置', 503, corsHeaders(origin));
-
-    // 门 4：体大小（multipart）
+    // 门 2：体大小（multipart）
     const contentLen = Number(request.headers.get('content-length') || '0');
     if (contentLen > UPLOAD_BODY_LIMIT) return errRes('BODY_TOO_LARGE', `请求体超过上限（${UPLOAD_BODY_LIMIT} 字节）`, 413, corsHeaders(origin));
     let form;
     try { form = await request.formData(); } catch { return errRes('BAD_REQUEST', '请求必须为 multipart/form-data', 400, corsHeaders(origin)); }
     const file = form.get('file');
     if (!file || typeof file.arrayBuffer !== 'function') return errRes('BAD_REQUEST', '缺少文件字段 file', 400, corsHeaders(origin));
-    const clientRequestId = String(form.get('client_request_id') || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64);
+    form.get('client_request_id'); // 预留：纯上传暂不建记录，幂等由提交链路负责
 
-    // 门 5：大小 + magic bytes（不信 Content-Type/扩展名）
+    // 门 3：大小 + magic bytes（不信 Content-Type/扩展名）
     if (file.size <= 0) return errRes('BAD_REQUEST', '空文件', 400, corsHeaders(origin));
     if (file.size > UPLOAD_MAX_BYTES) return errRes('FILE_TOO_LARGE', `图片超过上限（${UPLOAD_MAX_BYTES} 字节）`, 413, corsHeaders(origin));
     const buf = new Uint8Array(await file.arrayBuffer());
@@ -1355,89 +1670,35 @@ async function handleUploadImage(request, env) {
     const ext = (rawName.split('.').pop() || '').toLowerCase();
     if (ext && !magic.exts.has(ext)) return errRes('UNSUPPORTED_FILE_TYPE', '文件扩展名与图片内容不符', 400, corsHeaders(origin));
 
-    // ---- 飞书后端：drive media 上传 → file_token（纯上传，不建记录；附件在巡查提交时落入「三违照片」列）----
-    if (cfg.backend === 'feishu') {
-      if (!env.FS_APP_TOKEN) return errRes('STORAGE_NOT_CONFIGURED', '存储目标未配置', 503, corsHeaders(origin));
-      const safeName = (rawName.split(/[\\/]/).pop() || `photo.${[...magic.exts][0]}`).slice(0, 128);
-      let fileToken;
-      try {
-        const { uploadMedia } = await import('./storage/feishuAdapter.js');
-        fileToken = await uploadMedia(env, buf, safeName, magic.mime);
-      } catch (e) {
-        if (e && e.isRateLimit) return errRes('WPS_RATE_LIMITED', '存储限频，请稍后重试', 429, corsHeaders(origin));
-        return errRes('WPS_UPSTREAM_ERROR', `照片上传失败（fsCode=${e && e.fsCode}）`, 502, corsHeaders(origin));
-      }
-      return jsonRes({ success: true, code: 'OK', backend: 'feishu', file_token: fileToken, employee: { employee_code: employeeCode } }, 200, corsHeaders(origin));
-    }
+    // 门 4：存储目标配置
+    if (!env.FS_APP_TOKEN) return errRes('STORAGE_NOT_CONFIGURED', '存储目标未配置', 503, corsHeaders(origin));
 
-    // 幂等预查（仅测试 Sheet；沿用 client_request_id 语义）
-    if (clientRequestId) {
-      const existing = await findExistingByClientRequestId(adapter, env, fileId, testSheetId, [clientRequestId]);
-      if (existing) {
-        return jsonRes({ success: true, code: 'OK', deduplicated: true, recordIds: existing, employee: { employee_code: employeeCode } }, 200, corsHeaders(origin));
-      }
-    }
-
-    // WPS 官方三步上传
+    // 飞书 drive media 上传 → file_token（纯上传，不建记录；附件在巡查提交时落入「三违照片」列）
     const safeName = (rawName.split(/[\\/]/).pop() || `photo.${[...magic.exts][0]}`).slice(0, 128);
-    let addr, store;
+    let fileToken;
     try {
-      addr = await wpsGetUploadAddress(env, safeName, file.size, magic.mime);
-      if (!addr.url || !addr.uploadId) throw Object.assign(new Error('address incomplete'), { wpsHttpStatus: 502 });
-      store = await wpsUploadBinary(addr, buf);
-      const done = await wpsCompleteUpload(env, addr.uploadId, store.etag, store.key);
-      addr.attachmentId = done.attachmentId;
+      const { uploadMedia } = await import('./storage/feishuAdapter.js');
+      fileToken = await uploadMedia(env, buf, safeName, magic.mime);
     } catch (e) {
-      if (e && e.wpsHttpStatus === 403) {
-        return errRes('UPLOAD_SCOPE_MISSING', 'WPS 附件上传权限未开通（kso.documents.readwrite）', 503, corsHeaders(origin));
-      }
-      return errRes('WPS_UPSTREAM_ERROR', 'WPS 上传失败，请稍后再试', 502, corsHeaders(origin));
+      if (e && e.isRateLimit) return errRes('WPS_RATE_LIMITED', '存储限频，请稍后重试', 429, corsHeaders(origin));
+      return errRes('WPS_UPSTREAM_ERROR', `照片上传失败（fsCode=${e && e.fsCode}）`, 502, corsHeaders(origin));
     }
-
-    // 写隔离测试 Sheet 记录（字段白名单 = 测试 Sheet 列；employee_code 服务端注入）
-    const attObj = { fileName: safeName, size: file.size, source: 'upload_ks3', type: magic.mime, uploadId: addr.uploadId };
-    const record = {
-      '测试编号': `CF-WPS-12-TEST-${Date.now()}`,
-      'employee_code': employeeCode,
-      '测试图片': [attObj],
-      '测试状态': 'uploaded',
-      'client_request_id': clientRequestId || `CID-C12-${Date.now()}`,
-      '创建时间': new Date().toISOString().slice(0, 10),
-    };
-    let recs;
-    try {
-      recs = await adapter.createRecords(env, fileId, testSheetId, [record]);
-    } catch (e) {
-      if (e && e.isRateLimit) return errRes('WPS_RATE_LIMITED', 'WPS 限频，请稍后重试', 429, corsHeaders(origin));
-      return errRes('WPS_UPSTREAM_ERROR', 'WPS 写入失败', 502, corsHeaders(origin));
-    }
-    return jsonRes({
-      success: true, code: 'OK',
-      recordIds: recs.map((r) => (typeof r === 'string' ? r : r && r.id)).filter(Boolean),
-      attachment: { uploadId: addr.uploadId, attachmentId: addr.attachmentId || null },
-      employee: { employee_code: employeeCode },
-    }, 200, corsHeaders(origin));
+    return jsonRes({ success: true, code: 'OK', backend: 'feishu', file_token: fileToken, employee: { employee_code: employeeCode } }, 200, corsHeaders(origin));
   } catch {
     return errRes('INTERNAL_ERROR', '内部错误，请稍后再试', 500, corsHeaders(origin));
   }
 }
 
 // ============================================================================
-// CF-WPS-13 —— 网格长巡查文字业务链（Session→employee_code→WPS 缓冲表）
+// CF-WPS-13 —— 网格长巡查文字业务链（Session→employee_code→飞书主台账）
 // ----------------------------------------------------------------------------
-// 边界（CF-WPS-13 任务书）：
+// 边界（CF-WPS-13 任务书；2026-09-18 单主台账，已去 WPS 测试表分叉）：
 //   - 身份：一律取 Session.sub（employee_code），前端传入的 employee_code 一律忽略。
-//   - 网格：不按姓名/手机号猜。唯一来源 = Sheet 11「负责区域（在职）」按员工编码精确命中；
+//   - 网格：不按姓名/手机号猜。唯一来源 = 花名册「负责区域（在职）」按员工编码精确命中；
 //     解析不出 → 明确失败「当前人员无法确定巡查网格，请联系管理员」。
-//   - 目标 Sheet fail-closed：
-//       · 缺省 → 隔离测试 Sheet（WPS_DBSHEET_TEST_SHEET_ID）。
-//       · 生产目标 = WPS_PATROL_TARGET_SHEET=UNRESOLVED（CF-WPS-13 阶段 B 审计结论：
-//         现有 Sheet 3 为三违巡查表，缺 问题描述/问题类型/client_request_id 等列，
-//         硬写会污染三违台账）。启用生产写须同时满足三个 env 开关
-//         （MOBILE_PATROL_PRODUCTION_ENABLED + MOBILE_PATROL_TARGET_SHEET_ID +
-//          WPS_PATROL_FIELDS_CONFIRMED），任一缺失 → 503 PATROL_TARGET_UNRESOLVED。
+//   - 目标表：一律「H5员工日常不安全行为台账」主台账（prodSheetId）。
 //   - 三违：只做移动端「发现并记录」，不做责任人/扣分/审核/整改计算。
-//   - 照片：PHOTO_STATUS=PENDING_EXTERNAL（CF-WPS-12B 终局结论），不阻塞文字链。
+//   - 照片：经 /api/mobile/upload 上传（file_token），提交时落入「三违照片」附件列。
 //   - 幂等：沿用 client_request_id 预查（O(n) 扫描）→ IDEMPOTENCY_STATUS=LIMITED。
 // ============================================================================
 
@@ -1445,11 +1706,55 @@ const PATROL_BODY_LIMIT = 32 * 1024; // 巡查提交体上限
 const PATROL_DESC_MAX = 500;         // 问题描述长度上限
 const PATROL_VIOL_DESC_MAX = 300;    // 三违行为描述长度上限
 const PATROL_PEOPLE_MAX = 200;       // 涉及人员长度上限
+const PATROL_ATTR_MAX = 50;          // 违章人档案字段（性别/年龄/职位）长度上限
 const PATROL_TIME_MAX = 32;          // 巡查时间字符串长度上限
 const PATROL_LIST_LIMIT = 50;        // 「我的巡查记录」返回条数上限
 
-// 问题类型候选（env MOBILE_PATROL_PROBLEM_TYPES 可覆盖；默认集仅用于隔离测试，正式类型清单待业务方确认）
-const PATROL_DEFAULT_PROBLEM_TYPES = ['环境卫生', '设施设备', '安全隐患', '秩序管理', '其他'];
+// 问题类型候选（env MOBILE_PATROL_PROBLEM_TYPES 可覆盖）
+// ⚠️ 必须含「三违」：H5 的「是三违」分支按问题类型=三违入库（is_violation=是 + 三违行为描述 才是真判据）。
+// ⚠️ 必须含「一般问题」「现场正常」：H5「不是三违」分支的巡查结果就这两个值（check.html 单选卡
+//    data-patrol），直接透传为 problem_type。曾因白名单只有「环境卫生/设施设备/…」，
+//    普通巡查提交恒 400 PATROL_FIELD_INVALID —— 而普通巡查是最常用入口，等于主路径全断。
+//    （2026-09-17 端到端验收暴露，见 test/cfwps29b-contract.test.mjs）
+const PATROL_DEFAULT_PROBLEM_TYPES = ['三违', '一般问题', '现场正常', '环境卫生', '设施设备', '安全隐患', '秩序管理', '其他'];
+
+// ---------------------------------------------------------------------------
+// 三违标准库（业务方 2026-09-17 下发，共 20 条）—— H5「选择三违」宫格的唯一数据源
+// ---------------------------------------------------------------------------
+// 这是**服务端权威清单**：前端不再硬编码，而是经 GET /api/mobile/patrol/meta 的
+// `violation_types` 字段下发，保证「前端可选」与「后端可收」永远一致
+// （否则新增三违项时前端能选、后端校验拒绝，形成静默失败）。
+// 校验规则：提交的 violation_desc 必须命中本清单（见 validatePatrolBody）。
+const PATROL_VIOLATION_LIB = [
+  '闯红灯',
+  '骑车不戴头盔',
+  '逆行',
+  '违章停车',
+  '超速行驶',
+  '违章掉头',
+  '违章变道',
+  '驾车时抽烟',
+  '打电话',
+  '破坏车内监控设施',
+  '未穿工作服',
+  '横穿马路',
+  '翻越护栏',
+  '不领取防暑物资',
+  '出车不三检',
+  '脱岗、玩岗、替岗',
+  '隐瞒身体不适状况上岗',
+  '危险作业未按要求采取保护措施',
+  '机动车道作业未摆放路锥',
+  '背向来车方向作业',
+];
+
+// 三违库（env MOBILE_PATROL_VIOLATION_TYPES 可覆盖，逗号分隔；不配则用内置 20 条）
+function patrolViolationLib(env) {
+  const raw = String(env.MOBILE_PATROL_VIOLATION_TYPES || '').trim();
+  if (!raw) return PATROL_VIOLATION_LIB.slice();
+  const list = raw.split(',').map((s) => s.trim()).filter(Boolean);
+  return list.length ? list : PATROL_VIOLATION_LIB.slice();
+}
 
 function patrolProblemTypes(env) {
   const raw = String(env.MOBILE_PATROL_PROBLEM_TYPES || '').trim();
@@ -1458,16 +1763,11 @@ function patrolProblemTypes(env) {
   return list.length ? list : PATROL_DEFAULT_PROBLEM_TYPES.slice();
 }
 
-// ---- 目标 Sheet 解析（fail-closed；生产三开关缺一不可）----
+// ---- 目标表解析（2026-09-18 单主台账：prod/test 已合并，一律写主台账 prodSheetId）----
 function patrolTarget(env, cfg) {
-  cfg = cfg || storageConfig(env);
-  const prodEnabled = String(env.MOBILE_PATROL_PRODUCTION_ENABLED || '') === 'true';
-  const prodSheet = String(cfg.prodSheetId || '').trim();
-  const fieldsConfirmed = String(env.WPS_PATROL_FIELDS_CONFIRMED || '') === 'true';
-  if (prodEnabled && prodSheet && fieldsConfirmed) return { sheetId: prodSheet, production: true };
-  const testSheet = String(cfg.testSheetId || '').trim();
-  if (!testSheet) return null;
-  return { sheetId: testSheet, production: false };
+  const sheetId = String((cfg && cfg.prodSheetId) || '').trim();
+  if (!sheetId) return null;
+  return { sheetId, production: true };
 }
 
 // ---- 文本净化：去控制字符 + 长度截断 ----
@@ -1585,13 +1885,16 @@ function narrowDuplicateName(hits, me, env) {
 async function resolvePatrolGrids(env, ident) {
   const code = String((ident && ident.code) || '').trim();
   const name = String((ident && ident.name) || '').trim();
-  const cfg = storageConfig(env);
+  const cfg = await storageConfig(env);
   if (!cfg.fileId || !cfg.rosterSheetId) return { grids: [], matched: 0, by: null };
   // 会话必须带 sub：缺失 = 非本系统正常签发的会话 → fail-closed，不走姓名兜底
   if (!code) return { grids: [], matched: 0, by: null };
   const me = ident || {};
   const phone = phoneDigits(me.phone || (/^1\d{10}$/.test(code) ? code : ''));
-  const recs = (await getAdapter(env).scanRecords(env, cfg.fileId, cfg.rosterSheetId)).map(mapRosterAreaRecord);
+  // ⚠️ 必须走 loadRosterRaw（带 TTL 缓存），不能直接 scanRecords：
+  //    花名册 1291 人要 7 次串行分页 ≈ 10.9s，patrol/meta 是三违列表的唯一入口，
+  //    绕过缓存会让用户每次点开三违都干等 11 秒（2026-09-18 _t22 实测）。
+  const recs = (await loadRosterRaw(env, cfg)).map(mapRosterAreaRecord);
 
   if (phone) {
     const byPhone = recs.filter((r) => r.phone && r.phone === phone);
@@ -1618,7 +1921,7 @@ async function handlePatrolMeta(request, env) {
   if (!env.WORKER_SESSION_SECRET) return errRes('SESSION_NOT_CONFIGURED', '会话密钥未配置', 503, corsHeaders(origin));
   const payload = await verifyWorkerSession(bearerToken(request), env.WORKER_SESSION_SECRET);
   if (!payload) return errRes('UNAUTHORIZED', '未认证或登录态失效', 401, corsHeaders(origin));
-  const cfg = storageConfig(env);
+  const cfg = await storageConfig(env);
 
   let grids = [], matched = 0, gridBy = null;
   try {
@@ -1645,17 +1948,16 @@ async function handlePatrolMeta(request, env) {
     grid_resolved_by: gridBy,
     message: resolved ? '' : '当前人员无法确定巡查网格，请联系管理员',
     problem_types: patrolProblemTypes(env),
+    violation_types: patrolViolationLib(env),
     photo_status: 'FEISHU_ATTACHMENT_READY',
-    photo_note: cfg.backend === 'feishu'
-      ? '照片经 /wps/upload/image 上传至飞书（返回 file_token），提交时随记录落入「三违照片」附件列'
-      : '照片链路 WPS 页面预览能力未开放（CF-WPS-12B），本次巡查可先提交文字记录',
-    target: target ? (target.production ? 'production' : 'test') : 'unconfigured',
+    photo_note: '照片经 /api/mobile/upload 上传至飞书（返回 file_token），提交时随记录落入「三违照片」附件列',
+    target: target ? 'production' : 'unconfigured',
   }, 200, corsHeaders(origin));
 }
 
 // ---- 巡查提交字段校验（全部服务端定值；body 字段绝不展开进 record）----
 // 超长文本 = 拒绝（不静默截断，避免篡改用户内容）
-function validatePatrolBody(body, problemTypes) {
+function validatePatrolBody(body, problemTypes, violationLib) {
   const errors = [];
   const inspectTime = patrolText(body && body.inspection_time, PATROL_TIME_MAX);
   if (!/^\d{4}-\d{2}-\d{2}( \d{2}:\d{2})?$/.test(inspectTime) || patrolText(body && body.inspection_time, PATROL_TIME_MAX + 1).length > PATROL_TIME_MAX) errors.push('inspection_time');
@@ -1675,14 +1977,23 @@ function validatePatrolBody(body, problemTypes) {
   const isViolation = patrolText(body && body.is_violation, 4);
   if (isViolation !== '是' && isViolation !== '否') errors.push('is_violation');
 
-  let violationDesc = '', violationPeople = '';
+  let violationDesc = '', violationPeople = '', violationSex = '', violationAge = '', violationJob = '';
   if (isViolation === '是') {
     violationDesc = patrolText(body && body.violation_desc, PATROL_VIOL_DESC_MAX);
     const vdRaw = patrolText(body && body.violation_desc, PATROL_VIOL_DESC_MAX + 1);
     if (!violationDesc || vdRaw.length > PATROL_VIOL_DESC_MAX) errors.push('violation_desc');
+    // 三违行为必须命中服务端权威三违库（前端宫格的可选项即来自同一清单，见 patrolViolationLib）。
+    // 精确等值匹配 —— 不允许自造三违项，避免脏数据污染统计口径。
+    else if (Array.isArray(violationLib) && violationLib.length && !violationLib.includes(violationDesc) && !violationLib.includes(violationDesc.split('（')[0].trim())) {
+      errors.push('violation_desc_not_in_lib');
+    }
     violationPeople = patrolText(body && body.violation_people, PATROL_PEOPLE_MAX);
     const vpRaw = patrolText(body && body.violation_people, PATROL_PEOPLE_MAX + 1);
     if (!violationPeople || vpRaw.length > PATROL_PEOPLE_MAX) errors.push('violation_people');
+    // 违章人补充档案（可选）：性别/年龄/职位 → 主台账「性别」「年龄」「车辆类型|保洁员」列
+    violationSex = patrolText(body && body.violation_sex, PATROL_ATTR_MAX);
+    violationAge = patrolText(body && body.violation_age, PATROL_ATTR_MAX);
+    violationJob = patrolText(body && body.violation_job, PATROL_ATTR_MAX);
   }
 
   const photoTaken = String((body && body.photo_taken) || '') === 'true';
@@ -1693,7 +2004,7 @@ function validatePatrolBody(body, problemTypes) {
     errors,
     values: {
       inspectionTime: inspectTime, grid, description, problemType,
-      isViolation, violationDesc, violationPeople,
+      isViolation, violationDesc, violationPeople, violationSex, violationAge, violationJob,
       photoStatus: photoTaken ? 'PENDING_EXTERNAL' : '未拍摄',
       clientRequestId,
     },
@@ -1705,9 +2016,9 @@ async function handlePatrolSubmit(request, env) {
   const origin = corsOrigin(request, env);
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
   try {
-    // 存储后端装配（WPS / 飞书）
+    // 存储后端装配（飞书）
     const adapter = getAdapter(env);
-    const cfg = storageConfig(env);
+    const cfg = await storageConfig(env);
 
     // 门 1：Session（employee_code 唯一来源）
     if (!env.WORKER_SESSION_SECRET) return errRes('SESSION_NOT_CONFIGURED', '会话密钥未配置', 503, corsHeaders(origin));
@@ -1715,12 +2026,7 @@ async function handlePatrolSubmit(request, env) {
     if (!payload) return errRes('UNAUTHORIZED', '未认证或登录态失效', 401, corsHeaders(origin));
     const employeeCode = payload.sub; // 服务端注入；前端 employee_code 一律忽略
 
-    // 门 2：写开关 fail-closed
-    if (String(env.ALLOW_WPS_WRITE || '') !== 'true') {
-      return errRes('WPS_WRITE_DISABLED', '写入未启用（ALLOW_WPS_WRITE）', 403, corsHeaders(origin));
-    }
-
-    // 门 3：目标 Sheet fail-closed（生产目标 UNRESOLVED → 测试 Sheet；三开关缺一 → 拒生产）
+    // 门 2：目标 Sheet fail-closed（2026-09-18 单主台账：一律写主台账 prodSheetId）
     const target = patrolTarget(env, cfg);
     if (!target) return errRes('PATROL_TARGET_NOT_CONFIGURED', '巡查目标表未配置', 503, corsHeaders(origin));
     if (target.production && !cfg.fileId) {
@@ -1738,7 +2044,7 @@ async function handlePatrolSubmit(request, env) {
 
     // 校验（protected 字段 employee_code/inspector_employee_id/grid_id/attribution_status
     // 等即使出现在 body 也绝不进入 record：record 全部由服务端定值构建）
-    const { errors, values } = validatePatrolBody(body, patrolProblemTypes(env));
+    const { errors, values } = validatePatrolBody(body, patrolProblemTypes(env), patrolViolationLib(env));
     if (errors.length) {
       return errRes('PATROL_FIELD_INVALID', `字段校验失败：${errors.join(',')}`, 400, corsHeaders(origin));
     }
@@ -1749,7 +2055,6 @@ async function handlePatrolSubmit(request, env) {
       const ok = Array.isArray(body.photo_tokens) && body.photo_tokens.length <= 3
         && body.photo_tokens.every((t) => typeof t === 'string' && /^[A-Za-z0-9]{10,120}$/.test(t));
       if (!ok) return errRes('PATROL_FIELD_INVALID', 'photo_tokens 不合法（≤3 个、字母数字、来自上传接口）', 400, corsHeaders(origin));
-      if (cfg.backend !== 'feishu') return errRes('UPLOAD_NOT_SUPPORTED', 'WPS 后端照片链路未开放，请勿携带 photo_tokens', 501, corsHeaders(origin));
       photoTokens = [...new Set(body.photo_tokens)];
     }
 
@@ -1782,52 +2087,86 @@ async function handlePatrolSubmit(request, env) {
     }
 
     // 组 record（全部服务端定值；姓名取 Session 快照）
-    // CF-WPS-17：正式目标表(Sheet 15「生产用台账」)不含测试字段(测试编号/测试状态/照片状态)，
-    // 按 target.production 分叉构建，避免向不存在的列写入导致 WPS 500；测试表保持原形态。
-    // 三生产开关（MOBILE_PATROL_PRODUCTION_ENABLED / TARGET_SHEET_ID / WPS_PATROL_FIELDS_CONFIRMED）
-    // 任一为 false → patrolTarget() 回落测试表，本分支永不被触发（CF-WPS-17 §七）。
-    const record = target.production
-      ? {
-          '巡查人员ID': employeeCode,   // 复用现有列[X]；mobile 业务身份=employee_code，语义=巡查人员标识（CF-WPS-17 §六 安全复用，有明确证据）
-          '姓名': payload.name || '',
-          '巡查时间': values.inspectionTime,
-          '网格': values.grid,
-          '问题描述': values.description,
-          '问题类型': values.problemType,
-          '是否三违': values.isViolation,
-          '三违行为': values.violationDesc, // 复用现有列[M] 三违行为（CF-WPS-17 §六 安全复用，语义一致）
-          '涉及人员': values.violationPeople, // CF-WPS-18 §二/§五：新增列[B0]，仅承载 H5 允许的 violation_people 输入（多人逗号分隔，≤200 字符）；不映射到 违章人姓名/姓名/三违行为/巡查人员ID
-          '来源': 'h5-mobile',
-          client_request_id: values.clientRequestId,
-          '创建时间': new Date().toISOString().slice(0, 10),
-        }
-      : {
-          '测试编号': `CF-WPS-13-TEST-${Date.now()}`,
-          employee_code: employeeCode,
-          '姓名': payload.name || '',
-          '巡查时间': values.inspectionTime,
-          '网格': values.grid,
-          '问题描述': values.description,
-          '问题类型': values.problemType,
-          '是否三违': values.isViolation,
-          '三违行为描述': values.violationDesc,
-          '涉及人员': values.violationPeople,
-          '照片状态': values.photoStatus,
-          '来源': 'h5-mobile',
-          '测试状态': 'submitted',
-          client_request_id: values.clientRequestId,
-          '创建时间': new Date().toISOString().slice(0, 10),
-        };
+    // 2026-09-18 单主台账：一律写「H5员工日常不安全行为台账」主台账字段，无测试字段分叉。
+    // ⚠️ 列名必须是主台账**实测**列名（见 FEISHU_FIELD_WHITELIST 上方注释）：
+    //    用旧列名会被飞书 1254045 FieldNameNotFound 拒掉，前端只看到 502「存储写入失败」。
+    const isVio = values.isViolation === '是';
+    const record = {
+      '检查人姓名': payload.name || '',                       // 提交人姓名（主台账权威）
+      '网格等级': payload.grid_level || '',                    // 台账「网格长等级」
+      '片区|班组': values.grid,                                // 巡查网格 / 片区
+      '违章行为': isVio ? values.violationDesc : NO_VIOLATION_TEXT,
+      '违章人员姓名': isVio ? values.violationPeople : '',      // 非三违无违章人
+      '性别': isVio ? values.violationSex : '',                // 违章人档案 → 主台账「性别」
+      '年龄': isVio ? values.violationAge : '',                // 违章人档案 → 主台账「年龄」
+      '车辆类型|保洁员': isVio ? values.violationJob : '',      // 违章人职位 → 主台账「车辆类型|保洁员」
+      '描述': values.description,                              // 问题描述 / 巡查结果
+      // 主台账无「巡查人员ID」列、日期列只读 → 身份/时间/幂等键一并进「备注」
+      '备注': buildPatrolNote(employeeCode, values.inspectionTime, values.clientRequestId),
+    };
 
-    // 照片附件（飞书后端）：file_token 数组落入「三违照片」附件列，照片状态同步置「已上传」
+    // 照片附件（飞书后端）：file_token 数组落入主台账附件列「违章照片」
+    // （旧代码写「三违照片」——那是「表格视图」表的列名，主台账里没有，同样会 1254045）
     if (photoTokens.length) {
-      record['三违照片'] = photoTokens.map((t) => ({ file_token: t }));
-      record['照片状态'] = '已上传';
+      record['违章照片'] = photoTokens.map((t) => ({ file_token: t }));
+    }
+    // 整改后照片（可选）：body.rectify_photo_tokens，落入「整改后照片」附件列
+    if (Array.isArray(body.rectify_photo_tokens) && body.rectify_photo_tokens.length
+        && body.rectify_photo_tokens.every((t) => typeof t === 'string' && /^[A-Za-z0-9]{10,120}$/.test(t))) {
+      record['整改后照片'] = [...new Set(body.rectify_photo_tokens)].slice(0, 3).map((t) => ({ file_token: t }));
     }
 
-    // 写存储后端（适配器按后端转换端点/格式）
-    // 飞书后端：表已类型化（日期列=日期型毫秒、照片列=附件），写入前做字段映射变换
-    const outRecord = cfg.backend === 'feishu' ? feishuTypedRecord(record) : record;
+    /* ---- 可选：建单即指派（CF-WPS-43）----------------------------------------
+       现场反馈「点乡镇经理/管理员的姓名，要等好几秒才跳下一页」。
+       原链路：patrol/submit（≈4.2s）→ /api/mobile/assign（≈3.3s）**串行两段**，
+       而 assign 里的 getRecord（≈0.9s）+ updateRecord（≈2.2s）纯粹是把刚建好的
+       同一条记录再读一遍、再写一遍。建单时接收人信息已经全部已知 →
+       直接并进这一次 create，省掉整段 assign 往返（端到端 ≈7.7s → ≈4.3s）。
+       /api/mobile/assign 保留不动：事后改派、经理转派、历史补发仍走它。 */
+    let assignInfo = null;
+    const at = body.assign_to;
+    if (at && typeof at === 'object' && !Array.isArray(at)) {
+      const aid = String(at.assignee_id || '').trim();
+      if (aid) {
+        if (!/^\d{6,20}$/.test(aid)) {
+          return errRes('ASSIGN_FIELD_INVALID', 'assign_to.assignee_id 须为工号或手机号', 400, corsHeaders(origin));
+        }
+        // 新建记录的归属人就是调用者本人 → 「只能派自己的记录」天然满足，
+        // 只剩经理的接收人范围约束（与 /assign 同一套口径）。
+        const roleS = String(payload.role || '');
+        if (roleS === '经理' && roleS !== '公司管理') {
+          const subs = await managerSubordinatePhones(env, cfg, String(payload.name || ''));
+          if (!subs.has(aid)) {
+            return errRes('FORBIDDEN', '乡镇作业中心经理只能指派给你所在作业中心的下级', 403, corsHeaders(origin));
+          }
+        }
+        await ensureTodoFields(env, fileId, sheetId);
+        assignInfo = {
+          [TODO_FIELDS.assigneeId]: aid,
+          [TODO_FIELDS.assigneeName]: patrolText(at.assignee_name || aid, 40),
+          [TODO_FIELDS.town]: patrolText(at.town || '', 40),
+          [TODO_FIELDS.status]: TODO_STATUS.pending,
+          [TODO_FIELDS.assignerId]: String(payload.sub || ''),
+          [TODO_FIELDS.assignerName]: patrolText(payload.name || '', 40),
+          // 指派人单位 = 指派人自己的所属部门（如 公司管理=安环管理部），供「来自 XXX · 单位」显示
+          [TODO_FIELDS.assignerDept]: patrolText(payload.department || '', 40),
+          [TODO_FIELDS.assignedAt]: todoNowLocal(),
+          [TODO_FIELDS.doneAt]: '',
+          [TODO_FIELDS.note]: patrolText(at.note || '', 200),
+        };
+        Object.assign(record, assignInfo);
+      }
+    }
+
+    // CF-WPS（派发/上报区分）：来源列幂等补建 + 落主台账
+    // 来源：公司管理 / 乡镇作业中心经理 建的记录算「派发任务」，其余角色算「上报」（与前端 toPatrolBody 一致）
+    // ⚠️ fail-open：列建不出来（listFields/ensureField 异常）时**不写来源**，让巡查提交照常成功，
+    //    绝不能因为一个附加标签列把整条巡查挡在 1254045 之外。
+    const srcReady = await ensureSourceField(env, fileId, sheetId);
+    if (srcReady && srcReady.ok) record['来源'] = patrolText((body && body.source) || '上报', 10);
+
+    // 写主台账（飞书表已类型化：日期列=日期型毫秒、照片列=附件，写入前做字段映射变换）
+    const outRecord = feishuTypedRecord(record);
     let recs;
     try {
       recs = await adapter.createRecords(env, fileId, sheetId, [outRecord]);
@@ -1835,12 +2174,88 @@ async function handlePatrolSubmit(request, env) {
       if (e && e.isRateLimit) return errRes('WPS_RATE_LIMITED', '存储限频，请稍后重试', 429, corsHeaders(origin));
       return errRes('WPS_UPSTREAM_ERROR', '存储写入失败', 502, corsHeaders(origin));
     }
+    invalidateMainLedger(fileId, sheetId);   // CF-WPS-43：写后失效缓存，下次查重可见新记录
+    const notify = assignInfo
+      ? await notifyAssign(env, cfg, {
+          assigneeId: assignInfo[TODO_FIELDS.assigneeId],
+          assignerName: assignInfo[TODO_FIELDS.assignerName],
+          problem: String(record['违章行为'] || record['描述'] || ''),
+          town: assignInfo[TODO_FIELDS.town],
+          assignedAt: assignInfo[TODO_FIELDS.assignedAt],
+        })
+      : 'skipped';
     return jsonRes({
       success: true, code: 'OK',
       recordIds: recs.map((r) => (typeof r === 'string' ? r : r && r.id)).filter(Boolean),
       client_request_id: values.clientRequestId,
       employee: { employee_code: employeeCode },
-      target: target.production ? 'production' : 'test',
+      target: 'production',
+      assigned: !!assignInfo,
+      notify,
+    }, 200, corsHeaders(origin));
+  } catch {
+    return errRes('INTERNAL_ERROR', '内部错误，请稍后再试', 500, corsHeaders(origin));
+  }
+}
+
+// ---- POST /api/mobile/patrol/attach（把事后拍的照片补挂到已提交记录）----
+// 整改后照片是**记录提交之后**才拍的：提交那一刻还拿不到 file_token，
+// 只能等拍完 → 上传 → 再 PUT 回同一条记录（飞书 records/:id 局部更新）。
+// 归属校验用「备注」里的 巡查人ID，杜绝给别人记录挂照片。
+async function handlePatrolAttach(request, env) {
+  const origin = corsOrigin(request, env);
+  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
+  try {
+    const adapter = getAdapter(env);
+    const cfg = await storageConfig(env);
+
+    if (!env.WORKER_SESSION_SECRET) return errRes('SESSION_NOT_CONFIGURED', '会话密钥未配置', 503, corsHeaders(origin));
+    const payload = await verifyWorkerSession(bearerToken(request), env.WORKER_SESSION_SECRET);
+    if (!payload) return errRes('UNAUTHORIZED', '未认证或登录态失效', 401, corsHeaders(origin));
+
+    const target = patrolTarget(env, cfg);
+    if (!target) return errRes('PATROL_TARGET_NOT_CONFIGURED', '巡查目标表未配置', 503, corsHeaders(origin));
+
+    const contentLen = Number(request.headers.get('content-length') || '0');
+    if (contentLen > PATROL_BODY_LIMIT) return errRes('BODY_TOO_LARGE', `请求体超过上限（${PATROL_BODY_LIMIT} 字节）`, 413, corsHeaders(origin));
+    let body;
+    try { body = await request.json(); } catch { return errRes('BAD_REQUEST', '请求格式不正确', 400, corsHeaders(origin)); }
+    if (!body || typeof body !== 'object') return errRes('BAD_REQUEST', '请求格式不正确', 400, corsHeaders(origin));
+
+    const recordId = patrolText(body.record_id, 64);
+    if (!/^[A-Za-z0-9]{8,64}$/.test(recordId)) return errRes('PATROL_FIELD_INVALID', 'record_id 不合法', 400, corsHeaders(origin));
+
+    const kind = patrolText(body.kind, 8) === 'rectify' ? 'rectify' : 'scene';
+    const tokens = body.photo_tokens;
+    const okTokens = Array.isArray(tokens) && tokens.length >= 1 && tokens.length <= 3
+      && tokens.every((t) => typeof t === 'string' && /^[A-Za-z0-9]{10,120}$/.test(t));
+    if (!okTokens) return errRes('PATROL_FIELD_INVALID', 'photo_tokens 不合法（1~3 个、来自上传接口）', 400, corsHeaders(origin));
+
+    // 归属校验：只能补挂自己的记录
+    let hit;
+    try { hit = await adapter.getRecord(env, cfg.fileId, target.sheetId, recordId); }
+    catch (e) {
+      if (e && e.isNotFound) return errRes('NOT_FOUND', '记录不存在', 404, corsHeaders(origin));
+      return errRes('WPS_UPSTREAM_ERROR', '巡查记录暂不可用，请稍后再试', 502, corsHeaders(origin));
+    }
+    if (!hit || !patrolIsMine(hit.fields, payload.sub)) {
+      return errRes('NOT_FOUND', '记录不存在或无权修改', 404, corsHeaders(origin));
+    }
+    const recs = [hit];
+
+    const col = kind === 'rectify' ? '整改后照片' : '违章照片';
+    try {
+      await adapter.updateRecord(env, cfg.fileId, target.sheetId, recordId, {
+        [col]: [...new Set(tokens)].slice(0, 3).map((t) => ({ file_token: t })),
+      });
+      invalidateMainLedger(cfg.fileId, target.sheetId);   // CF-WPS-43
+    } catch (e) {
+      if (e && e.isRateLimit) return errRes('WPS_RATE_LIMITED', '存储限频，请稍后重试', 429, corsHeaders(origin));
+      return errRes('WPS_UPSTREAM_ERROR', '照片补挂失败', 502, corsHeaders(origin));
+    }
+    return jsonRes({
+      success: true, code: 'OK',
+      record_id: recordId, column: col, count: new Set(tokens).size,
     }, 200, corsHeaders(origin));
   } catch {
     return errRes('INTERNAL_ERROR', '内部错误，请稍后再试', 500, corsHeaders(origin));
@@ -1850,28 +2265,58 @@ async function handlePatrolSubmit(request, env) {
 // ---- GET /api/mobile/patrol/records（列表；?id= 详情；仅本人记录）----
 function patrolRecordView(rec, full) {
   const f = rec.fields || {};
+  // 主台账真实列（2026-09-18 实测）：检查人姓名 / 网格等级 / 片区|班组 / 违章行为 /
+  //   违章人员姓名 / 描述 / 备注 / 违章照片 / 整改后照片 …
+  // 旧列名（巡查时间/网格/问题类型/问题描述/是否三违/涉及人员）在主台账里**不存在**，
+  // 继续按旧名读只会得到一串空字符串 —— 台账页会显示成空白行。
+  const note = parsePatrolNote(fieldText(f['备注']));
+  const behavior = fieldText(f['违章行为']);
+  const isVio = !!behavior && behavior !== NO_VIOLATION_TEXT;
   const base = {
     record_id: rec.id,
-    inspection_time: fieldText(f['巡查时间']) || msToPatrolTime(f['日期']),
-    grid: fieldText(f['网格']),
-    problem_type: fieldText(f['问题类型']),
-    description: fieldText(f['问题描述']),
-    is_violation: fieldText(f['是否三违']),
-    created_at: fieldText(f['创建时间']) || msToPatrolTime(f['提交时间']),
+    inspection_time: note.inspectionTime || msToPatrolTime(f['日期']),
+    grid: fieldText(f['片区|班组']),
+    problem_type: isVio ? '三违' : '现场正常',
+    description: fieldText(f['描述']),
+    is_violation: isVio ? '是' : '否',
+    created_at: msToPatrolTime(f['日期']),
+    // ⚠️ 三违行为 / 违章人员必须进列表视图：台账页卡片靠这两个字段显示
+    //    「违章停车 · 张三」，只放进详情会让列表退化成光秃秃的「三违」。
+    violation_desc: isVio ? behavior : '',
+    violation_people: fieldText(f['违章人员姓名']),
+    // CF-WPS-36 整改待办：列表与详情都带指派信息 ——
+    // 公司管理要在台账里看到「派给了谁 / 现在什么状态」，被指派人要知道「谁派给我的」。
+    // 不放进视图的话前端拿不到，台账卡片就无法区分「自建」与「上级指派」（测试报告 D2）。
+    assignee_id: fieldText(f[TODO_FIELDS.assigneeId]),
+    assignee_name: fieldText(f[TODO_FIELDS.assigneeName]),
+    todo_town: fieldText(f[TODO_FIELDS.town]),
+    todo_status: fieldText(f[TODO_FIELDS.status]),
+    assigner_id: fieldText(f[TODO_FIELDS.assignerId]),
+    assigner_name: fieldText(f[TODO_FIELDS.assignerName]),
+    assigned_at: fieldText(f[TODO_FIELDS.assignedAt]),
+    done_at: fieldText(f[TODO_FIELDS.doneAt]),
+    todo_note: fieldText(f[TODO_FIELDS.note]),
+    // CF-WPS 派发/上报区分：来源列 → source，台账卡片据此显示 派发/上报 标签
+    // 历史记录（来源为空）→ 前端回退显示「上报」，符合其业务本质。
+    source: fieldText(f['来源']),
   };
   if (!full) return base;
   return {
     ...base,
-    employee_code: fieldText(f['employee_code']) || fieldText(f['巡查人员ID']),
-    name: fieldText(f['姓名']),
-    violation_desc: fieldText(f['三违行为描述']) || fieldText(f['三违行为']),
-    violation_people: fieldText(f['涉及人员']),
-    photo_status: fieldText(f['照片状态']) || 'PENDING_EXTERNAL',
-    photo_count: Array.isArray(f['三违照片']) ? f['三违照片'].length : 0,
-    source: fieldText(f['来源']),
-    test_status: fieldText(f['测试状态']),
-    client_request_id: fieldText(f['client_request_id']),
+    employee_code: note.employeeCode || fieldText(f['employee_code']) || fieldText(f['巡查人员ID']),
+    name: fieldText(f['检查人姓名']),
+    grid_level: fieldText(f['网格等级']),
+    photo_status: (Array.isArray(f['违章照片']) && f['违章照片'].length) ? '已上传' : 'PENDING_EXTERNAL',
+    photo_count: Array.isArray(f['违章照片']) ? f['违章照片'].length : 0,
+    rectify_photo_count: Array.isArray(f['整改后照片']) ? f['整改后照片'].length : 0,
+    client_request_id: note.clientRequestId || fieldText(f['client_request_id']),
   };
+}
+// 「本人记录」判定：主台账没有 employee_code 列，只能靠「备注」里的 巡查人ID:<手机号>。
+// 姓名不参与判定（重名会串号），手机号才是唯一身份。
+function patrolIsMine(fields, sub) {
+  const note = parsePatrolNote(fieldText((fields || {})['备注']));
+  return note.employeeCode === String(sub);
 }
 
 async function handlePatrolRecords(request, env) {
@@ -1881,7 +2326,7 @@ async function handlePatrolRecords(request, env) {
   const payload = await verifyWorkerSession(bearerToken(request), env.WORKER_SESSION_SECRET);
   if (!payload) return errRes('UNAUTHORIZED', '未认证或登录态失效', 401, corsHeaders(origin));
   const adapter = getAdapter(env);
-  const cfg = storageConfig(env);
+  const cfg = await storageConfig(env);
 
   const target = patrolTarget(env, cfg);
   if (!target) return errRes('PATROL_TARGET_NOT_CONFIGURED', '巡查目标表未配置', 503, corsHeaders(origin));
@@ -1898,16 +2343,17 @@ async function handlePatrolRecords(request, env) {
   const wantId = url.searchParams.get('id');
 
   if (wantId) {
-    const hit = recs.find((r) => r.id === String(wantId) && (fieldText(r.fields['employee_code']) || fieldText(r.fields['巡查人员ID'])) === payload.sub);
+    const hit = recs.find((r) => r.id === String(wantId) && patrolIsMine(r.fields, payload.sub));
     if (!hit) return errRes('NOT_FOUND', '记录不存在', 404, corsHeaders(origin));
     return jsonRes({ success: true, code: 'OK', record: patrolRecordView(hit, true) }, 200, corsHeaders(origin));
   }
 
   const mine = recs
-    .filter((r) => (fieldText(r.fields['employee_code']) || fieldText(r.fields['巡查人员ID'])) === payload.sub)
+    .filter((r) => patrolIsMine(r.fields, payload.sub))
     .sort((a, b) => {
-      const ta = fieldText(a.fields['创建时间']) || msToPatrolTime(a.fields['日期']) || fieldText(a.fields['提交时间']);
-      const tb = fieldText(b.fields['创建时间']) || msToPatrolTime(b.fields['日期']) || fieldText(b.fields['提交时间']);
+      // 排序键：备注里的巡查时间 → 退到 日期（创建时间，毫秒）
+      const ta = parsePatrolNote(fieldText(a.fields['备注'])).inspectionTime || msToPatrolTime(a.fields['日期']);
+      const tb = parsePatrolNote(fieldText(b.fields['备注'])).inspectionTime || msToPatrolTime(b.fields['日期']);
       return String(tb).localeCompare(String(ta));
     })
     .slice(0, PATROL_LIST_LIMIT);
@@ -1918,43 +2364,421 @@ async function handlePatrolRecords(request, env) {
   }, 200, corsHeaders(origin));
 }
 
+/* ============================================================================
+   CF-WPS-36 整改待办：跨账号指派的服务端实体 + 三个接口
+   ---------------------------------------------------------------------------
+   背景：此前「转给责任乡镇」只在**指派人本机 localStorage**打标记，被指派人
+   永远收不到（见 docs/三级账号权限与流程测试报告.md 的 B3/B4/B5/C1/C2/F2/F3）。
+   指派关系必须落到服务端，才能被另一个账号读到。
+
+   存储：与主台账同表，新增 9 个文本列（TODO_FIELDS），由 ensureTodoFields() 幂等创建。
+   一条巡查记录最多对应一条待办，语义一致、无需额外建表。
+
+   三个接口：
+     POST /api/mobile/assign            指派（创建/覆盖待办）
+     GET  /api/mobile/inbox             我的待办（按 整改接收人ID 过滤）
+     POST /api/mobile/assign/complete   完成待办（仅接收人可操作）
+   ============================================================================ */
+
+// 本地时间字符串 YYYY-MM-DD HH:mm（与前端 nowLocalInspectTime 同格式，便于人工阅读）
+function todoNowLocal(d) {
+  const t = d || new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  // Cloudflare Worker 默认 UTC；业务在东八区，+8h 后取本地时间
+  const cn = new Date(t.getTime() + 8 * 3600 * 1000);
+  return cn.getUTCFullYear() + '-' + pad(cn.getUTCMonth() + 1) + '-' + pad(cn.getUTCDate())
+    + ' ' + pad(cn.getUTCHours()) + ':' + pad(cn.getUTCMinutes());
+}
+
+// 待办视图：给被指派人看的字段（含「谁派给我的」来源信息 —— 测试报告 D2 要求）
+function todoView(rec, full) {
+  const f = rec.fields || {};
+  const base = patrolRecordView(rec, false);
+  const todo = {
+    record_id: rec.id,
+    assignee_id: fieldText(f[TODO_FIELDS.assigneeId]),
+    assignee_name: fieldText(f[TODO_FIELDS.assigneeName]),
+    town: fieldText(f[TODO_FIELDS.town]),
+    status: fieldText(f[TODO_FIELDS.status]),
+    assigner_id: fieldText(f[TODO_FIELDS.assignerId]),
+    assigner_name: fieldText(f[TODO_FIELDS.assignerName]),
+    // 指派人**所属单位**（不是接收方责任单位）——「来自 XXX · 单位」据此显示
+    assigner_dept: fieldText(f[TODO_FIELDS.assignerDept]),
+    assigned_at: fieldText(f[TODO_FIELDS.assignedAt]),
+    done_at: fieldText(f[TODO_FIELDS.doneAt]),
+    note: fieldText(f[TODO_FIELDS.note]),
+  };
+  if (!full) return { ...base, ...todo };
+  return {
+    ...base, ...todo,
+    rectify_photo_count: Array.isArray(f['整改后照片']) ? f['整改后照片'].length : 0,
+    description: fieldText(f['描述']),
+  };
+}
+
+function todoIsMine(fields, sub) {
+  const id = fieldText((fields || {})[TODO_FIELDS.assigneeId]);
+  return !!id && id === String(sub);
+}
+
+// ---- POST /api/mobile/assign ----
+// body: { record_id, assignee_id, assignee_name, town, note }
+// 权限：记录创建者本人，或公司管理（可指派全公司任一条）
+async function handleAssign(request, env) {
+  const origin = corsOrigin(request, env);
+  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
+  if (request.method !== 'POST') return errRes('METHOD_NOT_ALLOWED', '不支持的请求方法', 405, corsHeaders(origin));
+  if (!env.WORKER_SESSION_SECRET) return errRes('SESSION_NOT_CONFIGURED', '会话密钥未配置', 503, corsHeaders(origin));
+  const payload = await verifyWorkerSession(bearerToken(request), env.WORKER_SESSION_SECRET);
+  if (!payload) return errRes('UNAUTHORIZED', '未认证或登录态失效', 401, corsHeaders(origin));
+
+  let body;
+  try { body = await request.json(); } catch { return errRes('BAD_JSON', '请求体解析失败', 400, corsHeaders(origin)); }
+  const recordId = String((body && body.record_id) || '').trim();
+  const assigneeId = String((body && body.assignee_id) || '').trim();
+  const assigneeName = String((body && body.assignee_name) || '').trim();
+  if (!recordId) return errRes('ASSIGN_FIELD_INVALID', '缺少 record_id', 400, corsHeaders(origin));
+  if (!assigneeId) return errRes('ASSIGN_FIELD_INVALID', '缺少 assignee_id（接收人工号/手机号）', 400, corsHeaders(origin));
+  if (!/^\d{6,20}$/.test(assigneeId)) return errRes('ASSIGN_FIELD_INVALID', 'assignee_id 须为工号或手机号', 400, corsHeaders(origin));
+
+  const adapter = getAdapter(env);
+  const cfg = await storageConfig(env);
+  const target = patrolTarget(env, cfg);
+  if (!target) return errRes('PATROL_TARGET_NOT_CONFIGURED', '巡查目标表未配置', 503, corsHeaders(origin));
+  await ensureTodoFields(env, cfg.fileId, target.sheetId);
+
+  // CF-WPS-43：单条 GET 替代全表扫描（之前 5s+）—— 写入路径必须看到刚 submit 的最新记录。
+  let hit;
+  try { hit = await adapter.getRecord(env, cfg.fileId, target.sheetId, recordId); }
+  catch (e) {
+    if (e && e.isNotFound) return errRes('NOT_FOUND', '记录不存在', 404, corsHeaders(origin));
+    return errRes('WPS_UPSTREAM_ERROR', '巡查记录暂不可用，请稍后再试', 502, corsHeaders(origin));
+  }
+  if (!hit) return errRes('NOT_FOUND', '记录不存在', 404, corsHeaders(origin));
+  const recs = [hit];
+
+  // 权限（CF-WPS-41 扩展：给乡镇作业中心经理对称的「派活」能力）：
+  //   公司管理                 → 全公司可派，接收人不限；
+  //   乡镇作业中心经理         → 可派「自己接收的」或「责任单位 = 本作业中心」的记录，
+  //                              且接收人**必须是台账里直接上级 = 本人**的下级；
+  //   其它角色                 → 只能派自己创建的记录（原行为不变，避免动到既有流程）。
+  const role = String(payload.role || '');
+  const isCompany = role === '公司管理';
+  const isManager = role === '经理';
+  let permitted = false;
+  let denyMsg = '只能指派自己创建的记录';
+  if (isCompany || patrolIsMine(hit.fields, payload.sub)) permitted = true;
+  else if (isManager) {
+    const townNow = patrolText(hit.fields[TODO_FIELDS.town] || '');
+    const dept = String(payload.department || '');
+    const ownUnit = !!townNow && !!dept && (townNow === dept || dept.includes(townNow) || townNow.includes(dept));
+    if (todoIsMine(hit.fields, payload.sub) || ownUnit) permitted = true;
+    else denyMsg = '只能指派你本人接收的、或属于你所在作业中心的记录';
+  }
+  if (!permitted) return errRes('FORBIDDEN', denyMsg, 403, corsHeaders(origin));
+
+  // 接收人范围收敛：经理只能派给本作业中心的下级（越权指派到别的镇一律拒绝）
+  if (isManager && !isCompany) {
+    const subs = await managerSubordinatePhones(env, cfg, String(payload.name || ''));
+    if (!subs.has(assigneeId)) {
+      return errRes('FORBIDDEN', '乡镇作业中心经理只能指派给你所在作业中心的下级', 403, corsHeaders(origin));
+    }
+  }
+
+  const fields = {
+    [TODO_FIELDS.assigneeId]: assigneeId,
+    [TODO_FIELDS.assigneeName]: assigneeName || assigneeId,
+    [TODO_FIELDS.town]: patrolText((body && body.town) || '', 40),
+    [TODO_FIELDS.status]: TODO_STATUS.pending,
+    [TODO_FIELDS.assignerId]: String(payload.sub || ''),
+    [TODO_FIELDS.assignerName]: String(payload.name || ''),
+    // 指派人单位 = 指派人自己的所属部门（如 公司管理=安环管理部），供「来自 XXX · 单位」显示
+    [TODO_FIELDS.assignerDept]: patrolText(payload.department || '', 40),
+    [TODO_FIELDS.assignedAt]: todoNowLocal(),
+    [TODO_FIELDS.doneAt]: '',
+    [TODO_FIELDS.note]: patrolText((body && body.note) || '', 200),
+  };
+  try {
+    await adapter.updateRecord(env, cfg.fileId, target.sheetId, recordId, fields);
+    invalidateMainLedger(cfg.fileId, target.sheetId);   // CF-WPS-43
+  } catch (e) {
+    if (e && e.isRateLimit) return errRes('WPS_RATE_LIMITED', '存储限频，请稍后重试', 429, corsHeaders(origin));
+    return errRes('WPS_UPSTREAM_ERROR', '指派写入失败：' + String((e && e.fsMsg) || ''), 502, corsHeaders(origin));
+  }
+  // CF-WPS-41：指派成功后给接收人发微信（未配令牌时内部直接短路）。
+  const notify = await notifyAssign(env, cfg, {
+    assigneeId,
+    assignerName: String(payload.name || ''),
+    problem: patrolText(hit.fields['违章行为'] || '') || patrolText(hit.fields['描述'] || ''),
+    town: fields[TODO_FIELDS.town],
+    assignedAt: fields[TODO_FIELDS.assignedAt],
+  });
+
+  return jsonRes({
+    success: true, code: 'OK',
+    record_id: recordId,
+    assignee_id: assigneeId, assignee_name: fields[TODO_FIELDS.assigneeName],
+    town: fields[TODO_FIELDS.town], status: TODO_STATUS.pending,
+    assigned_at: fields[TODO_FIELDS.assignedAt],
+    notify,   // sent | no_uid（接收人未绑定微信）| not_configured | upstream | network | error
+  }, 200, corsHeaders(origin));
+}
+
+// 台账里「直接上级 = meName」的人的手机号集合（经理可指派范围）
+async function managerSubordinatePhones(env, cfg, meName) {
+  const out = new Set();
+  const name = String(meName || '').trim();
+  if (!name) return out;
+  const adapter = getAdapter(env);
+  let rows;
+  try {
+    // CF-WPS-43：走 60s 缓存的身份表，避免每次指派都把台账整表扫一遍（~1s）
+    rows = (await getIdentityRows(adapter, env, cfg.fileId, cfg.ledgerSheetId)).map(mapLedgerRecord).filter((r) => r.name);
+  } catch { return out; }
+  const count = ledgerNameCount(rows);
+  for (const d of ledgerChildren(rows, name, count)) {
+    if (d.phone) out.add(String(d.phone));
+  }
+  return out;
+}
+
+// ---- GET /api/mobile/inbox（我的待办）----
+// 按「整改接收人ID == 我」过滤 —— 与 patrol/records（按创建者过滤）互补：
+// 前者是「我派出去的」，这里是「派给我的」。
+async function handleInbox(request, env) {
+  const origin = corsOrigin(request, env);
+  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
+  if (request.method !== 'GET') return errRes('METHOD_NOT_ALLOWED', '不支持的请求方法', 405, corsHeaders(origin));
+  if (!env.WORKER_SESSION_SECRET) return errRes('SESSION_NOT_CONFIGURED', '会话密钥未配置', 503, corsHeaders(origin));
+  const payload = await verifyWorkerSession(bearerToken(request), env.WORKER_SESSION_SECRET);
+  if (!payload) return errRes('UNAUTHORIZED', '未认证或登录态失效', 401, corsHeaders(origin));
+
+  const adapter = getAdapter(env);
+  const cfg = await storageConfig(env);
+  const target = patrolTarget(env, cfg);
+  if (!target) return errRes('PATROL_TARGET_NOT_CONFIGURED', '巡查目标表未配置', 503, corsHeaders(origin));
+
+  // CF-WPS-43：用「按整改接收人ID过滤」替代全表扫描 —— 单条人通常只有几条记录，
+  // 飞书原生 search API 单次往返 ~200ms。
+  await ensureTodoFields(env, cfg.fileId, target.sheetId);
+  let mine;
+  try {
+    mine = await adapter.searchRecords(env, cfg.fileId, target.sheetId, {
+      field: TODO_FIELDS.assigneeId, value: String(payload.sub || ''), maxPages: 5,
+    });
+  } catch {
+    // 旧字段不存在（建列失败前的老数据）或 search 列不过筛：退回全表扫描兜底，
+    // 不至于接口挂掉 —— 这条路径只会出现在极端 race condition 下。
+    let recs;
+    try { recs = await adapter.scanRecords(env, cfg.fileId, target.sheetId); }
+    catch { return errRes('WPS_UPSTREAM_ERROR', '待办暂不可用，请稍后再试', 502, corsHeaders(origin)); }
+    mine = recs.filter((r) => todoIsMine(r.fields, payload.sub));
+  }
+
+  const pending = mine.filter((r) => fieldText(r.fields[TODO_FIELDS.status]) !== TODO_STATUS.done);
+  const sortKey = (r) => fieldText(r.fields[TODO_FIELDS.assignedAt]);
+  const byTimeDesc = (a, b) => String(sortKey(b)).localeCompare(String(sortKey(a)));
+
+  const todos = [...pending.sort(byTimeDesc), ...mine.filter((r) => fieldText(r.fields[TODO_FIELDS.status]) === TODO_STATUS.done).sort(byTimeDesc)]
+    .slice(0, PATROL_LIST_LIMIT)
+    .map((r) => todoView(r, false));
+  // 老记录（「指派人单位」列上线前建的）没有该值 → 用身份台账按指派人手机号回填。
+  // 目的：让「来自 XXX · 单位」对存量待办也显示**指派人自己的单位**，而不是接收方的责任单位。
+  // 回填失败静默降级（单位缺失只是显示少一截，不影响待办本身）。
+  const needFill = todos.filter((t) => !t.assigner_dept && t.assigner_id);
+  if (needFill.length) {
+    try {
+      const rows = (await getIdentityRows(adapter, env, cfg.fileId, cfg.ledgerSheetId)).map(mapLedgerRecord);
+      const deptByPhone = new Map();
+      for (const r of rows) if (r.phone) deptByPhone.set(String(r.phone), r.department || '');
+      for (const t of needFill) t.assigner_dept = deptByPhone.get(String(t.assigner_id)) || '';
+    } catch { /* 回填失败静默 */ }
+  }
+
+  return jsonRes({
+    success: true, code: 'OK',
+    me: { id: String(payload.sub || ''), name: String(payload.name || ''), role: String(payload.role || '') },
+    pending_count: pending.length,        // 首页「待整改」红点直接取这个
+    total: mine.length,
+    todos,
+  }, 200, corsHeaders(origin));
+}
+
+// ---- POST /api/mobile/assign/complete ----
+// body: { record_id, note, photo_tokens? }
+// 权限：**仅接收人**（整改接收人ID == 我）可完成 —— 别人不能替他结案。
+async function handleAssignComplete(request, env) {
+  const origin = corsOrigin(request, env);
+  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
+  if (request.method !== 'POST') return errRes('METHOD_NOT_ALLOWED', '不支持的请求方法', 405, corsHeaders(origin));
+  if (!env.WORKER_SESSION_SECRET) return errRes('SESSION_NOT_CONFIGURED', '会话密钥未配置', 503, corsHeaders(origin));
+  const payload = await verifyWorkerSession(bearerToken(request), env.WORKER_SESSION_SECRET);
+  if (!payload) return errRes('UNAUTHORIZED', '未认证或登录态失效', 401, corsHeaders(origin));
+
+  let body;
+  try { body = await request.json(); } catch { return errRes('BAD_JSON', '请求体解析失败', 400, corsHeaders(origin)); }
+  const recordId = String((body && body.record_id) || '').trim();
+  if (!recordId) return errRes('ASSIGN_FIELD_INVALID', '缺少 record_id', 400, corsHeaders(origin));
+
+  const adapter = getAdapter(env);
+  const cfg = await storageConfig(env);
+  const target = patrolTarget(env, cfg);
+  if (!target) return errRes('PATROL_TARGET_NOT_CONFIGURED', '巡查目标表未配置', 503, corsHeaders(origin));
+
+  await ensureTodoFields(env, cfg.fileId, target.sheetId);
+
+  // CF-WPS-43：单条 GET 替代全表扫描
+  let hit;
+  try { hit = await adapter.getRecord(env, cfg.fileId, target.sheetId, recordId); }
+  catch (e) {
+    if (e && e.isNotFound) return errRes('NOT_FOUND', '记录不存在', 404, corsHeaders(origin));
+    return errRes('WPS_UPSTREAM_ERROR', '巡查记录暂不可用，请稍后再试', 502, corsHeaders(origin));
+  }
+  if (!hit) return errRes('NOT_FOUND', '记录不存在', 404, corsHeaders(origin));
+  if (!todoIsMine(hit.fields, payload.sub)) {
+    return errRes('FORBIDDEN', '只有接收人本人可以完成这条待办', 403, corsHeaders(origin));
+  }
+
+  const fields = {
+    [TODO_FIELDS.status]: TODO_STATUS.done,
+    [TODO_FIELDS.doneAt]: todoNowLocal(),
+    [TODO_FIELDS.note]: patrolText((body && body.note) || '', 200),
+  };
+  const tokens = Array.isArray(body.photo_tokens) ? body.photo_tokens.filter((t) => typeof t === 'string' && t) : [];
+  if (tokens.length) fields['整改后照片'] = [...new Set(tokens)].slice(0, 3).map((t) => ({ file_token: t }));
+
+  try {
+    await adapter.updateRecord(env, cfg.fileId, target.sheetId, recordId, fields);
+    invalidateMainLedger(cfg.fileId, target.sheetId);   // CF-WPS-43
+  } catch (e) {
+    if (e && e.isRateLimit) return errRes('WPS_RATE_LIMITED', '存储限频，请稍后重试', 429, corsHeaders(origin));
+    return errRes('WPS_UPSTREAM_ERROR', '完成写入失败：' + String((e && e.fsMsg) || ''), 502, corsHeaders(origin));
+  }
+  return jsonRes({
+    success: true, code: 'OK',
+    record_id: recordId, status: TODO_STATUS.done,
+    done_at: fields[TODO_FIELDS.doneAt],
+    photo_count: tokens.length,
+  }, 200, corsHeaders(origin));
+}
+
+/* 微信推送绑定状态（CF-WPS-41） */
+async function handleWxStatus(request, env) {
+  const origin = corsOrigin(request, env);
+  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
+  if (request.method !== 'GET') return errRes('METHOD_NOT_ALLOWED', '不支持的请求方法', 405, corsHeaders(origin));
+  if (!env.WORKER_SESSION_SECRET) return errRes('SESSION_NOT_CONFIGURED', '会话密钥未配置', 503, corsHeaders(origin));
+  const payload = await verifyWorkerSession(bearerToken(request), env.WORKER_SESSION_SECRET);
+  if (!payload) return errRes('UNAUTHORIZED', '未认证或登录态失效', 401, corsHeaders(origin));
+
+  const cfg = await storageConfig(env);
+  const uid = await wxUidByPhone(env, cfg, payload.sub).catch(() => '');
+  return jsonRes({
+    success: true, code: 'OK',
+    enabled: !!String(env.WX_APP_TOKEN || '').trim(),
+    bound: !!uid,
+    // 未配置关注链接时前端降级为纯文字引导
+    follow_url: String(env.WX_FOLLOW_URL || 'https://wxpusher.zjiecode.com/admin/'),
+  }, 200, corsHeaders(origin));
+}
+
+/* 绑定 / 解绑微信推送 UID（CF-WPS-41） */
+async function handleWxBind(request, env) {
+  const origin = corsOrigin(request, env);
+  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
+  if (request.method !== 'POST') return errRes('METHOD_NOT_ALLOWED', '不支持的请求方法', 405, corsHeaders(origin));
+  if (!env.WORKER_SESSION_SECRET) return errRes('SESSION_NOT_CONFIGURED', '会话密钥未配置', 503, corsHeaders(origin));
+  const payload = await verifyWorkerSession(bearerToken(request), env.WORKER_SESSION_SECRET);
+  if (!payload) return errRes('UNAUTHORIZED', '未认证或登录态失效', 401, corsHeaders(origin));
+  if (!String(env.WX_APP_TOKEN || '').trim()) {
+    return errRes('WX_NOT_CONFIGURED', '微信推送未开通', 503, corsHeaders(origin));
+  }
+  let body;
+  try { body = await request.json(); } catch { return errRes('BAD_JSON', '请求体解析失败', 400, corsHeaders(origin)); }
+  const uid = String((body && body.uid) || '').trim();
+  const unbind = !!(body && body.unbind);
+
+  const adapter = getAdapter(env);
+  const cfg = await storageConfig(env);
+  await ensureWxField(env, cfg.fileId, cfg.ledgerSheetId);
+
+  let recs;
+  try { recs = await adapter.scanRecords(env, cfg.fileId, cfg.ledgerSheetId); }
+  catch { return errRes('UPSTREAM_ERROR', '身份信息暂不可用，请稍后再试', 502, corsHeaders(origin)); }
+  const me = String(payload.sub || '').replace(/\D/g, '');
+  const hit = recs.find((r) => phoneDigits((r.fields || {})['手机号']) === me);
+  if (!hit) return errRes('NOT_FOUND', '身份表中未找到你的账号', 404, corsHeaders(origin));
+
+  if (unbind) {
+    try {
+      await adapter.updateRecord(env, cfg.fileId, cfg.ledgerSheetId, hit.id, { [WX_FIELD]: '' });
+      invalidateIdentity(cfg.fileId, cfg.ledgerSheetId);   // CF-WPS-43：否则 60s 内仍读到旧 UID
+    }
+    catch { return errRes('UPSTREAM_ERROR', '解绑写入失败', 502, corsHeaders(origin)); }
+    return jsonRes({ success: true, code: 'OK', bound: false }, 200, corsHeaders(origin));
+  }
+
+  if (!/^UID_[A-Za-z0-9]+$/i.test(uid)) {
+    return errRes('WX_UID_INVALID', 'UID 格式不对（应以 UID_ 开头）', 400, corsHeaders(origin));
+  }
+  // 必须真的关注了本应用才允许绑定 —— 否则会把消息推到陌生人或静默丢失
+  const ok = await wxUidFollows(env, uid);
+  if (!ok) {
+    return errRes('WX_UID_NOT_FOLLOWED', '该 UID 尚未关注本应用，请先点关注链接完成关注', 400, corsHeaders(origin));
+  }
+  try {
+    await adapter.updateRecord(env, cfg.fileId, cfg.ledgerSheetId, hit.id, { [WX_FIELD]: uid });
+    invalidateIdentity(cfg.fileId, cfg.ledgerSheetId);   // CF-WPS-43：让下一次指派立刻用上刚绑定的 UID
+  }
+  catch { return errRes('UPSTREAM_ERROR', '绑定写入失败', 502, corsHeaders(origin)); }
+  return jsonRes({ success: true, code: 'OK', bound: true, uid }, 200, corsHeaders(origin));
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const p = url.pathname;
 
-    if (p === '/wps/oauth/start') return handleStart(env);
-    if (p === '/wps/oauth/callback') return handleCallback(request, env);
     if (p === '/wps/records/create') return handleRecordCreate(request, env);
-    if (p === '/wps/upload/image') return handleUploadImage(request, env);
+    if (p === '/api/mobile/upload') return handleUploadImage(request, env);
     // CF-WPS-11：移动端身份登录（最小闭环）
     if (p === '/api/mobile/auth/login') return handleMobileLogin(request, env);
     if (p === '/api/mobile/auth/logout') return handleMobileLogout(request, env);
     if (p === '/api/mobile/me') return handleMobileMe(request, env);
     // CF-WPS-19：选人数据链（组织关系 + 真实花名册）
     if (p === '/api/mobile/org/subordinates') return handleOrgSubordinates(request, env);
+    if (p === '/api/mobile/org/towns') return handleOrgTowns(request, env);
+    if (p === '/api/mobile/org/teams') return handleOrgTeams(request, env);
     if (p === '/api/mobile/roster') return handleRoster(request, env);
     if (p === '/api/mobile/geo/regeo') return handleGeoRegeo(request, env);
     // CF-WPS-13：网格长巡查文字业务链
     if (p === '/api/mobile/patrol/meta') return handlePatrolMeta(request, env);
     if (p === '/api/mobile/patrol/submit') return handlePatrolSubmit(request, env);
+    if (p === '/api/mobile/patrol/attach') return handlePatrolAttach(request, env);
     if (p === '/api/mobile/patrol/records') return handlePatrolRecords(request, env);
+    // CF-WPS-36：整改待办（跨账号指派）
+    if (p === '/api/mobile/assign') return handleAssign(request, env);
+    if (p === '/api/mobile/inbox') return handleInbox(request, env);
+    if (p === '/api/mobile/assign/complete') return handleAssignComplete(request, env);
+    // CF-WPS-41：微信推送绑定（GET 状态 / POST 绑定或解绑）
+    if (p === '/api/mobile/wx/status') return handleWxStatus(request, env);
+    if (p === '/api/mobile/wx/bind') return handleWxBind(request, env);
 
     return jsonRes({ success: false, code: 'NOT_FOUND', message: 'unknown route', path: p }, 404);
   },
 };
 
 // 导出供 Node 测试复用（Cloudflare 运行时不依赖这些导出）
-// 注：normalizeWpsRecord / scanWpsRecords 已迁入 worker/storage/wpsAdapter.js（零行为变更），此处再导出供测试
-export { normalizeWpsRecord, getAppToken } from './storage/wpsAdapter.js';
+//
+// ⚠️⚠️ 改了上面的正式代码？**必须重新生成 deploy.js**，否则线上跑的还是旧逻辑且不会报错！
+//   python worker/_scratch/mkdeploy.py     # 切出 deploy.js（= 本文件砍掉下面这些具名导出）
+//   node   worker/test/_t6c-deploy-drift.mjs   # 校验两者同步（红灯就去跑上一行）
+//   npx wrangler deploy                    # 部署
+//   原因：wrangler 3.114.17 的模块校验拒绝「export default {fetch}」与「非函数具名导出」共存
+//        （报 Incorrect type for map entry），所以部署入口是 deploy.js 而不是本文件。
+//
+// 导出供 Node 测试复用（Cloudflare 运行时不依赖这些导出）
 export {
-  kso1Signature,
-  buildKso1Headers,
-  parseTokenResponse,
-  unwrapV7,
-  normalizeUser,
-  handleStart,
-  handleCallback,
   handleRecordCreate,
   handleUploadImage,
   handleMobileLogin,
@@ -1969,6 +2793,11 @@ export {
   pinyinInitials,
   // CF-WPS-19
   handleOrgSubordinates,
+  handleOrgTowns,
+  handleOrgTeams,
+  townTeams,
+  sortTeams,
+  teamSortKey,
   handleRoster,
   mapRosterRecord,
   rosterAreaHit,
@@ -1976,8 +2805,38 @@ export {
   ledgerSubtree,
   splitOrg,
   ORG_MAX_DEPTH,
+  // CF-WPS-32（作业中心口径：镇/乡/街道 + 公园 + 作业中心，供单测直接复用真实逻辑）
+  townLabel,
+  isTownName,
+  isUnitName,
+  ledgerTowns,
+  ledgerTownPeople,
+  ledgerNameCount,
+  fillUnitHead,
+  TOWN_ANCHOR_RE,
+  UNIT_ANCHOR_RE,
   handlePatrolMeta,
   handlePatrolSubmit,
+  handlePatrolAttach,
+  // CF-WPS-36 整改待办
+  handleAssign,
+  handleInbox,
+  handleAssignComplete,
+  todoView,
+  todoIsMine,
+  todoNowLocal,
+  TODO_FIELDS,
+  TODO_STATUS,
+  // CF-WPS-41 微信推送 + 经理指派范围
+  handleWxStatus,
+  handleWxBind,
+  wxSend,
+  wxUidByPhone,
+  wxUidFollows,
+  ensureWxField,
+  notifyAssign,
+  managerSubordinatePhones,
+  WX_FIELD,
   handlePatrolRecords,
   patrolTarget,
   patrolProblemTypes,
@@ -1996,12 +2855,16 @@ export {
   regeoNingjin,
   validLatLng,
   GEO_TOWNS,
-  wpsGetUploadAddress,
-  wpsUploadBinary,
-  wpsCompleteUpload,
   detectImageMagic,
   UPLOAD_MAX_BYTES,
   RECORD_FIELD_WHITELIST,
-  TEST_FIELD_WHITELIST,
   PROTECTED_FIELDS,
+  // 主台账真实列映射（2026-09-18 修正：旧列名在主台账里不存在，写必 1254045）
+  FEISHU_FIELD_WHITELIST,
+  feishuTypedRecord,
+  patrolRecordView,
+  patrolIsMine,
+  buildPatrolNote,
+  parsePatrolNote,
+  NO_VIOLATION_TEXT,
 };
