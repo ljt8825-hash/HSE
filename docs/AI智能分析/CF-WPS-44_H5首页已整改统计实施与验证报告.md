@@ -73,6 +73,9 @@
 | 新后端单测（cfwps44-inbox-monthly） | **13 PASS_MOCK / 0 FAIL** |
 | `deploy.js` 漂移检测 | **7 passed / 0 failed** |
 | 生产写入 | **0**（E2E 全程路由拦截，除登录 POST 外非 GET 一律 abort，跑完 `blocked === 0`） |
+| **生产部署后复验（线上站点）** | ① 登录 POST **401**（非 405 ⇒ Functions 在）② `/api/mobile/health` **404 JSON**（Functions→Worker 通）③ `/home` **302 → /check** ④ 线上 `/check` 含新卡片 |
+| **生产 API 探针** | `/api/mobile/inbox` 已返回 `monthly_done_count`（键存在、数值型）✅ 新版 Worker 生效 |
+| **生产 E2E**（`LOCAL_PAGES=https://grid-mobile-cloudflare.pages.dev`） | **30 passed / 0 failed**（真实后端路径） |
 
 E2E 关键断言摘录：
 - 真实账号 `role=经理` → 4 卡，顺序 `本月派发|已整改|待整改|已闭环`；`role=公司管理` → 3 卡、无「已整改」。
@@ -84,19 +87,23 @@ E2E 关键断言摘录：
 
 ## 6. 边界与未验证项（如实标注）
 
-1. **本月已整改的真实服务端取值尚未在生产上跑过** —— 前端 E2E 打的是**尚未升级的生产 Worker**（还没有 `monthly_done_count` 字段），因此浏览器里那条路径降级为 0；真实服务端口径由 `cfwps44-inbox-monthly.test.mjs` 离线覆盖。**本阶段结束前生产尚未部署**，需用户授权后执行（见 §7）。
+1. **本月已整改的真实服务端取值已在生产复验**：部署后 `/api/mobile/inbox` 确认下发 `monthly_done_count`，生产 E2E 30/30 全绿（本次真实账号 `pending=0 / monthly_done=0`，与该账号确无被指派待办一致）。服务端多分支口径（跨月 pending、上月完成、完成时间缺失）仍由离线单测 `cfwps44-inbox-monthly.test.mjs` 钉死。
 2. **完成时间为空的存量已完成记录不计入本月已整改** —— 「整改完成时间」列是 CF-WPS-36 才加的，更早完成的老记录没有完成时间，无法归属月份，代码选择「如实不猜」。它们同样不占「待整改」，不会误导用户。
 3. `已整改` 与 `已闭环` 是两个不同人群：前者 = 指派给我且我整改掉的；后者 = 我自己上报且已闭环的。对同时兼任网格长的管理员，两个数字可能都非零，属预期。
 
-## 7. 部署清单（均未执行，待授权）
+## 7. 部署记录（已执行，用户显式授权）
 
-```bash
-# ① Worker（提供 monthly_done_count，必须先发；未发时前端降级为 0，不会报错）
-cd grid-mobile-cloudflare/worker && npm run deploy
+| 步骤 | 命令 / 结果 |
+|---|---|
+| ① Worker | `cd grid-mobile-cloudflare/worker && wrangler deploy` → **Version ID `7c6b87aa-38d1-40c2-95a0-d33c73329484`**，`Uploaded ... (3.72 sec)` |
+| ② Pages | `cd grid-mobile-cloudflare/_pages_deploy && ../worker/node_modules/.bin/wrangler pages deploy --project-name grid-mobile-cloudflare` → **Deployment `3682d48e.grid-mobile-cloudflare.pages.dev`** |
 
-# ② Pages（页面改动，含 4 卡布局）
-cd grid-mobile-cloudflare/_pages_deploy && npx wrangler pages deploy --project-name grid-mobile-cloudflare
-```
-⛔ ② 必须在 `_pages_deploy/` 目录内、**不带目录参数**执行（带目录参数会静默丢 Functions ⇒ 登录 405，2026-09-17 真实事故）。
-部署后必跑三条探针（见技能 `cf-pages-h5-verify` §0.1）：登录 POST 期望 401、`/api/mobile/health` 期望 404 JSON、`/home` 期望 302 → `/check`。
-回滚：Pages 控制台 → Deployments → Rollback（CLI 无 rollback 子命令）。
+② 的安装日志两行关键证据均出现：**`✨ Compiled Worker successfully`** + **`✨ Uploading Functions bundle`**（缺后者即代表 Functions 被静默丢掉 ⇒ 登录 405，2026-09-17 真实事故的判据）。
+
+发布后三条存活探针（见技能 `cf-pages-h5-verify` §0.1）：登录 POST **401** ✅ / `/api/mobile/health` **404 JSON** ✅ / `/home` **302 → `/check`** ✅。
+
+回滚：Worker 用 `wrangler rollback`；Pages 走控制台 → Deployments → Rollback（CLI 无 rollback 子命令）。
+
+## 8. 顺带发现（与本次改动无关，建议另行处理）
+
+`wrangler.toml` 显示 `FS_PATROL_PRODUCTION_TABLE_ID = "tbl5QiCv5Qbal044"` —— 即 `tbl5QiCv5Qbal044` 是**主台账（H5员工日常不安全行为台账）**，而 2026-09-19 早前那份「根目录飞书表导出 PII 治理」提交（`523fd9f`）的说明文字把它写成了「花名册」。**隔离规则本身不受影响**（该导出文件确实含真实 PII，该忽略仍然正确），但注释里的表名归属写错了，建议下次触碰 `.gitignore` 时顺手改正。
