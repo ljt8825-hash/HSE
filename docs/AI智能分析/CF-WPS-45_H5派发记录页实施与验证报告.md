@@ -6,7 +6,8 @@
 - 用户确认的两个口径（AskUserQuestion 作答）：
   - **形态** = 底部导航新增一页
   - **范围** = 只列「之前派发但未完成的」（跨月一直显示，直到整改完成）
-- 结论：实现完成，本地验证 **25/25（后端离线）+ 49/49（浏览器 E2E）** 全绿；**尚未发布**（生产 Worker + Pages 待授权）
+- 结论：实现完成，本地验证 **25/25（后端离线）+ 54/54（浏览器 E2E）** 全绿；**已发布并生产验证通过**（Worker `b9c31893` → Pages `ef920da4`，见 §6）
+- ⚠️ 发布后生产验证发现 **1 处真实文案缺陷**并已修复重发（空态把「从未派发」误写成「都整改完成了」），详见 §6.2
 
 ---
 
@@ -109,7 +110,7 @@
 | 前端所需字段确实下发 | `assignee_name / todo_status / assigned_at / assigner_name / town / violation_desc / violation_people` 全非空 |
 | 无会话 → 401 且响应体不含 records | `HTTP 401` |
 
-### 3.2 浏览器 E2E `cfwps45-dispatch-tab.mjs` —— 49 PASS / 0 FAIL
+### 3.2 浏览器 E2E `cfwps45-dispatch-tab.mjs` —— 49 PASS / 0 FAIL（补 ⑨b/⑨c 后为 54 / 0）
 
 - ① 真实生产账号（`role=经理`）页签可见性与角色一致；
 - ② 点击页签 → 视图切换 + 页签高亮同步；
@@ -147,12 +148,12 @@
 
 ## 4. 边界与未验证项（如实标注）
 
-- **生产未部署**：Worker 未发 ⇒ `/api/mobile/dispatched` 在生产返回 404，页面会走 §3.2⑨ 的降级文案（「派发记录暂时拉不到」），**不白屏、不报错**，也不影响其它页签。**正确顺序：先 Worker 后 Pages。**
+- ~~**生产未部署**~~ → **已解决**：Worker + Pages 均已发布（§6.1）。该接口生产返回 401（无凭证）/ 200（有凭证），不再走降级文案。**发布顺序：先 Worker 后 Pages**（顺序反了会有一段时间 404）。
 - **真实飞书数据下的取值未验证**：E2E 的夹具来自离线 mock 飞书端点。生产上「经理账号实际能查到几条」取决于该账号是否真的派发过（建单即指派才会写 `指派人ID`）。**需发布后用真实账号复验一次**。
 - **>50 条截断**：列表上限沿用 `PATROL_LIST_LIMIT = 50`（与 inbox / 台账一致）。挂账超过 50 条时只显示最新 50 条，`pending_count` 仍是真实总数（角标不会骗人）。
 - **本页只读**：不提供任何写入口 —— 整改必须由接收人本人完成，派发方不能替他结案（与 `/api/mobile/assign/complete` 的「仅接收人可操作」一致）。
 
-## 5. 顺带发现的仓库卫生问题（未处理，供决策）
+## 5. 顺带发现的仓库卫生问题（2026-09-19 晚仍未处理，属待决策项）
 
 `worker/package.json` 的 `test` 链引用了两个**已被 gitignore 隔离**的测试文件：
 
@@ -160,3 +161,85 @@
 - `cfwps30-feishu-typing.test.mjs`（含真实号尾号）
 
 这意味着**全新 clone 的仓库跑 `npm test` 会在第 5 步断链**。二者此前因红线 PII 被隔离，隔离本身是对的，但与 `test` 脚本出现了冲突。可选处置：把这两个文件里的真实姓名/手机号替换为合成值后解隔离入库，或把它们从 `test` 链里摘出并在 README 说明需另配本地夹具。本轮未擅动（属另一主题）。
+
+---
+
+## 6. 发布与生产验证（2026-09-19 晚；用户授权「现在发（先 Worker 后 Pages）」）
+
+### 6.1 发布记录
+
+| 步骤 | 产物 | 关键日志 |
+|---|---|---|
+| Worker | Version `b9c31893-dfe4-42fa-9c35-c503a938263d` | `Uploaded ... (5.00 sec)` |
+| Pages（第一版） | `6be3ced1.grid-mobile-cloudflare.pages.dev` | `✨ Compiled Worker successfully` + `✨ Uploading Functions bundle` |
+| Pages（文案修正版，**最终**） | **`ef920da4.grid-mobile-cloudflare.pages.dev`** | 同上（Functions 未丢） |
+
+> ⚠️ 日志里必须出现 `✨ Uploading Functions bundle` —— 缺了就是「`pages deploy <dir>` 丢 Functions」事故（症状：登录接口 405）。发布命令一律在 `_pages_deploy/` **目录内、不带目录参数**执行。
+
+### 6.2 生产验证发现并修复的**真实缺陷**：空态文案
+
+发布后用 4 个真实账号（含 2 个公司管理）读 `/api/mobile/dispatched`，`total` **全为 0** —— 即系统里目前尚无任何派发中记录（派发动作尚未被真实使用）。但当时空态文案写的是「**派出去的都整改完成了**」。
+
+**这是语义错误**：会让人误以为自己的派发都已闭环，而事实是「压根没派过」。已修正为按 `total` 分流：
+
+| 条件 | 汇总行 | 空态 |
+|---|---|---|
+| `total === 0` | 还没有派发记录 | 你还没有派发过记录（+ 引导语） |
+| `total > 0` 且 `pending === 0` | 派出去的都整改完成了 | 派出去的都整改完成了 |
+| `pending > 0` | 未整改完成 N 条（另有 M 条已整改完成） | —（走列表） |
+
+### 6.3 最终 E2E：54 passed / 0 failed
+
+在 §3.2 基础上新增：
+
+- **⑨b** 两种空态文案不混用（含**反向**断言：不得出现「都整改完成了」）；
+- **⑨c** **真·生产后端对照**：用 `localStorage` 里的真实 token 直连 `/api/mobile/dispatched`，按真实 `total` / `pending_count` 分三支校验文案，截图 `05-real-backend-data`。实测生产回传 `HTTP 200 code=OK pending=0 total=0`。
+
+只读纪律收尾断言 `guard.blocked === 0` 仍为 0（全程零生产写入）。
+
+### 6.4 发布后探针（6 项全过）
+
+| 探针 | 期望 | 实测 |
+|---|---|---|
+| `POST /api/mobile/auth/login`（空 body） | 非 405（405 = Functions 丢） | **400** `BAD_REQUEST` |
+| 对照：对只允许 GET 的路由 POST | 405 | 405（确认 405 特征可辨识） |
+| `GET /api/mobile/dispatched` 无凭证 | 401 | **401** `UNAUTHORIZED` |
+| `/home` | 302 → `/check` | `Location: /check` |
+| `/check` 构建号 | `2026-09-19.59` | 已在线 |
+| 新文案 / `tab-dispatch` | 在线 | 空态文案 1 处 / `tab-dispatch` 3 处 |
+
+### 6.5 两处探针踩坑（修正上轮记录）
+
+1. **登录端点不是 `/api/mobile/login`，而是 `/api/mobile/auth/login`**（`worker/index.js:2810`）。用错路径会拿到 Worker 自己的 `unknown route` 404，极易误判成「Functions 挂了」。空 body 的正确期望是 **400**（不是 401）。
+2. **`/check.html` 会 308 → `/check`**（Pages clean-URL）。直接 `curl /check.html` 拿到的是**空 body 的 308**，grep 构建号/文案必然 0 命中。探针要打 `/check`（或加 `-L`）。
+
+### 6.6 ⚠️ 环境陷阱：本机 Bash 工具无法更新 `refs/remotes/**`
+
+`git push` / `git fetch` 在本环境的 Bash 工具里**报告成功、但永远不会更新本地远程跟踪引用**：
+
+- `mkdir -p .git/refs/remotes/origin` 报成功、`ls` 也能看到目录，但**往里写文件报 `No such file or directory`**（写普通文件同样失败）；
+- `git update-ref refs/remotes/origin/main HEAD` 返回 **rc=0 但引用纹丝不动**，松散 ref 文件不生成；
+- 结果：`git status` / `git branch -vv` 长期显示**假的 `ahead N`**（本次为 **129**），极易让人误以为「没推上去」而重复劳动。本机工作副本一直如此（`refs/remotes/origin/main` 停在 `31975ef`「initial cleaned baseline」）。
+- **验证推送的唯一可靠办法**：`git ls-remote origin main`（本次权威确认 `bdec43b` = 本地 HEAD）。
+- **修复办法**：改用 PowerShell 写 `.git/refs/remotes/origin/main`（内容为 HEAD 的 SHA）—— PowerShell 侧写入正常。本会话已修，之后 `git branch -vv` 归一为 `[origin/main]`、无 ahead。
+
+---
+
+## 7. 提交与推送
+
+| 提交 | 说明 |
+|---|---|
+| `e8486d0` | feat：H5 新增「派发记录」页（接口 + 页签 + 视图 + 测试 + 报告） |
+| `d332078` | docs：本报告 |
+| `bdec43b` | fix：空态文案按 `total` 分流 + E2E 补 ⑨b/⑨c 真实生产对照 |
+
+推送命令（本机非交互环境专用，见用户级记忆；只加 `wincred` 会挂死，必须先空值清空 helper 列表）：
+
+```bash
+git -c credential.helper= -c credential.helper=wincred \
+  -c http.proxy=http://127.0.0.1:7890 -c https.proxy=http://127.0.0.1:7890 push origin main
+```
+
+结果：`d0d7903..bdec43b  main -> main`；随后 `ls-remote` 复核 `refs/heads/main = bdec43b0eaa45bdf7f7e67624ab7cb1e11acef47`。
+
+提交前自检：`check-repo-source-integrity.mjs` **A=0 / B=0**；diff 凭据/PII 扫描 **0 命中**（唯一命中为 `localStorage` 取 token 的变量名）。
