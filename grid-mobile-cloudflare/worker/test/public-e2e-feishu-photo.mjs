@@ -1,6 +1,6 @@
 // ============================================================================
 // public-e2e-feishu-photo.mjs —— 照片链路公网 E2E（飞书附件列）
-// 链路：登录 → meta → 上传 1×1 PNG（/wps/upload/image）→ 携 photo_tokens 提交
+// 链路：登录 → meta → 上传 1×1 PNG（/api/mobile/upload）→ 携 photo_tokens 提交
 //       → 详情读回 photo_count=1 → 完（测试行由 e2e-cleanup 通道另行清理）
 // 运行：WORKER_URL=https://grid-mobile-cloudflare.pages.dev node test/public-e2e-feishu-photo.mjs
 // ============================================================================
@@ -38,11 +38,11 @@ async function main() {
   const grid = (meta.grids || [])[0];
   assert(grid, `网格 ${JSON.stringify(meta.grids)}`);
 
-  console.log(CY('\n[3/5] 上传照片 /wps/upload/image（multipart PNG）'));
+  console.log(CY('\n[3/5] 上传照片 /api/mobile/upload（multipart PNG）'));
   const fd = new FormData();
   fd.append('file', new Blob([png], { type: 'image/png' }), 'e2e-photo.png');
   fd.append('client_request_id', 'e2eup' + Date.now());
-  const upRes = await fetch(`${WORKER_URL}/wps/upload/image`, { method: 'POST', headers: auth, body: fd });
+  const upRes = await fetch(`${WORKER_URL}/api/mobile/upload`, { method: 'POST', headers: auth, body: fd });
   const up = await upRes.json().catch(() => ({}));
   assert(upRes.status === 200 && up.success, `上传 200 got=${upRes.status} body=${JSON.stringify(up).slice(0, 200)}`);
   assert(typeof up.file_token === 'string' && up.file_token.length >= 10, `file_token=${up.file_token}`);

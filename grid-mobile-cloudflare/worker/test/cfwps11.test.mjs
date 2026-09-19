@@ -10,7 +10,7 @@
  */
 const workerMod = await import('../index.js');
 const worker = workerMod.default;
-const { signJwtHs256, normalizeWpsRecord, mapLedgerRecord, pinyinInitials } = workerMod;
+const { signJwtHs256, mapLedgerRecord, pinyinInitials } = workerMod;
 
 // ---- fixture data (all fake) ----
 const SESSION_SECRET = 'mock-session-secret-0123456789abcdef';
@@ -35,11 +35,19 @@ const LEDGER_ROWS = [
 
 // ---- mock fetch: intercept feishu upstream; unmocked URL = hard fail ----
 let mockCalls = [];
+// 表名解析契约（同 worker/storage/index.js ROLE_TABLE_NAMES）。模块级缓存按 appToken 生效，
+// 因此「身份表缺失」用例需换一个全新 appToken 以强制重新解析。
+let mockTableNames = ['H5移动端身份表', 'H5花名册表', 'H5员工日常不安全行为台账'];
 globalThis.fetch = async (url, init) => {
   const u = String(url instanceof URL ? url : url);
   mockCalls.push(u);
   if (u.includes('/auth/v3/tenant_access_token/internal')) {
     return new Response(JSON.stringify({ code: 0, tenant_access_token: 'mock-fs-tenant-token', expire: 7200 }), { status: 200 });
+  }
+  if (/\/bitable\/v1\/apps\/[^/]+\/tables(\?|$)/.test(u)) {
+    // listTables（按名解析）：返回当前 mockTableNames
+    const items = mockTableNames.map((n, i) => ({ table_id: `tblMockName_${i}`, name: n }));
+    return new Response(JSON.stringify({ code: 0, data: { items, has_more: false } }), { status: 200 });
   }
   if (u.includes(`/bitable/v1/apps/${FS_APP_TOKEN}/tables/${LEDGER_TABLE_ID}/records`)) {
     return new Response(JSON.stringify({ code: 0, data: { items: LEDGER_ROWS, has_more: false } }), { status: 200 });
@@ -122,11 +130,15 @@ console.log('===== gates =====');
   const r = await callLogin({ phone: P1, password: PW('zs', P1) }, env);
   assert(r.status === 503 && r.json.code === 'SESSION_NOT_CONFIGURED', 'session secret missing -> 503', JSON.stringify(r.json));
 }
-// ledger table not configured
+// ledger table not configured（新体系：表 ID 按名解析；身份表缺失 → IDENTITY_NOT_CONFIGURED）
 {
-  const env = workerEnv(); delete env.FS_LEDGER_TABLE_ID;
-  const r = await callLogin({ phone: P1, password: PW('zs', P1) }, env);
-  assert(r.status === 503 && r.json.code === 'IDENTITY_NOT_CONFIGURED', 'ledger table missing -> 503', JSON.stringify(r.json));
+  const prevNames = mockTableNames;
+  const env = workerEnv({ FS_APP_TOKEN: 'mock-fs-base-identity-missing', FS_LEDGER_TABLE_ID: undefined });
+  mockTableNames = ['H5花名册表', 'H5员工日常不安全行为台账']; // 身份表缺失
+  try {
+    const r = await callLogin({ phone: P1, password: PW('zs', P1) }, env);
+    assert(r.status === 503 && r.json.code === 'IDENTITY_NOT_CONFIGURED', 'identity table missing -> 503', JSON.stringify(r.json));
+  } finally { mockTableNames = prevNames; }
 }
 
 console.log('===== matrix =====');
@@ -262,14 +274,6 @@ console.log('===== mapLedgerRecord units =====');
   assert(m.name === '张三' && m.phone === P1 && m.grade === '管理员' && m.superior === '领导甲', 'mapLedgerRecord maps ledger fields', JSON.stringify(m));
 }
 
-console.log('===== normalizeWpsRecord units =====');
-{
-  assert(normalizeWpsRecord({ id: '1', fields_value: '{"a":1}' })?.fields.a === 1, 'normalize fields_value', '');
-  assert(normalizeWpsRecord({ id: '2', fields: '{"b":2}' })?.fields.b === 2, 'normalize fields', '');
-  assert(normalizeWpsRecord({ id: '3', fields_value: 'not-json' }) === null, 'normalize invalid json -> null', '');
-  assert(normalizeWpsRecord(null) === null, 'normalize null -> null', '');
-}
-
 console.log('===== leak scan (all response bodies) =====');
 {
   // 新体系：employee_code = 登录者本人手机号（返回给本人不算泄漏）。
@@ -294,9 +298,11 @@ console.log('===== leak scan (all response bodies) =====');
   for (const [name, condOk] of checks) assert(condOk, `leak-scan: ${name}`, condOk ? '' : 'LEAK DETECTED');
 }
 
-// unmocked-URL guard check: only feishu token + ledger records endpoints allowed
+// unmocked-URL guard check: only feishu token + tables-list + ledger records endpoints allowed
 {
-  const allowed = (u) => u.includes('/auth/v3/tenant_access_token/internal') || u.includes(`/tables/${LEDGER_TABLE_ID}/records`);
+  const allowed = (u) => u.includes('/auth/v3/tenant_access_token/internal')
+    || /\/bitable\/v1\/apps\/[^/]+\/tables(\?|$)/.test(u)
+    || u.includes(`/tables/${LEDGER_TABLE_ID}/records`);
   const bad = mockCalls.filter((u) => !allowed(u));
   assert(bad.length === 0, 'network guard: only mocked feishu endpoints touched', bad.slice(0, 3).join(' | '));
 }

@@ -90,6 +90,11 @@ const ROSTER_ROWS = [
 globalThis.fetch = async (url) => {
   const u = String(url);
   if (u.includes('/auth/v3/tenant_access_token/internal')) return new Response(JSON.stringify({ code: 0, tenant_access_token: 'mock-fs-tenant-token', expire: 7200 }), { status: 200 });
+  if (/\/bitable\/v1\/apps\/[^/]+\/tables(\?|$)/.test(u)) return new Response(JSON.stringify({ code: 0, data: { items: [
+    { table_id: LEDGER_TABLE_ID, name: 'H5移动端身份表' },
+    { table_id: ROSTER_TABLE_ID, name: 'H5花名册表' },
+    { table_id: 'tblMockProd22', name: 'H5员工日常不安全行为台账' },
+  ], has_more: false } }), { status: 200 });
   if (u.includes(`/tables/${LEDGER_TABLE_ID}/records`)) return new Response(JSON.stringify({ code: 0, data: { items: LEDGER_ROWS, has_more: false } }), { status: 200 });
   if (u.includes(`/tables/${ROSTER_TABLE_ID}/records`)) return new Response(JSON.stringify({ code: 0, data: { items: ROSTER_ROWS, has_more: false } }), { status: 200 });
   throw new Error(`UNMOCKED URL (guard): ${u}`);

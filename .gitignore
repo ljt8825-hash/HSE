@@ -456,6 +456,10 @@ grid-mobile-cloudflare/worker/test/_who.mjs
 grid-mobile-cloudflare/worker/test/cfwps30-feishu-typing.test.mjs
 # 测试快照产物（非源码，可能含真实台账落点）→ 不入库
 grid-mobile-cloudflare/worker/test/*-snapshot.json
+# 含真实员工姓名的回归测试 fixture（cfwps28-town-list 18 个、cfwps28-e2e-real 3 个真实姓名）
+#   ⇒ 隔离防误提交；如需入库请先脱敏真实姓名为角色/e2e-account 占位。
+grid-mobile-cloudflare/worker/test/cfwps28-town-list.test.mjs
+grid-mobile-cloudflare/worker/test/cfwps28-e2e-real.mjs
 
 # ===== 临时目录（任何会话的工作暂存，禁入库） =====
 /_tmp/

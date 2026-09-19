@@ -60,11 +60,26 @@ const ROSTER_ROWS = [
 ];
 let rosterUpstreamCalls = 0;
 
-// ---- mock fetch: 飞书（台账 + 花名册）；unmocked URL = hard fail ----
+// ---- mock fetch: 飞书（台账 + 花名册 + 表清单）；unmocked URL = hard fail ----
+// mockTableList 可变：C22「花名册未配置」改用全新 baseToken + 无花名册的表清单，模拟缺表
+let mockTableList = [
+  { table_id: LEDGER_TABLE_ID, name: 'H5移动端身份表' },
+  { table_id: ROSTER_TABLE_ID, name: 'H5花名册表' },
+  { table_id: 'tblMockProd', name: 'H5员工日常不安全行为台账' },
+];
 globalThis.fetch = async (url) => {
   const u = String(url);
   if (u.includes('/auth/v3/tenant_access_token/internal')) {
     return new Response(JSON.stringify({ code: 0, tenant_access_token: 'mock-fs-tenant-token', expire: 7200 }), { status: 200 });
+  }
+  if (/\/bitable\/v1\/apps\/[^/]+\/tables(\?|$)/.test(u)) {
+    // 缺花名册的 base（C22）或缺身份表/台账的 base（A17）：表清单按 token 剔除
+    const items = u.includes('mock-base-no-roster')
+      ? mockTableList.filter((t) => t.name !== 'H5花名册表')
+      : u.includes('mock-base-no-identity')
+        ? mockTableList.filter((t) => t.name !== 'H5移动端身份表')
+        : mockTableList;
+    return new Response(JSON.stringify({ code: 0, data: { items, has_more: false } }), { status: 200 });
   }
   if (u.includes(`/tables/${LEDGER_TABLE_ID}/records`)) {
     return new Response(JSON.stringify({ code: 0, data: { items: LEDGER_ROWS, has_more: false } }), { status: 200 });
@@ -143,7 +158,11 @@ assert(!!tokWang && !!tokLi && !!tokZhang, 'A0 三个角色登录成功', `wang=
   const j = r.json;
   assert(j.managers.length === 1 && j.managers[0].name === '李四' && j.managers[0].department === '测试片区',
     'A6 公司管理看到下辖片区经理', JSON.stringify(j.managers));
-  assert(j.admins.length === 4 && j.admins.map((a) => a.name).join(',') === '赵六,孙七,周八,周八',
+  // ⚠️ 只断言「成员集合」不断言顺序：同 depth 的次序由 name.localeCompare(zh) 决定，
+  //    而各 Node 构建的 ICU 中文排序不一致（本机 孙七<赵六，其他环境可能相反）。
+  //    按名去重的 bug 已修（见 ledgerSubtree keyOf），这里改为集合比较以免误报。
+  const adminNames = j.admins.map((a) => a.name).slice().sort();
+  assert(j.admins.length === 4 && adminNames.join(',') === ['周八', '周八', '孙七', '赵六'].sort().join(','),
     'A7 直属管理员 4 人（同名两条独立记录）', j.admins.map((a) => a.name).join(','));
   assert(j.hasDeeper === true, 'A8 hasDeeper=true（可继续下钻）');
   assert(j.me.role === '公司管理' && j.me.name === '王五', 'A9 me 回显角色/姓名', JSON.stringify(j.me));
@@ -173,7 +192,7 @@ assert(!!tokWang && !!tokLi && !!tokZhang, 'A0 三个角色登录成功', `wang=
   assert(r.status === 401 && r.json.code === 'UNAUTHORIZED', 'A16 未认证 → 401', `status=${r.status}`);
 }
 {
-  const bad = workerEnv({ FS_LEDGER_TABLE_ID: '' });
+  const bad = workerEnv({ FS_APP_TOKEN: 'mock-base-no-identity', FS_LEDGER_TABLE_ID: '', FS_ROSTER_TABLE_ID: '' });
   const r = await get('/api/mobile/org/subordinates', tokLi, bad);
   assert(r.status === 503 && r.json.code === 'IDENTITY_NOT_CONFIGURED', 'A17 台账未配置 → 503', `status=${r.status} code=${r.json.code}`);
 }
@@ -261,7 +280,7 @@ console.log('===== C. 花名册（飞书「花名册」表） =====');
 {
   const r = await get('/api/mobile/roster', '', ENV);
   assert(r.status === 401, 'C21 花名册未认证 → 401', `status=${r.status}`);
-  const r2 = await get('/api/mobile/roster', tokLi, workerEnv({ FS_ROSTER_TABLE_ID: '' }));
+  const r2 = await get('/api/mobile/roster', tokLi, workerEnv({ FS_APP_TOKEN: 'mock-base-no-roster', FS_ROSTER_TABLE_ID: '', FS_LEDGER_TABLE_ID: '' }));
   assert(r2.status === 503 && r2.json.code === 'ROSTER_NOT_CONFIGURED', 'C22 花名册未配置 → 503', `code=${r2.json.code}`);
 }
 {
