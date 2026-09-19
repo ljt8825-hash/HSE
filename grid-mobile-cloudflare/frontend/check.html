@@ -499,6 +499,15 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
     </div>
     <div class="stat-row">
       <div class="stat-card"><div class="num" style="color:var(--primary)" id="stat-month">0</div><div class="lab" id="stat-month-lab">本月上报</div></div>
+      <!-- CF-WPS-44：乡镇作业中心经理、管理员两级首页在「本月上报」后增加「已整改」
+           （本月完成整改数）。口径与「待整改」严格互补、不重叠：
+             · 待整改 = 指派给我且**未完成** —— 不按月过滤，跨月继续显示，直到整改完成为止；
+             · 已整改 = 指派给我且**完成时间落在本自然月**。
+           公司管理不显示（保持原有 3 卡布局，不受影响）。 -->
+      <div class="stat-card" id="stat-rectified-card" style="display:none">
+        <div class="num" style="color:#7C3AED" id="stat-rectified">0</div>
+        <div class="lab">已整改</div>
+      </div>
       <div class="stat-card"><div class="num" style="color:var(--warn)" id="stat-pending">0</div><div class="lab">待整改</div></div>
       <div class="stat-card"><div class="num" style="color:var(--success)" id="stat-done">0</div><div class="lab">已闭环</div></div>
     </div>
@@ -1709,6 +1718,33 @@ function isSameMonth(t, ref){
   const a = new Date(t), b = new Date(ref);
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
 }
+/* ---- CF-WPS-44：首页「已整改」（仅乡镇作业中心经理 / 管理员）----
+   与「待整改」互补，不是同一件事的两种叫法：
+     · 待整改（本机 + 服务端指派）不按月过滤 → 上月没整改完的，这个月继续挂着，直到完成为止；
+     · 已整改按**自然月**统计 → 只回答「这个月我整改掉了几条」。
+   所以跨月时「已整改」会归零重数，「待整改」不会 —— 这是刻意设计的两个口径。 */
+const RECTIFIED_ROLES = ["经理", "管理员"];
+function showRectifiedCard(){ return !!session && RECTIFIED_ROLES.indexOf(session.role) >= 0; }
+// 本机已完成、但**还没进服务端**的整改（未同步的手工转派记录等）。
+// 已同步的（有 serverRecordId）由服务端 monthly_done_count 权威计数，此处必须排除，否则同一条数两次。
+function localRectifiedThisMonth(){
+  const now = Date.now();
+  return (db.records || []).filter(r =>
+    (r.rectifierId === session.id || r.transferAdminName === session.name) &&
+    (r.status === "done" || r.status === "reviewed") &&
+    !r.serverRecordId &&
+    isSameMonth(r.rectifyTime || r.time, now)
+  ).length;
+}
+// 唯一渲染入口：角色门槛 + 取数（refreshHomeStats 与 refreshInboxStats 都调它，避免两处各写一份）
+function updateRectifiedStat(){
+  const card = document.getElementById("stat-rectified-card");
+  if(!card) return;
+  if(!showRectifiedCard()){ card.style.display = "none"; return; }
+  card.style.display = "";
+  const el = document.getElementById("stat-rectified");
+  if(el) el.textContent = inboxMonthlyDone + localRectifiedThisMonth();
+}
 function refreshHomeStats(){
   const mine = myChecks();
   const monthCount = db.records.filter(r => r.checkerId === session.id && isSameMonth(r.time, Date.now())).length;
@@ -1720,6 +1756,7 @@ function refreshHomeStats(){
   if(labM) labM.textContent = (session.role === "公司管理" || session.role === "经理") ? "本月派发" : "本月上报";
   $("#stat-pending").textContent = pending.length;
   $("#stat-done").textContent = done.length;
+  updateRectifiedStat();   // CF-WPS-44：先按本机值占位，服务端计数到手后 refreshInboxStats 会再刷一次
   const unfinished = mine.filter(r => r.status === "unfinished");
   setBadge("badge-checks", unfinished.length);
   setBadge("badge-rectify", pending.length);
@@ -1752,6 +1789,7 @@ async function refreshInboxStats(localPending, baseLines){
     const sp = document.getElementById("stat-pending");
     if(sp) sp.textContent = total;
     setBadge("badge-rectify", total);
+    updateRectifiedStat();   // CF-WPS-44：服务端「本月已整改」到手，刷新「已整改」卡片
     const todo = document.getElementById("todo-list");
     if(!todo) return;
     const lines = baseLines.slice();
@@ -2632,6 +2670,9 @@ function renderListInto(elId, records, opts){
    CF-WPS-36：指派关系现在写在服务端台账上，被指派人才能真正收到。
    这些记录**不在本机 db 里**（是别人建的），所以必须单独拉并转成卡片形状渲染。 */
 let inboxRecs = null, inboxAt = 0, inboxPending = 0;
+// CF-WPS-44：服务端「本月已整改」计数（指派给我 + 完成时间在本自然月），首页「已整改」卡片取它。
+// 由服务端按全量台账统计，不受 todos 列表 50 条上限影响。
+let inboxMonthlyDone = 0;
 function todoToRec(t){
   // "2026-09-19 06:59" → Date（用于分组与排序；解析失败退到当前时间）
   const m = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/.exec(String(t.inspection_time || t.assigned_at || ""));
@@ -2664,8 +2705,13 @@ function todoToRec(t){
 async function loadInbox(force){
   if(!force && inboxRecs && Date.now() - inboxAt < SERVER_RECS_TTL) return inboxRecs;
   const r = await mobileApi("/api/mobile/inbox", null, "GET");
-  if(r.status !== 200 || !r.body || !r.body.success){ inboxRecs = []; inboxAt = Date.now(); return inboxRecs; }
+  if(r.status !== 200 || !r.body || !r.body.success){
+    inboxRecs = []; inboxAt = Date.now();
+    inboxMonthlyDone = 0;   // 拉取失败：不残留上一次的旧值，交由本机口径兜底
+    return inboxRecs;
+  }
   inboxPending = Number(r.body.pending_count) || 0;
+  inboxMonthlyDone = Number(r.body.monthly_done_count) || 0;   // CF-WPS-44（老 Worker 无此字段时按 0）
   inboxRecs = (r.body.todos || []).map(todoToRec);
   inboxAt = Date.now();
   return inboxRecs;
@@ -2947,6 +2993,11 @@ function submitRectify(){
       done.completedToServer = r.status === 200 && r.body && r.body.success;
       done.completeError = done.completedToServer ? "" : ((r.body && (r.body.message || r.body.code)) || ("HTTP " + r.status));
       saveDB();
+      // CF-WPS-44：整改完成即时回显（首页「待整改」-1、「已整改」+1），不必等 25s 轮询。
+      // 强制回源跳过 60s 缓存，否则服务端计数还是整改前的旧值。
+      if(done.completedToServer){
+        try{ await loadInbox(true); refreshHomeStats(); }catch(e){ /* 静默：下次轮询会补上 */ }
+      }
     })();
   } else if(done.afterPhoto && !done.rectifyPhotoToken && done.serverRecordId){
     // 本人自建的记录：只补挂整改后照片
@@ -3084,7 +3135,7 @@ document.addEventListener("DOMContentLoaded", () => {
         row.className = "town-row";
         // ⚠️ 后端下发的是嵌套对象 `manager:{name,phone}`，**不是**扁平的 managerName。
         //    改版前这里读 t.managerName 恒为 undefined → 全部乡镇都显示「未配经理」
-        //    （即使台账里明明配了 杨清华/王臣祥 等）。兼容两种形状，避免后端调整再踩。
+        //    （即使台账里明明配了经理）。兼容两种形状，避免后端调整再踩。
         const mgr = (t.manager && t.manager.name) || t.managerName || "";
         const admins = Array.isArray(t.admins) ? t.admins : [];
         const n = t.peopleCount || 0;

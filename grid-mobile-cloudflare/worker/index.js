@@ -2576,6 +2576,15 @@ async function handleInbox(request, env) {
   }
 
   const pending = mine.filter((r) => fieldText(r.fields[TODO_FIELDS.status]) !== TODO_STATUS.done);
+  // 本月已整改：指派给我、状态为「已完成」且完成时间落在本自然月。
+  // 使用字符串前缀 YYYY-MM 匹配，避免 Worker UTC 时区解析歧义；待整改 pending 不按月过滤，
+  // 跨月未完成的记录继续显示在「待整改」中，直到整改完成为止。
+  const thisYm = todoNowLocal().slice(0, 7);
+  const doneThisMonth = mine.filter((r) => {
+    if (fieldText(r.fields[TODO_FIELDS.status]) !== TODO_STATUS.done) return false;
+    const doneAt = fieldText(r.fields[TODO_FIELDS.doneAt]) || '';
+    return doneAt.slice(0, 7) === thisYm;
+  });
   const sortKey = (r) => fieldText(r.fields[TODO_FIELDS.assignedAt]);
   const byTimeDesc = (a, b) => String(sortKey(b)).localeCompare(String(sortKey(a)));
 
@@ -2599,6 +2608,7 @@ async function handleInbox(request, env) {
     success: true, code: 'OK',
     me: { id: String(payload.sub || ''), name: String(payload.name || ''), role: String(payload.role || '') },
     pending_count: pending.length,        // 首页「待整改」红点直接取这个
+    monthly_done_count: doneThisMonth.length, // 首页「已整改」（经理/管理员），本月口径
     total: mine.length,
     todos,
   }, 200, corsHeaders(origin));
