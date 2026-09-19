@@ -461,5 +461,26 @@ grid-mobile-cloudflare/worker/test/*-snapshot.json
 grid-mobile-cloudflare/worker/test/cfwps28-town-list.test.mjs
 grid-mobile-cloudflare/worker/test/cfwps28-e2e-real.mjs
 
+# ===== 根目录飞书表导出（含真实 PII，禁止入库，2026-09-19 补全） =====
+# 说明：以下为飞书多维表格 base WX9TbTqJKa7sywsgrU4cVoKdnXb 的本地一次性导出，
+#   含真实员工手机号、真实姓名、真实台账/整改落点。按红线“手机号/花名册明细/
+#   签到表影印产物 gitignore”，全部隔离，防误提交（与 grid-mobile 探针隔离同口径）。
+#   tbl58t9kjyDlacSw=身份表、tbl5QiCv5Qbal044=花名册、tbl5hz1RyHlO3C3l=主台账（均真实 PII）。
+#   用精确 table_id 模式，避免误吞未来可能需入库的 tbl* 文件。
+tbl58t9kjyDlacSw_*.ndjson
+tbl58t9kjyDlacSw_*.manifest.json
+tbl5QiCv5Qbal044_*.ndjson
+tbl5QiCv5Qbal044_*.manifest.json
+tbl5hz1RyHlO3C3l_*.ndjson
+tbl5hz1RyHlO3C3l_*.manifest.json
+# 样本导出（真实表结构 + 真实落点）
+_identity_sample.ndjson
+_ledger_sample.ndjson
+_view_sample.ndjson
+# 字段 schema 导出：select 选项含大量真实员工姓名（王学方/王洪岭/张海清…）⇒ PII
+_lark_fields.jsonl
+# 飞书表导出预览副产物（真实台账数据）⇒ 隔离
+_preview_town.html
+
 # ===== 临时目录（任何会话的工作暂存，禁入库） =====
 /_tmp/
