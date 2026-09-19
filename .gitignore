@@ -465,7 +465,12 @@ grid-mobile-cloudflare/worker/test/cfwps28-e2e-real.mjs
 # 说明：以下为飞书多维表格 base WX9TbTqJKa7sywsgrU4cVoKdnXb 的本地一次性导出，
 #   含真实员工手机号、真实姓名、真实台账/整改落点。按红线“手机号/花名册明细/
 #   签到表影印产物 gitignore”，全部隔离，防误提交（与 grid-mobile 探针隔离同口径）。
-#   tbl58t9kjyDlacSw=身份表、tbl5QiCv5Qbal044=花名册、tbl5hz1RyHlO3C3l=主台账（均真实 PII）。
+#   表名归属（2026-09-19 按 wrangler.toml env + docs/191副/project_memory.md 实测更正）：
+#   tbl58t9kjyDlacSw = **身份表**（H5移动端身份表，FS_LEDGER_TABLE_ID / FS_IDENTITY_TABLE_ID）
+#   tbl5QiCv5Qbal044 = **主台账**（H5员工日常不安全行为台账，FS_PATROL_PRODUCTION_TABLE_ID）
+#                      —— 早前本条注释误写为「花名册」，此处更正；隔离规则本身不受影响。
+#   tbl5hz1RyHlO3C3l = 表格视图（339 行）；
+#   花名册另有其表（tbl2ZHdXX5d8R12a，1291 人）。三者均含真实 PII，一律隔离。
 #   用精确 table_id 模式，避免误吞未来可能需入库的 tbl* 文件。
 tbl58t9kjyDlacSw_*.ndjson
 tbl58t9kjyDlacSw_*.manifest.json
