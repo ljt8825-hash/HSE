@@ -7,7 +7,7 @@
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-09-19.59">
+<meta name="hse-build" content="2026-09-20.63">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -204,6 +204,20 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
       结果是「拍现场照片」大按钮被压成一条窄柱、文字换行、图标显得异常巨大。
       凡「多个按钮叠放」处一律走这个容器，保证与 .page 同一套 gap / 拉伸行为。 */
 .btn-stack{display:flex;flex-direction:column;gap:var(--gap)}
+/* CF-WPS-58：本月派发明细页的「未完成 / 已完成」分段 —— **两个按钮一行并排**。
+   ⚠️ 与 .btn-stack（纵向）相反，这里必须是 flex row + 子项 flex:1 等分；
+      同样不能包在裸 div 里（block 容器会让 button 收缩到内容宽度，详见 .btn-stack 注释）。 */
+.sd-seg{display:flex;flex-direction:row;gap:var(--gap);width:100%}
+.sd-seg button{flex:1 1 0;min-width:0;display:flex;align-items:center;justify-content:center;gap:6px;
+  height:var(--h-btn-row);padding:0 var(--pad-card);border-radius:var(--r-btn);
+  background:var(--card);border:1px solid var(--line);color:var(--t1);
+  font-size:var(--fs-btn-row);font-weight:600;line-height:1;cursor:pointer}
+.sd-seg button:active{transform:scale(.98)}
+.sd-seg button .n{font-size:var(--fs-sub);font-weight:700;opacity:.85}
+/* 选中态：未完成=橙（与「待整改」同色系），已完成=绿（与「已闭环」同色系） */
+.sd-seg button.on{color:#fff;border-color:transparent}
+.sd-seg button.on.warn{background:var(--warn);box-shadow:0 6px 16px -2px rgba(217,119,6,.25)}
+.sd-seg button.on.ok{background:var(--success);box-shadow:0 6px 16px -2px rgba(22,163,74,.25)}
 .big-cta{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--cta-icon-gap);height:var(--h-cta);border-radius:var(--r-card);background:var(--primary);color:#fff;cursor:pointer;border:none;box-shadow:0 10px 24px -4px rgba(29,78,216,.3)}
 .big-cta:active{transform:scale(.985)}
 .big-cta:disabled{background:#B6C4E8;box-shadow:none}
@@ -338,6 +352,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
 .stat-row{display:flex;gap:var(--gap)}
 /* 统计卡与入口卡同高（原 78 / 76 两个值 → 统一 --h-entry） */
 .stat-card{flex:1;height:var(--h-entry);border-radius:var(--r-card);background:var(--card);border:1px solid var(--line);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px}
+.stat-card.drillable{cursor:pointer}
+.stat-card.drillable:active{transform:scale(.97)}
 .stat-card .num{font-size:var(--fs-h1);font-weight:700}
 .stat-card .lab{font-size:var(--fs-sub);color:var(--t3)}
 .entry-row{display:flex;gap:var(--gap)}
@@ -503,19 +519,21 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 5l7 7-7 7" stroke="#9CA3AF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
     </div>
+    <!-- CF-WPS-58：四张统计卡都可点击下钻（data-drill 对应 /api/mobile/summary 下发的
+         scopes 键）。数字与下钻明细同源 —— 点了必定对得上，详见 renderStatDetail 注释。 -->
     <div class="stat-row">
-      <div class="stat-card"><div class="num" style="color:var(--primary)" id="stat-month">0</div><div class="lab" id="stat-month-lab">本月上报</div></div>
+      <div class="stat-card drillable" id="stat-month-card" data-drill="month_post" role="button" tabindex="0"><div class="num" style="color:var(--primary)" id="stat-month">0</div><div class="lab" id="stat-month-lab">本月上报</div></div>
       <!-- CF-WPS-44：乡镇作业中心经理、管理员两级首页在「本月上报」后增加「已整改」
            （本月完成整改数）。口径与「待整改」严格互补、不重叠：
              · 待整改 = 指派给我且**未完成** —— 不按月过滤，跨月继续显示，直到整改完成为止；
              · 已整改 = 指派给我且**完成时间落在本自然月**。
            公司管理不显示（保持原有 3 卡布局，不受影响）。 -->
-      <div class="stat-card" id="stat-rectified-card" style="display:none">
+      <div class="stat-card drillable" data-drill="rectified" id="stat-rectified-card" role="button" tabindex="0" style="display:none">
         <div class="num" style="color:#7C3AED" id="stat-rectified">0</div>
         <div class="lab">已整改</div>
       </div>
-      <div class="stat-card"><div class="num" style="color:var(--warn)" id="stat-pending">0</div><div class="lab">待整改</div></div>
-      <div class="stat-card"><div class="num" style="color:var(--success)" id="stat-done">0</div><div class="lab">已闭环</div></div>
+      <div class="stat-card drillable" data-drill="pending" role="button" tabindex="0"><div class="num" style="color:var(--warn)" id="stat-pending">0</div><div class="lab">待整改</div></div>
+      <div class="stat-card drillable" data-drill="closed" role="button" tabindex="0"><div class="num" style="color:var(--success)" id="stat-done">0</div><div class="lab">已闭环</div></div>
     </div>
     <div class="card" id="todo-card">
       <div style="font-size:var(--fs-body);font-weight:600;margin-bottom:6px">待办提醒</div>
@@ -867,14 +885,31 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
   </div>
 </section>
 
-<!-- ============ 三违详情 ============ -->
+<!-- ============ 记录详情（CF-WPS-58 起三类记录共用）============
+     标题由 setDetailTitle() 按记录类型动态设置（三违详情 / 台账详情 / 派发详情）。
+     本机记录走 renderDetail（有真实照片与电话），服务端记录走 renderServerDetail
+     （飞书附件不下发 URL ⇒ 只能显示照片数量）。 -->
 <section class="view" id="view-detail">
   <div class="statusbar"></div>
   <div class="navbar">
     <div class="icon-btn" id="dt-back"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-    <div class="nav-title">三违详情</div><div style="width:40px"></div>
+    <div class="nav-title" id="dt-title">三违详情</div><div style="width:40px"></div>
   </div>
   <div class="page" id="detail-body"></div>
+</section>
+
+<!-- ============ CF-WPS-58：首页统计卡下钻 ============
+     点首页任意统计卡 → 进入本视图，标题与列表按 drill 类型渲染。
+     设计约束（必须守住）：这里的明细**必须**与卡片上的数字同源 ——
+     数字由 /api/mobile/summary 出，明细按 summary 下发的 scopes 取，
+     否则会「卡上写 3、点进去 0 条」。 -->
+<section class="view" id="view-stat-detail">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" id="sd-back"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title" id="sd-title">明细</div><div style="width:40px"></div>
+  </div>
+  <div class="page" id="stat-detail-body"></div>
 </section>
 
 <!-- ============ 我的（个人） ============ -->
@@ -979,8 +1014,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
      读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
    - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
    - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
-<script src="./config.js?v=2026-09-19.59"></script>
-<script src="./app.js?v=2026-09-19.59"></script>
+<script src="./config.js?v=2026-09-20.63"></script>
+<script src="./app.js?v=2026-09-20.63"></script>
 <script>
 /* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
 (function(){
@@ -1287,7 +1322,30 @@ function loadDB(){
   try { db = JSON.parse(localStorage.getItem(STORE_KEY)) || null; } catch(e){ db = null; }
   if(!db || !db.records){ db = { seq: 1, records: [] }; }
 }
-function saveDB(){ localStorage.setItem(STORE_KEY, JSON.stringify(db)); }
+/* 本机记录落盘 —— **永不因配额抛错**（CF-WPS-59）
+   实测 Chrome 配额 ≈ 4.75MB（真机 WebView 常见 5MB，部分机型更低）。
+   db.records 里存着 scenePhoto / afterPhoto 的 dataURL，用久了必然撞线；
+   而 saveDB 散落在提交 / 整改 / 补传等十余处，一旦抛 QuotaExceededError 就
+   **当场中断那条流程**（用户表现为「点了没反应 / 卡住 / 白屏」）。
+   策略：① 先整体试写；② 失败则瘦身——丢掉**已上报（syncState==='synced'）**
+   记录的照片（照片已在服务端，本机只需留记录文本）；③ 仍失败就放弃本次落盘，但不抛错。 */
+function saveDB(){
+  try{ localStorage.setItem(STORE_KEY, JSON.stringify(db)); return true; }
+  catch(e){}
+  try{
+    const recs = (db && Array.isArray(db.records)) ? db.records : null;
+    if(recs){
+      let cut = 0;
+      for(const r of recs){
+        if(!r || r.syncState !== "synced") continue;   // 未上报的照片必须留着，否则补传时就没图了
+        if(r.scenePhoto){ r.scenePhoto = ""; cut++; }
+        if(r.afterPhoto){ r.afterPhoto = ""; cut++; }
+      }
+      if(cut){ localStorage.setItem(STORE_KEY, JSON.stringify(db)); return true; }
+    }
+  }catch(e){}
+  return false;   // 宁可这次不落盘，也绝不让调用方崩
+}
 function nextNo(){
   const d = new Date();
   const ds = "" + d.getFullYear() + String(d.getMonth()+1).padStart(2,"0") + String(d.getDate()).padStart(2,"0");
@@ -1654,7 +1712,7 @@ async function migrateTransferIds(){
     const attempts = Number(localStorage.getItem(FLAG + "_try") || "0");
     if(localStorage.getItem(FLAG) || attempts >= 3) return;
     const dirty = (db.records || []).filter(r => r.transferAdminId && !/^\d{6,20}$/.test(String(r.transferAdminId)));
-    if(!dirty.length){ localStorage.setItem(FLAG, "1"); return; }
+    if(!dirty.length){ try{ localStorage.setItem(FLAG, "1"); }catch(e){} return; }   // CF-WPS-59：配额满时静默跳过，不能崩
 
     let resolved = 0;
     for(const rec of dirty){
@@ -1677,8 +1735,8 @@ async function migrateTransferIds(){
       }
     }
     if(resolved) saveDB();
-    if(resolved === dirty.length) localStorage.setItem(FLAG, "1");
-    else localStorage.setItem(FLAG + "_try", String(attempts + 1));
+    if(resolved === dirty.length){ try{ localStorage.setItem(FLAG, "1"); }catch(e){} }
+    else { try{ localStorage.setItem(FLAG + "_try", String(attempts + 1)); }catch(e){} }
   }catch(e){ /* 回填失败不影响使用：只是这批老记录仍按旧口径匹配 */ }
 }
 
@@ -1736,6 +1794,70 @@ async function startPrefetch(){
 }
 
 /* ================= 首页统计 ================= */
+/* ---- CF-WPS-58：首页统计统一来源 ----
+   首页数字原先分散出自两处：本机 db.records（本月派发 / 已闭环）与服务端 inbox
+   （待整改 / 已整改）。两套口径各自演化 ⇒ 一旦统计卡可点击下钻，就会暴露
+   「卡上写 3、点进去 0 条」。现在统一由 /api/mobile/summary 出数，本机只渲染。
+   本机未同步的记录**不再混进主数字**，改由「待补传」提示单独呈现。 */
+let statSummary = null, statSummaryAt = 0;
+const SUMMARY_TTL = 20000;
+function localYm(){ const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"); }
+async function loadSummary(force){
+  if(!force && statSummary && Date.now() - statSummaryAt < SUMMARY_TTL) return statSummary;
+  const r = await mobileApi("/api/mobile/summary", null, "GET");
+  if(r.status !== 200 || !r.body || !r.body.success){ statSummary = null; statSummaryAt = 0; return null; }
+  statSummary = r.body; statSummaryAt = Date.now();
+  return statSummary;
+}
+/* 本机未同步增量：服务端台账里还没有的本机记录（提交失败、或纯本机操作）。
+   为什么必须并入首页数字：否则「卡上的数」只算服务端，而用户在本机明明看到有自己的记录
+   —— 数字与直觉不符同样是口径事故，只是方向相反。
+   ⚠️ 判定条件必须与 renderStatDetail 的下钻过滤**逐字一致**，否则「数字 = 明细条数」会破。 */
+function localUnsynced(){
+  const out = { post: 0, dispatch: 0, pending: 0 };
+  if(!session || !db || !db.records) return out;
+  const now = Date.now();
+  (db.records || []).forEach(r => {
+    if(r.serverRecordId) return;                     // 已同步：服务端已计入，绝不重复
+    const open = r.status !== "done" && r.status !== "reviewed";
+    if(r.checkerId === session.id && isSameMonth(r.time, now)){
+      out.post++;
+      if(r.source === "派发") out.dispatch++;        // source 由提交时按角色写入（见 patrolSubmit）
+    }
+    if(open && (r.rectifierId === session.id || r.transferAdminName === session.name)) out.pending++;
+  });
+  return out;
+}
+// 把服务端数字写进首页（唯一写入口，避免多处各写一份导致口径分叉）
+/* CF-WPS-58：本卡数字与下钻必须**同源**，否则「卡上写 78、点进去是另一套」。
+   数字按角色取 month_dispatch / month_post（见下方 applySummary），
+   下钻的 data-drill 必须跟着一起切 —— 写死成 month_post 会让公司管理点「本月派发」
+   却看到「本月上报」的明细（patrol/records 是「我提交的」，不是「我派出去的」）。 */
+function syncMonthCardDrill(){
+  if(!session) return;
+  const isDispatchRole = session.role === "公司管理" || session.role === "经理";
+  const card = document.getElementById("stat-month-card");
+  if(card) card.dataset.drill = isDispatchRole ? "month_dispatch" : "month_post";
+}
+function applySummary(s){
+  if(!s || !session) return;
+  const isDispatchRole = session.role === "公司管理" || session.role === "经理";
+  const lu = localUnsynced();
+  const m = document.getElementById("stat-month");
+  if(m) m.textContent = isDispatchRole
+    ? (Number(s.month_dispatch) || 0) + lu.dispatch
+    : (Number(s.month_post) || 0) + lu.post;
+  syncMonthCardDrill();   // 数字换了口径，下钻必须同步换
+  const pendingTotal = (Number(s.pending) || 0) + lu.pending;
+  const p = document.getElementById("stat-pending");
+  if(p) p.textContent = pendingTotal;
+  inboxMonthlyDone = Number(s.rectified) || 0;                 // 已整改：服务端本月口径
+  inboxDispatchPending = Number(s.dispatch_pending) || 0;      // 派发页签角标用（省一次 dispatched 请求）
+  inboxDispatchDone = Number(s.dispatch_done) || 0;
+  updateRectifiedStat();                                        // 已整改 = 服务端 + 本机未同步
+  setBadge("badge-rectify", pendingTotal);
+  setBadge("badge-dispatch", DISPATCH_TAB_ROLES.indexOf(session.role) >= 0 ? inboxDispatchPending : 0);
+}
 function myChecks(){ return db.records.filter(r => r.checkerId === session.id && r.type === "三违"); }
 // 本月上报：本自然月内本人提交的全部记录（三违上报 + 普通巡查），按自然月统计
 function isSameMonth(t, ref){
@@ -1778,6 +1900,7 @@ function refreshHomeStats(){
   // CF-WPS（派发/上报区分）：公司管理 / 乡镇作业中心经理 的主要动作是「派发任务」，文案相应调整
   const labM = document.getElementById("stat-month-lab");
   if(labM) labM.textContent = (session.role === "公司管理" || session.role === "经理") ? "本月派发" : "本月上报";
+  syncMonthCardDrill();   // 文案切了，下钻口径也要跟着切（summary 未到手时先按角色摆正）
   $("#stat-pending").textContent = pending.length;
   $("#stat-done").textContent = done.length;
   updateRectifiedStat();   // CF-WPS-44：先按本机值占位，服务端计数到手后 refreshInboxStats 会再刷一次
@@ -1803,29 +1926,27 @@ function refreshHomeStats(){
   refreshInboxStats(pending.length, lines.slice());
 }
 
-// 把服务端 inbox 的待整改数并入首页统计与红点（异步，失败静默不影响主渲染）
-// 页签角标（异步，失败静默）：派发方在首页就能看到还有几条挂着没整改完
+/* 页签角标（异步，失败静默）：派发方在首页就能看到还有几条挂着没整改完。
+   数字优先取 summary（首页只发一次统计请求）；summary 未到手时才单拉一次 dispatched。 */
 async function refreshDispatchBadge(){
   if(!session || DISPATCH_TAB_ROLES.indexOf(session.role) < 0){ setBadge("badge-dispatch", 0); return; }
+  if(statSummary){ setBadge("badge-dispatch", inboxDispatchPending); return; }
   try{ await loadDispatched(false); setBadge("badge-dispatch", inboxDispatchPending); }catch(e){ /* 拉取失败：不亮角标，不打断首页 */ }
 }
+// 首页统计：数字统一由 /api/mobile/summary 出（与下钻明细同源）；inbox 只用来生成待办文案
 async function refreshInboxStats(localPending, baseLines){
   try{
+    const s = await loadSummary(false);
+    if(s) applySummary(s);
     const inbox = await loadInbox(false);          // 60s 缓存，不会每次进首页都回源
     const localIds = new Set((db.records || []).map(r => r.serverRecordId).filter(Boolean));
-    // 去重：本机已有的同一条记录不重复计数
     const extra = (inbox || []).filter(r => r.todoStatus === "待整改" && r.status !== "done" && !localIds.has(r.serverRecordId));
-    const total = localPending + extra.length;
-    const sp = document.getElementById("stat-pending");
-    if(sp) sp.textContent = total;
-    setBadge("badge-rectify", total);
-    updateRectifiedStat();   // CF-WPS-44：服务端「本月已整改」到手，刷新「已整改」卡片
     const todo = document.getElementById("todo-list");
     if(!todo) return;
     const lines = baseLines.slice();
     extra.slice(0, 2).forEach(r => lines.unshift("· 收到指派：" + (r.behavior || "整改") + "（来自 " + (r.assignerName || "上级") + (r.assignerDept ? " · " + r.assignerDept : "") + "）"));
     todo.innerHTML = lines.length ? lines.map(l => "<div>" + esc(l) + "</div>").join("") : "<div>· 暂无待办，一切正常</div>";
-  }catch(e){ /* inbox 拉取失败：保留本机统计，不打断首页 */ }
+  }catch(e){ /* 拉取失败：保留本机渲染的数字，不打断首页 */ }
 }
 function setBadge(id, n){ const el = document.getElementById(id); if(!el) return; el.classList.toggle("hidden", !n); el.textContent = n; }
 
@@ -1836,6 +1957,10 @@ function setBadge(id, n){ const el = document.getElementById(id); if(!el) return
    本机 db.records 里根本没有这条，所以这里不走本机口径，也不做本机/服务端合并去重。 */
 let dispatchRecs = null, dispatchAt = 0, dispatchErr = "";
 let inboxDispatchPending = 0, inboxDispatchDone = 0, inboxDispatchTotal = 0;
+// CF-WPS-58：「已完成」分组（原实现只回一个 done_count 数字，看不出是哪几条、谁完成的）
+let dispatchDoneRecs = null, dispatchDoneMore = false;
+// 本月派发数（服务端算，与首页「本月派发」卡同源同值）
+let inboxDispatchMonthly = 0;
 
 /* 角色门槛：只有真的会派发的角色才挂这个页签。
    建单即指派（CF-WPS-43）把「指派人ID」写成调用者本人，而能成为调用者的只有
@@ -1863,6 +1988,11 @@ function dispatchedToRec(t){
     town: t.town || t.todo_town || "",
     todoStatus: t.todo_status || "",
     assignedAt: t.assigned_at || "",
+    doneAt: t.done_at || "",
+    note: t.note || "",
+    // CF-WPS-58：保留服务端原始视图供详情页直接渲染，不再二次拼字段 ——
+    // 否则「列表能显示的字段」与「详情能显示的字段」会各自演化、迟早对不上。
+    _srv: t,
   };
 }
 /* 挂账天数：派发当天 → 今天的自然日差。这条页的核心用途是追未整改项，
@@ -1881,31 +2011,52 @@ async function loadDispatched(force){
     dispatchRecs = null; dispatchAt = 0;
     dispatchErr = (r.body && r.body.message) || ("HTTP " + r.status);
     inboxDispatchPending = 0; inboxDispatchDone = 0; inboxDispatchTotal = 0;   // 失败不残留旧值，避免角标骗人
+    inboxDispatchMonthly = 0; dispatchDoneRecs = null; dispatchDoneMore = false;
     return null;
   }
   dispatchErr = "";
   inboxDispatchPending = Number(r.body.pending_count) || 0;
   inboxDispatchDone = Number(r.body.done_count) || 0;
   inboxDispatchTotal = Number(r.body.total) || 0;   // 我派出去过的总数（=0 表示**从未派发过**）
+  inboxDispatchMonthly = Number(r.body.monthly_dispatch_count) || 0;
+  dispatchDoneMore = !!r.body.done_more;
   dispatchRecs = (r.body.records || []).map(dispatchedToRec);
+  // CF-WPS-58：已完成明细（原来只回一个数字，看不出是哪几条）
+  dispatchDoneRecs = (r.body.done_records || []).map(dispatchedToRec);
   dispatchAt = Date.now();
   return dispatchRecs;
 }
-function dispatchCard(rec){
+function dispatchCard(rec, opts){
+  opts = opts || {};
+  const done = opts.done === true || rec.todoStatus === "已完成";
   const card = document.createElement("div");
   card.className = "record-card";
   const days = hangDays(rec.assignedAt);
-  const daysChip = days >= 1
+  // 已完成的改显示「已完成」徽标 —— 它不再是"挂着"的活了
+  const chip = done
+    ? '<span class="chip" style="background:#DCFCE7;color:#15803D">已完成</span>'
+    : '<span class="chip" style="background:#FEF3C7;color:#B45309">待整改</span>';
+  // 挂账天数只对未完成的显示（≥30 天标红：一眼看出哪几条拖最久）
+  const daysChip = (!done && days >= 1)
     ? '<span class="chip" style="margin-left:6px;background:' + (days >= 30 ? '#FEE2E2;color:#B91C1C' : '#EEF2FF;color:#4338CA') + '" title="从派发当天算起">挂账 ' + days + ' 天</span>'
     : "";
   const who = rec.assigneeName ? "派给 " + rec.assigneeName + (rec.town ? " · " + rec.town : "") : "未指定接收人";
+  const tail = (done && rec.doneAt)
+    ? '<div class="r-sub" style="color:var(--success)">完成于 ' + esc(String(rec.doneAt).slice(0, 16)) + "</div>"
+    : '<div class="r-sub" style="color:var(--t4)">派发于 ' + esc(String(rec.assignedAt || "").slice(0, 16)) + "</div>";
   card.innerHTML =
-    '<div class="r-top"><span class="chip" style="background:#FEF3C7;color:#B45309">待整改</span>' + daysChip +
-      '<span style="font-size:var(--fs-sub);color:var(--t4)">' + esc(rec.assignedAt || "") + "</span></div>" +
+    '<div class="r-top">' + chip + daysChip + "</div>" +
     '<div class="r-title">' + esc(rec.type === "三违" ? rec.behavior : "普通巡查") + "</div>" +
     '<div class="r-sub">' + esc(who) + "</div>" +
-    (rec.personName ? '<div class="r-sub">涉及人员 ' + esc(rec.personName) + "</div>" : "");
-  // 只读页：不给任何写入口 —— 整改必须由接收人本人完成，派发方不能替他结案
+    (rec.personName ? '<div class="r-sub">涉及人员 ' + esc(rec.personName) + "</div>" : "") +
+    tail;
+  // CF-WPS-58：可点开详情。仍然是**只读**的 —— 详情页不给任何写入口，
+  // 整改必须由接收人本人完成，派发方不能替他结案。
+  card.style.cursor = "pointer";
+  card.onclick = () => openServerDetail(rec._srv || rec, {
+    title: done ? "派发详情 · 已完成" : "派发详情",
+    from: opts.from || "dispatch",
+  });
   return card;
 }
 async function renderDispatch(){
@@ -1919,25 +2070,207 @@ async function renderDispatch(){
     return;
   }
   el.innerHTML = "";
-  const head = document.createElement("div");
-  head.className = "section-label";
-  // total=0 与「都改完了」是两件事：前者从没派过活，后者派过且全部闭环。
-  // 混用文案会让人误以为「我派出去的都整改完了」，因此分开措辞（2026-09-19 生产验证时发现）。
-  head.textContent = inboxDispatchTotal === 0
-    ? "还没有派发记录"
-    : "未整改完成 " + inboxDispatchPending + " 条" + (inboxDispatchDone ? "（另有 " + inboxDispatchDone + " 条已整改完成）" : "");
-  el.appendChild(head);
-  if(!recs.length){
-    const empty = document.createElement("div");
-    empty.className = "empty-tip";
-    empty.innerHTML = inboxDispatchTotal === 0
-      ? '你还没有派发过记录<br><span style="font-size:var(--fs-sub)">把巡查发现的问题派给网格员整改后，这里会一直跟踪到整改完成</span>'
-      : '派出去的都整改完成了<br><span style="font-size:var(--fs-sub)">跨月未整改的会一直显示在这里，直到完成为止</span>';
-    el.appendChild(empty);
+  const doneRecs = dispatchDoneRecs || [];
+  const mkLabel = (t) => { const d = document.createElement("div"); d.className = "section-label"; d.textContent = t; return d; };
+  const mkTip = (html) => { const d = document.createElement("div"); d.className = "empty-tip"; d.innerHTML = html; return d; };
+  const sub = (t) => '<span style="font-size:var(--fs-sub)">' + t + "</span>";
+  // 分组容器：让「未完成 / 已完成」两组可分别定位取数（页面要分段，测试也要精确断言）
+  const pendWrap = document.createElement("div"); pendWrap.id = "dispatch-pending";
+  const doneWrap = document.createElement("div"); doneWrap.id = "dispatch-done";
+
+  // 「从未派发过」与「派过且全部闭环」是两件事，文案必须分开 ——
+  // 2026-09-19 生产验证发现：4 个真实账号 total 全为 0，却显示「派出去的都整改完成了」，
+  // 会让从没派过活的人以为自己的活都闭环了。
+  if(inboxDispatchTotal === 0){
+    el.appendChild(mkLabel("还没有派发记录"));
+    el.appendChild(mkTip("你还没有派发过记录<br>" + sub("把巡查发现的问题派给网格员整改后，这里会一直跟踪到整改完成")));
     return;
   }
-  recs.forEach(r => el.appendChild(dispatchCard(r)));
+
+  // ① 未整改完成 —— 不按自然月过滤，跨月继续挂在这里，直到整改完成为止
+  el.appendChild(mkLabel("未整改完成 " + inboxDispatchPending + " 条"
+    + (inboxDispatchDone ? "（另有 " + inboxDispatchDone + " 条已整改完成）" : "")));
+  if(recs.length) recs.forEach(r => pendWrap.appendChild(dispatchCard(r)));
+  else pendWrap.appendChild(mkTip("派出去的都整改完成了<br>" + sub("跨月未整改的会一直显示在这里，直到完成为止")));
+  el.appendChild(pendWrap);
+
+  // ② 已完成 —— 原来只回一个数字（done_count），看不出是哪几条、谁完成的、什么时候完成的
+  if(inboxDispatchDone){
+    el.appendChild(mkLabel("已完成 " + inboxDispatchDone + " 条" + (dispatchDoneMore ? "（仅列最近 " + doneRecs.length + " 条）" : "")));
+    doneRecs.forEach(r => doneWrap.appendChild(dispatchCard(r, { done: true })));
+    el.appendChild(doneWrap);
+  }
 }
+/* ================= CF-WPS-58：首页统计卡下钻 =================
+   点首页任意统计卡 → 出卡片列表 → 点卡片 → 详情。
+   ⚠️ 口径约束（本页最重要的一条）：下钻的过滤条件必须与 applySummary 的数字**逐字一致**，
+      否则「卡上写 3、点进去 0 条」—— 那比不能点还糟，会让人连数字都不信。
+   各 drill 的数字/明细对照：
+     month_post     数字 = summary.month_post + 本机未同步本月巡查
+                    明细 = patrol/records?mine=1&month=（服务端）+ 本机未同步本月巡查
+     month_dispatch 数字 = summary.month_dispatch + 本机未同步本月派发
+                    明细 = dispatched?month=（服务端）+ 本机未同步本月派发
+     pending        数字 = summary.pending + 本机未同步待整改
+                    明细 = inbox 未完成（服务端）+ 本机未同步待整改
+     rectified      数字 = summary.rectified + localRectifiedThisMonth()
+                    明细 = inbox 已完成且完成时间本月 + 本机未同步本月已完成
+     closed         数字 = 本机
+                    明细 = 本机已闭环记录 */
+const DRILL_META = {
+  month_post:     { title: "本月上报", empty: "本月还没有上报记录" },
+  month_dispatch: { title: "本月派发", empty: "本月还没有派发记录" },
+  pending:        { title: "待整改",   empty: "没有待整改的任务" },
+  rectified:      { title: "已整改",   empty: "本月还没有整改完成的任务" },
+  closed:         { title: "已闭环",   empty: "还没有已闭环的记录" },
+};
+/* CF-WPS-58：本月派发 —— 「未完成 / 已完成」分段。
+   一次请求拿全两组数据存这里，切换分段只重渲染、不再打接口（否则每次点都等 3s+）。
+   pending / done 的元素形如 {s:服务端记录} 或 {l:本机记录}，渲染时据此选卡片组件。 */
+let sdDispatchData = null;    // { pending:[], done:[] }
+let sdDispatchTab = "pending"; // 默认落在「未完成」（派发出去还没整改的才是要盯的）
+async function openStatDetail(drill){
+  const meta = DRILL_META[drill];
+  if(!meta) return;
+  const t = document.getElementById("sd-title");
+  if(t) t.textContent = meta.title;
+  // 每次进入重新拉取，且回到默认分段 —— 不用上一次的缓存，避免「刚派完却看不到」
+  sdDispatchData = null;
+  sdDispatchTab = "pending";
+  showView("stat-detail");
+  await renderStatDetail(drill);
+}
+// 本机未同步的明细（与 localUnsynced 用**同一套判定**，逐条给出）
+function localUnsyncedRecords(drill){
+  const out = [];
+  if(!session || !db || !db.records) return out;
+  const now = Date.now();
+  (db.records || []).forEach(r => {
+    if(r.serverRecordId) return;
+    const open = r.status !== "done" && r.status !== "reviewed";
+    if(drill === "month_post" && r.checkerId === session.id && isSameMonth(r.time, now)) out.push(r);
+    else if(drill === "month_dispatch" && r.checkerId === session.id && r.source === "派发" && isSameMonth(r.time, now)) out.push(r);
+    else if(drill === "pending" && open && (r.rectifierId === session.id || r.transferAdminName === session.name)) out.push(r);
+    else if(drill === "rectified" && !open && (r.rectifierId === session.id || r.transferAdminName === session.name) && isSameMonth(r.rectifyTime || r.time, now)) out.push(r);
+  });
+  return out;
+}
+function drillSubtitle(drill){
+  if(drill === "month_post") return "只统计本自然月提交的记录";
+  if(drill === "month_dispatch") return "按派发时间算；跨月未整改的会留在「派发记录」页";
+  if(drill === "pending") return "跨月未整改的会一直挂在这里，直到完成为止";
+  if(drill === "rectified") return "按整改完成时间落在本自然月统计";
+  return "本机记录（未上报的也在其中）";
+}
+async function renderStatDetail(drill){
+  const el = document.getElementById("stat-detail-body");
+  if(!el) return;
+  const meta = DRILL_META[drill] || { title: "明细", empty: "暂无记录" };
+  el.innerHTML = '<div class="empty-tip">加载中…</div>';
+  const back = { from: "stat-detail" };
+
+  let nodes = [];
+  let err = "";
+
+  if(drill === "closed"){
+    const mine = myChecks().filter(r => r.status === "done" || r.status === "reviewed");
+    nodes = mine.map(r => recordCard(r, back));
+  } else if(drill === "month_post"){
+    const r = await mobileApi("/api/mobile/patrol/records?mine=1&month=" + localYm() + "&limit=50", null, "GET");
+    if(r.status === 200 && r.body && r.body.success) nodes = (r.body.records || []).map(x => serverRecCard(x, back));
+    else err = (r.body && r.body.message) || ("HTTP " + r.status);
+  } else if(drill === "month_dispatch"){
+    // 一次拉全「未完成 + 已完成」两组；切分段时直接用缓存，不再请求
+    if(!sdDispatchData){
+      const r = await mobileApi("/api/mobile/dispatched?month=" + localYm(), null, "GET");
+      if(r.status === 200 && r.body && r.body.success){
+        sdDispatchData = {
+          pending: (r.body.records || []).map(dispatchedToRec).map(x => ({ s: x })),
+          done: (r.body.done_records || []).map(dispatchedToRec).map(x => ({ s: x })),
+        };
+      } else err = (r.body && r.body.message) || ("HTTP " + r.status);
+    }
+  } else if(drill === "pending" || drill === "rectified"){
+    const inbox = await loadInbox(true);
+    const want = drill === "pending" ? "待整改" : "已完成";
+    let list = (inbox || []).filter(t => t.todoStatus === want);
+    if(drill === "rectified") list = list.filter(t => String(t.doneAt || "").slice(0, 7) === localYm());
+    nodes = list.map(t => drill === "rectified"
+      ? dispatchCard(t, { done: true, from: "stat-detail" })
+      : dispatchCard(t, back));
+  }
+
+  if(err){
+    el.innerHTML = '<div class="empty-tip">明细暂时拉不到<br><span style="font-size:var(--fs-sub)">' + esc(err) + "</span></div>";
+    return;
+  }
+
+  // 本月派发走分段渲染（本机未同步的按是否已完成分别归入两组），见下方分支
+  if(drill === "month_dispatch" && sdDispatchData){
+    localUnsyncedRecords(drill).forEach(r => {
+      const fin = r.status === "done" || r.status === "reviewed";
+      (fin ? sdDispatchData.done : sdDispatchData.pending).push({ l: r });
+    });
+  }
+
+  // 本机未同步的增量（closed 本就是本机口径，不叠；month_dispatch 已在上方归入分段两组）
+  if(drill !== "closed" && drill !== "month_dispatch"){
+    localUnsyncedRecords(drill).forEach(r => {
+      const o = { from: "stat-detail" };
+      if(drill === "pending") o.goLine = "点击开始整改";
+      nodes.push(recordCard(r, o));
+    });
+  }
+
+  el.innerHTML = "";
+
+  // ---- CF-WPS-58：本月派发 —— 未完成 / 已完成 分段（两个按钮一行并排）----
+  if(drill === "month_dispatch" && sdDispatchData){
+    const P = sdDispatchData.pending, D = sdDispatchData.done;
+    const isDone = sdDispatchTab === "done";
+    const seg = document.createElement("div");
+    seg.className = "sd-seg";
+    seg.innerHTML =
+      '<button type="button" data-tab="pending" class="' + (isDone ? '' : 'on warn') + '">未完成 <span class="n">' + P.length + '</span></button>' +
+      '<button type="button" data-tab="done" class="' + (isDone ? 'on ok' : '') + '">已完成 <span class="n">' + D.length + '</span></button>';
+    seg.querySelectorAll("button").forEach(b => {
+      b.onclick = () => { if(sdDispatchTab === b.dataset.tab) return; sdDispatchTab = b.dataset.tab; renderStatDetail(drill); };
+    });
+    el.appendChild(seg);
+
+    const list = isDone ? D : P;
+    const lab = document.createElement("div");
+    lab.className = "section-label";
+    lab.textContent = (isDone ? "已完成" : "未完成") + " · " + list.length + " 条";
+    el.appendChild(lab);
+
+    if(!list.length){
+      const e = document.createElement("div");
+      e.className = "empty-tip";
+      e.innerHTML = (isDone ? "本月还没有已完成的派发" : "本月派发已全部完成") +
+        '<br><span style="font-size:var(--fs-sub)">' + esc(drillSubtitle(drill)) + "</span>";
+      el.appendChild(e);
+      return;
+    }
+    list.forEach(x => el.appendChild(x.l
+      ? recordCard(x.l, { from: "stat-detail" })
+      : dispatchCard(x.s, isDone ? { done: true, from: "stat-detail" } : back)));
+    return;
+  }
+
+  const lab = document.createElement("div");
+  lab.className = "section-label";
+  lab.textContent = meta.title + " · " + nodes.length + " 条";
+  el.appendChild(lab);
+  if(!nodes.length){
+    const e = document.createElement("div");
+    e.className = "empty-tip";
+    e.innerHTML = meta.empty + '<br><span style="font-size:var(--fs-sub)">' + esc(drillSubtitle(drill)) + "</span>";
+    el.appendChild(e);
+    return;
+  }
+  nodes.forEach(n => el.appendChild(n));
+}
+
 // 我的下级姓名（台账「直接上级」解析结果，boot 时预加载）。
 // 说明：检查记录目前按账号隔离存在各自手机上，跨账号查看需后端记录接口；
 // 此处用于「本机记录是否属于我下级」的判断。
@@ -2024,22 +2357,83 @@ function resetScenePhotoUI(){
   $("#btn-photo-next").classList.add("hidden");
   $("#photo-tip").textContent = "照片将自动保存到本条检查记录";
 }
+/* 照片压缩 —— **移动端内存安全版**（CF-WPS-59）
+   ---------------------------------------------------------------------------
+   旧实现：readAsDataURL(原文件) → new Image() 全尺寸解码 → canvas 缩放。
+   手机相机一张 4000×3000 的原图：
+     · readAsDataURL 先物化出一份 4~8MB 的 base64 字符串
+     · <img> 解码再物化一份 **48MB 的位图**（4000×3000×4B）
+   而真机拍照返回时，页面刚被系统回收、正处于内存最紧张的时刻；
+   低端安卓机（尤其微信 X5 WebView）单页内存常在 100~200MB 就会被杀 ——
+   这一步就是真机「拍照回来白屏 / 直接被回收」的头号嫌疑。
+   桌面 Chrome 内存充足，_t59 全绿、永远复现不了，所以只能按真机口径重写：
+     ① 不再把原文件读成 base64 字符串（改 objectURL，用完立刻 revoke）
+     ② 优先 createImageBitmap(file, {resizeWidth/Height}) —— **解码时就降采样**，
+        峰值位图从 48MB 降到 ~2.5MB；拿原始宽高的 probe 用完立即 close()
+     ③ 任何一步失败都 cb(null)，绝不让异常中断拍照流程（由调用方给提示） */
+const PHOTO_MAX_EDGE = 800;
 function compressImage(file, cb){
-  const reader = new FileReader();
-  reader.onload = e => {
-    const img = new Image();
-    img.onload = () => {
-      const max = 800, scale = Math.min(1, max / Math.max(img.width, img.height));
+  const fail = () => cb(null);
+  const draw = (src, w, h, release) => {
+    try{
       const c = document.createElement("canvas");
-      c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
-      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      c.width = w; c.height = h;
+      c.getContext("2d").drawImage(src, 0, 0, w, h);
       cb(c.toDataURL("image/jpeg", 0.7));
-    };
-    img.src = e.target.result;
+    }catch(e){ fail(); }
+    finally{ try{ release && release(); }catch(e){} }
   };
-  reader.readAsDataURL(file);
+  // ① 现代内核：解码期降采样（内存最省）
+  if(typeof createImageBitmap === "function"){
+    (async () => {
+      let probe = null;
+      try{
+        probe = await createImageBitmap(file);
+        const scale = Math.min(1, PHOTO_MAX_EDGE / Math.max(probe.width, probe.height));
+        const w = Math.max(1, Math.round(probe.width * scale));
+        const h = Math.max(1, Math.round(probe.height * scale));
+        try{ probe.close && probe.close(); }catch(e){}
+        probe = null;                                   // 立刻释放 48MB 全尺寸位图
+        const small = await createImageBitmap(file, { resizeWidth: w, resizeHeight: h, resizeQuality: "medium" });
+        draw(small, w, h, () => { try{ small.close && small.close(); }catch(e){} });
+        return;
+      }catch(e){ try{ probe && probe.close && probe.close(); }catch(_){} }
+      legacy();   // 内核不支持带 resize 的 bitmap（或解码失败）→ 回退 ②
+    })();
+    return;
+  }
+  legacy();
+  // ② 回退：objectURL + <img>（比 readAsDataURL 少一份 4~8MB 的 base64 字符串）
+  function legacy(){
+    let url = null;
+    try{
+      url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, PHOTO_MAX_EDGE / Math.max(img.width, img.height));
+        draw(img, Math.max(1, Math.round(img.width * scale)), Math.max(1, Math.round(img.height * scale)),
+             () => URL.revokeObjectURL(url));
+      };
+      img.onerror = () => { try{ URL.revokeObjectURL(url); }catch(e){} fail(); };
+      img.src = url;
+    }catch(e){ try{ url && URL.revokeObjectURL(url); }catch(_){} fail(); }
+  }
+}
+// 轻提示：拍照失败时给一句人话，而不是静默没反应
+function flashMsg(text){
+  let t = document.getElementById("hse-flash");
+  if(!t){
+    t = document.createElement("div"); t.id = "hse-flash";
+    t.style.cssText = "position:fixed;left:16px;right:16px;bottom:96px;z-index:9999;padding:12px 14px;border-radius:12px;background:rgba(17,24,39,.94);color:#fff;font-size:14px;line-height:1.45;text-align:center;transition:opacity .25s";
+    document.body.appendChild(t);
+  }
+  t.textContent = text; t.style.opacity = "1";
+  clearTimeout(t._tm);
+  t._tm = setTimeout(() => { t.style.opacity = "0"; }, 2600);
 }
 function setScenePhoto(dataUrl){
+  // CF-WPS-59：压缩失败（内存不足 / 文件损坏）时给提示，绝不写入坏 src 让页面卡在半路
+  if(!dataUrl){ flashMsg("照片读取失败，请重拍一次，或改用「从相册上传」"); return; }
   draft.scenePhoto = dataUrl;
   $("#scene-photo-box").innerHTML = '<img alt="现场照片" src="' + dataUrl + '">';
   $("#scene-photo-box").classList.add("clickable");
@@ -2840,6 +3234,8 @@ function todoToRec(t){
     assignedAt: t.assigned_at || "",
     doneAt: t.done_at || "",
     todoNote: t.todo_note || "",
+    // CF-WPS-58：保留服务端原始视图供详情页直接渲染（含 description / rectify_photo_count）
+    _srv: t,
   };
 }
 async function loadInbox(force){
@@ -2892,21 +3288,29 @@ async function loadServerRecs(force){
   return serverRecs;
 }
 // 服务端记录卡片：只显示服务端真有的字段，缺什么就空着，绝不拿本地数据补
-function serverRecCard(x){
+function serverRecCard(x, opts){
+  opts = opts || {};
   const card = document.createElement("div");
   card.className = "record-card";
   const isVio = x.is_violation === "是";
   const t = x.inspection_time || x.created_at || "";
   const hm = t.length >= 16 ? t.slice(11, 16) : "";
   const sub = [x.violation_people, x.grid].filter(Boolean).map(esc).join(" · ");
+  // 整改状态：只有被派发过的记录才带 todo_status
+  const st = x.todo_status === "已完成"
+    ? '<span class="chip" style="background:#DCFCE7;color:#15803D">已整改</span>'
+    : (x.todo_status ? '<span class="chip" style="background:#FEF3C7;color:#B45309">待整改</span>' : "");
   card.innerHTML =
-    '<div class="r-top"><span class="chip green"><span class="dot"></span>已上报</span>' +
+    '<div class="r-top"><span class="chip green"><span class="dot"></span>已上报</span>' + st +
     (x.photo_count ? '<span class="chip blue">' + x.photo_count + " 张照片</span>" : "") +
     (hm ? '<span style="font-size:var(--fs-sub);color:var(--t4)">' + esc(hm) + "</span>" : "") + "</div>" +
     '<div class="r-title">' + esc(isVio ? (x.violation_desc || "三违") : "普通巡查") + "</div>" +
     (sub ? '<div class="r-sub">' + sub + "</div>" : "") +
     (x.description ? '<div class="r-sub">' + esc(x.description) + "</div>" : "") +
     '<div class="r-sub">' + esc(t) + "</div>";
+  // CF-WPS-58：可点开详情 —— 此前巡查台账的服务端卡片点了没反应
+  card.style.cursor = "pointer";
+  card.onclick = () => openServerDetail(x, { title: "台账详情", from: opts.from || "my-checks" });
   return card;
 }
 async function renderMyChecks(){
@@ -2933,7 +3337,80 @@ async function renderMyChecks(){
   }
 }
 
+function setDetailTitle(t){
+  const el = document.getElementById("dt-title");
+  if(el) el.textContent = t;
+}
+
+/* ================= CF-WPS-58：服务端记录详情 =================
+   此前只有「本机记录」的卡片能点开详情（recordCard → openRecord → renderDetail），
+   而**派发记录**与**巡查台账（服务端）**的卡片点了完全没反应。
+   现在三类都走 view-detail 这一个外壳：
+     · renderDetail       —— 本机记录（有 blob 照片、有违章人电话）
+     · renderServerDetail —— 服务端记录（台账 / 待办 / 派发三类共用）
+   为什么服务端三类能共用一套渲染：它们的后端视图都出自 patrolRecordView / todoView，
+   字段名与含义一致（record_id / inspection_time / violation_desc / todo_status …）。
+   ⚠️ 服务端记录**看不到照片**：飞书附件不下发可访问 URL，只下发数量。
+      本机刚拍的照片（renderDetail）仍正常显示 —— 这是数据源限制，不是渲染缺陷。 */
+function renderServerDetail(x, opts){
+  opts = opts || {};
+  x = x || {};
+  const b = $("#detail-body"); b.innerHTML = "";
+  const mk = html => { const d = document.createElement("div"); d.innerHTML = html; return d.firstElementChild; };
+  setDetailTitle(opts.title || "记录详情");
+
+  const isVio = x.is_violation === "是" || !!x.violation_desc;
+  const rid = String(x.record_id || "");
+  const insp = String(x.inspection_time || x.created_at || "");
+  const checker = x.checker_name || x.name || x.assigner_name || "";
+  const st = x.todo_status === "已完成"
+    ? '<span class="chip" style="background:#DCFCE7;color:#15803D">已完成</span>'
+    : (x.todo_status ? '<span class="chip" style="background:#FEF3C7;color:#B45309">待整改</span>' : "");
+
+  b.appendChild(mk('<div class="card" style="display:flex;flex-direction:column;gap:8px">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:var(--fs-body);font-weight:600;color:var(--primary)">' + esc(rid.slice(-8)) + "</span>" + st + "</div>" +
+    '<div style="font-size:var(--fs-h2);font-weight:700">' + esc(isVio ? (x.violation_desc || "三违") : "普通巡查") + "</div>" +
+    (x.violation_people ? '<div style="font-size:var(--fs-body);color:var(--t3)">涉及人员：' + esc(x.violation_people) + "</div>" : "") +
+    '<div style="font-size:var(--fs-body);color:var(--t2);line-height:1.9">' +
+      "检查人：" + esc(checker || "—") + "<br>" +
+      "巡查时间：" + esc(insp || "—") + "<br>" +
+      (x.grid ? "网格：" + esc(x.grid) + "<br>" : "") +
+      "记录号：" + esc(rid) +
+    "</div></div>"));
+
+  // 派发 / 整改情况（只有涉及待办的记录才有这些字段）
+  if(x.assigner_id || x.assignee_id || x.assigned_at || x.done_at){
+    const lines = [];
+    if(x.assigner_name) lines.push("派发人：" + esc(x.assigner_name) + (x.assigner_dept ? "（" + esc(x.assigner_dept) + "）" : ""));
+    if(x.assigned_at) lines.push("派发时间：" + esc(x.assigned_at));
+    if(x.assignee_name) lines.push("当前责任人：" + esc(x.assignee_name) + ((x.town || x.todo_town || x.assignee_dept) ? "（" + esc(x.town || x.todo_town || x.assignee_dept) + "）" : ""));
+    if(x.done_at) lines.push("完成时间：" + esc(x.done_at));
+    if(x.note || x.todo_note) lines.push("整改说明：" + esc(x.note || x.todo_note));
+    b.appendChild(mk('<div class="section-label">派发与整改</div>'));
+    b.appendChild(mk('<div class="card"><div style="font-size:var(--fs-body);color:var(--t2);line-height:1.9">' + lines.join("<br>") + "</div></div>"));
+  }
+
+  if(x.description){
+    b.appendChild(mk('<div class="section-label">问题描述</div>'));
+    b.appendChild(mk('<div class="card"><div style="font-size:var(--fs-body);color:var(--t2);line-height:1.9">' + esc(x.description) + "</div></div>"));
+  }
+
+  // 照片：服务端只拿得到数量（飞书附件不下发 URL）
+  const pn = Number(x.photo_count) || 0;
+  const rn = Number(x.rectify_photo_count) || 0;
+  b.appendChild(mk('<div class="section-label">照片</div>'));
+  b.appendChild(mk('<div class="card"><div style="font-size:var(--fs-body);color:var(--t2);line-height:1.9">' +
+    (pn ? "现场照片 " + pn + " 张" : "现场照片：未记录") + "<br>" +
+    (rn ? "整改后照片 " + rn + " 张" : "整改后照片：无") +
+    '<div style="font-size:var(--fs-sub);color:var(--t4);margin-top:6px">照片存在飞书台账附件里，手机端暂不显示原图</div>' +
+    "</div></div>"));
+
+  $("#dt-back").onclick = () => { opts.from ? showView(opts.from) : showView("home"); };
+  showView("detail");
+}
+
 function renderDetail(rec, from){
+  setDetailTitle("三违详情");
   const b = $("#detail-body"); b.innerHTML = "";
   const mk = html => { const d = document.createElement("div"); d.innerHTML = html; return d.firstElementChild; };
   b.appendChild(mk('<div class="card" style="display:flex;flex-direction:column;gap:8px">' +
@@ -3097,6 +3574,7 @@ function renderDelegateBlock(rec){
   });
 }
 function setAfterPhoto(dataUrl){
+  if(!dataUrl){ flashMsg("整改照片读取失败，请重拍一次，或改用「从相册上传」"); return; }   // CF-WPS-59
   draft.afterPhoto = dataUrl; rectifying.afterPhoto = dataUrl;
   $("#after-photo-box").innerHTML = '<img alt="整改后照片" src="' + dataUrl + '">';
   // 拍后切到两列轻量行（与「未完成 违章停车·王同池」那行视觉同量级）
@@ -3193,6 +3671,9 @@ document.addEventListener("DOMContentLoaded", () => {
   // 首页
   $("#btn-start").onclick = startCheck;
   $$(".entry-card").forEach(c => c.onclick = () => openEntry(c.dataset.go));
+  // CF-WPS-58：首页统计卡下钻（点数字 → 出卡片列表 → 点卡片 → 详情）
+  $$(".stat-card[data-drill]").forEach(c => { c.onclick = () => openStatDetail(c.dataset.drill); });
+  $("#sd-back").onclick = () => showView("home");
   $$("#tabbar .tab-item").forEach(t => t.onclick = () => openTab(t.dataset.tab));
   $("#btn-me-sub").onclick = () => openEntry("sub-checks");
   function openTab(tab){

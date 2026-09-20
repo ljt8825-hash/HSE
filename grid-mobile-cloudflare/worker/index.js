@@ -579,6 +579,32 @@ const LEDGER_ROLE_MAP = {
   '管理员': '管理员',
 };
 
+// CF-WPS-58 —— 业务口径：**身份表「分级/角色」压过花名册「职位」**。
+//   账号在身份表的分级若是「公司管理」，即便花名册把它写成「XX作业中心经理」，
+//   它**也不是乡镇作业中心经理**，不得作为整改接收人 —— 他就是公司管理。
+//   （实测黄元同被 5 个单位、刘菲被 1 个单位顶成「经理」，语义退化成「派给同级」。）
+function isCompanyGrade(row) {
+  return String((row && row.grade) || '').trim() === '公司管理';
+}
+
+// 校验「拟接收人」是不是公司管理角色 —— 用于 /assign 与 patrol/submit 的 assign_to
+// 两条写入路径的**服务端硬校验**（前端列表过滤只是体验优化，防不住直接打接口）。
+// 命中手机号为先（session.sub 即手机号），姓名兜底。
+// fail-open：身份表读不到时不阻断既有派单流程，仅跳过该项校验（避免误伤）。
+async function assigneeIsCompanyRole(adapter, env, cfg, assigneeId, assigneeName) {
+  try {
+    const rows = (await getIdentityRows(adapter, env, cfg.fileId, cfg.ledgerSheetId))
+      .map(mapLedgerRecord).filter((r) => r.name);
+    const id = String(assigneeId || '').trim();
+    const nm = String(assigneeName || '').trim();
+    const hit = (id && rows.find((r) => r.phone && r.phone === id))
+      || (nm && rows.find((r) => r.name === nm));
+    return !!(hit && isCompanyGrade(hit));
+  } catch {
+    return false;
+  }
+}
+
 // 常量时间字符串比较（复用全局 sha256Hex：哈希后逐字节比较，避免长度/前缀时序泄漏）
 async function constantTimeEqual(a, b) {
   const [ha, hb] = await Promise.all([sha256Hex(a), sha256Hex(b)]);
@@ -927,26 +953,25 @@ function fillUnitHead(rows, unit) {
       return;
     }
   }
-  // ② 本公司管理且职位带「经理」
-  for (const r of inUnit) {
-    if (r.grade === '公司管理' && /经理/.test(String(r.position || ''))) {
-      unit.managerName = r.name;
-      unit.managerPhone = r.phone || '';
-      return;
-    }
-  }
-  // ③ 成员的直接上级 —— **仅对非行政区划单位（公园）生效**。
+  // ② 【CF-WPS-58 移除】原「公司管理 + 职位带经理」兜底。
+  //    业务口径：身份表角色压过花名册职位。公司管理账号即便花名册写着
+  //    「XX作业中心经理」，也**不是**乡镇作业中心经理 —— 顶着「经理」头衔进组织树，
+  //    会让前端「指派给乡镇作业中心经理」列出公司管理账号，语义退化成「派给同级」
+  //    （实测：黄元同被 5 个单位、刘菲被 1 个单位顶成经理）。
+  //    移除后这些单位如实暴露「未配乡镇经理」的数据缺口，与服务端硬校验一致。
+  // ③ 成员的直接上级 —— **仅对非行政区划单位（公园）生效，且只认乡镇作业中心经理**。
   //    ⚠️ 乡镇绝不能走这条：津城街道确实「未配经理」，其 3 名管理员的直接上级
   //    直接挂到了市政园林作业中心经理黄元同名下。若对乡镇也兜底，会把公司级经理
   //    误报成乡镇负责人，掩盖真实的「未配经理」状态（2026-09-18 实测踩到）。
-  //    公园不同：公园本来就不设自己的经理，管理员的上级（黄元同）就是其负责人。
+  //    公园原本靠这条取管理员的上级作负责人，但那个上级（黄元同）是**公司管理**，
+  //    按 CF-WPS-58 口径同样不能算乡镇经理 → 只保留 grade='乡镇作业中心经理' 的命中。
   if (isTownName(unit.town)) return;
   const superiors = new Set();
   for (const r of inUnit) if (r.superior) superiors.add(r.superior);
   for (const nm of superiors) {
     const p = rows.find((r) => r.name === nm);
     if (!p) continue;
-    if (p.grade === '乡镇作业中心经理' || p.grade === '公司管理') {
+    if (p.grade === '乡镇作业中心经理') {
       unit.managerName = p.name;
       unit.managerPhone = p.phone || '';
       return;
@@ -2140,6 +2165,10 @@ async function handlePatrolSubmit(request, env) {
             return errRes('FORBIDDEN', '乡镇作业中心经理只能指派给你所在作业中心的下级', 403, corsHeaders(origin));
           }
         }
+        // CF-WPS-58：接收人不得是公司管理角色（角色压过职位，详见 isCompanyGrade 注释）
+        if (await assigneeIsCompanyRole(adapter, env, cfg, aid, at.assignee_name)) {
+          return errRes('FORBIDDEN', '公司管理账号不可作为整改接收人（其身份角色为公司管理，不因花名册职位而改变）', 403, corsHeaders(origin));
+        }
         await ensureTodoFields(env, fileId, sheetId);
         assignInfo = {
           [TODO_FIELDS.assigneeId]: aid,
@@ -2280,6 +2309,10 @@ function patrolRecordView(rec, full) {
     description: fieldText(f['描述']),
     is_violation: isVio ? '是' : '否',
     created_at: msToPatrolTime(f['日期']),
+    // CF-WPS-58：列表也带检查人姓名（详情页要显示「谁查的」）。
+    // 只放**姓名**、不放手机号 —— 姓名本就是台账列表的业务信息（台账卡片一直显示网格与
+    // 涉及人员），手机号属敏感项，仍只在 full=true（单条详情）时下发。
+    checker_name: fieldText(f['检查人姓名']),
     // ⚠️ 三违行为 / 违章人员必须进列表视图：台账页卡片靠这两个字段显示
     //    「违章停车 · 张三」，只放进详情会让列表退化成光秃秃的「三违」。
     violation_desc: isVio ? behavior : '',
@@ -2319,6 +2352,53 @@ function patrolIsMine(fields, sub) {
   return note.employeeCode === String(sub);
 }
 
+/* ---- 巡查台账的可见范围（scope，2026-09-19 用户决策：按组织树放开）----
+     公司管理      → ALL  全公司
+     乡镇作业中心经理 → DEPT 本人 + 直接/间接下级
+     管理员        → SELF 仅本人（与放开前行为完全一致）
+   组织关系取自**身份台账**的「直接上级」列（ledgerSubtree 递归，复用 /org/subordinates 同款解析），
+   不取主台账 —— 主台账没有「所属单位」列（实际列名见 patrolRecordView 注释）。
+   次级判定键是「备注」里的 巡查人ID（手机号），与 patrolIsMine 同源；
+   不用姓名判定 —— 花名册有 24 组重名，姓名会串号。
+   ⚠️ fail-closed：取不到组织信息（上游抖动／姓名不唯一）时退回 SELF，
+      绝不因为一次上游失败就把全公司台账放开。 */
+const SCOPE_TTL_MS = 5 * 60 * 1000;
+const deptScopeCache = new Map();   // 'DEPT|<姓名>' → { at, phones:Set }
+
+function patrolInScope(fields, view) {
+  if (!view || view.scope === 'ALL') return true;
+  const code = parsePatrolNote(fieldText((fields || {})['备注'])).employeeCode;
+  return !!code && view.phones.has(String(code));
+}
+
+async function resolveViewScope(adapter, env, cfg, payload) {
+  const role = String(payload.role || '');
+  const mePhone = phoneDigits(payload.sub);
+  const selfOnly = { scope: 'SELF', phones: new Set(mePhone ? [mePhone] : []) };
+  if (role === '公司管理') return { scope: 'ALL', phones: null };
+  if (role !== '经理') return selfOnly;
+  const meName = String(payload.name || '').trim();
+  if (!meName) return selfOnly;
+  const key = 'DEPT|' + meName;
+  const hit = deptScopeCache.get(key);
+  if (hit && Date.now() - hit.at < SCOPE_TTL_MS) return hit.value;
+  let rows;
+  try {
+    rows = (await adapter.scanRecords(env, cfg.fileId, cfg.ledgerSheetId))
+      .map(mapLedgerRecord).filter((r) => r.name);
+  } catch {
+    return Object.assign({}, selfOnly, { degraded: true });   // fail-closed
+  }
+  const subtree = ledgerSubtree(rows, meName);
+  // null = 台账里姓名不唯一或未登记 → 无法确定下级范围，不放开
+  if (!subtree) return Object.assign({}, selfOnly, { degraded: true });
+  const phones = new Set(mePhone ? [mePhone] : []);
+  for (const r of subtree) if (r.phone) phones.add(r.phone);
+  const value = { scope: 'DEPT', phones };
+  deptScopeCache.set(key, { at: Date.now(), value });
+  return value;
+}
+
 async function handlePatrolRecords(request, env) {
   const origin = corsOrigin(request, env);
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
@@ -2341,26 +2421,64 @@ async function handlePatrolRecords(request, env) {
 
   const url = new URL(request.url);
   const wantId = url.searchParams.get('id');
-
-  if (wantId) {
-    const hit = recs.find((r) => r.id === String(wantId) && patrolIsMine(r.fields, payload.sub));
-    if (!hit) return errRes('NOT_FOUND', '记录不存在', 404, corsHeaders(origin));
-    return jsonRes({ success: true, code: 'OK', record: patrolRecordView(hit, true) }, 200, corsHeaders(origin));
+  // 可见范围：公司管理 ALL / 经理 DEPT（本人 + 下级）/ 管理员 SELF
+  let view = await resolveViewScope(adapter, env, cfg, payload);
+  // ?mine=1：强制「仅本人」范围（首页「本月上报」卡下钻用）。
+  // 该卡的数字口径是「我巡查的」，而下钻若走角色 scope（公司管理 = 全公司），
+  // 就会「卡上写 3、点进去几十条」—— 同源约束要求整条链口径一致，故给显式覆盖开关。
+  if (url.searchParams.get('mine') === '1') {
+    const mp = phoneDigits(payload.sub);
+    view = { scope: 'SELF', phones: new Set(mp ? [mp] : []) };
   }
 
-  const mine = recs
-    .filter((r) => patrolIsMine(r.fields, payload.sub))
+  if (wantId) {
+    const hit = recs.find((r) => r.id === String(wantId) && patrolInScope(r.fields, view));
+    if (!hit) return errRes('NOT_FOUND', '记录不存在', 404, corsHeaders(origin));
+    return jsonRes({
+      success: true, code: 'OK', scope: view.scope,
+      record: patrolRecordView(hit, true),
+    }, 200, corsHeaders(origin));
+  }
+
+  // ?month=YYYY-MM 可选；不传则不按月过滤（与放开前行为一致，避免打断既有调用）
+  const monthRaw = (url.searchParams.get('month') || '').trim();
+  const wantMonth = /^\d{4}-\d{2}$/.test(monthRaw) ? monthRaw : '';
+  const inWantMonth = (r) => {
+    if (!wantMonth) return true;
+    const t = parsePatrolNote(fieldText(r.fields['备注'])).inspectionTime || msToPatrolTime(r.fields['日期']);
+    return String(t).slice(0, 7) === wantMonth;
+  };
+
+  const visible = recs
+    .filter((r) => patrolInScope(r.fields, view))
+    .filter(inWantMonth)
     .sort((a, b) => {
       // 排序键：备注里的巡查时间 → 退到 日期（创建时间，毫秒）
       const ta = parsePatrolNote(fieldText(a.fields['备注'])).inspectionTime || msToPatrolTime(a.fields['日期']);
       const tb = parsePatrolNote(fieldText(b.fields['备注'])).inspectionTime || msToPatrolTime(b.fields['日期']);
       return String(tb).localeCompare(String(ta));
-    })
-    .slice(0, PATROL_LIST_LIMIT);
+    });
+  const total = visible.length;
+  const offset = Math.max(0, Number(url.searchParams.get('offset')) || 0);
+  const limit = Math.min(PATROL_LIST_LIMIT,
+    Math.max(1, Number(url.searchParams.get('limit')) || PATROL_LIST_LIMIT));
+  const page = visible.slice(offset, offset + limit);
+
+  // 审计：放开读范围（公司管理/经理可看他人记录）必须留痕，
+  // 便于事后回答「谁在什么时候拉了多少条别人的记录」。
+  console.log(JSON.stringify({
+    evt: 'patrol_records', role: String(payload.role || ''), scope: view.scope,
+    degraded: !!view.degraded, month: wantMonth || 'all', total, returned: page.length,
+  }));
+
   return jsonRes({
     success: true, code: 'OK',
-    total: mine.length,
-    records: mine.map((r) => patrolRecordView(r, false)),
+    scope: view.scope,                 // 前端据此显示「范围：本人 / 本中心 / 全公司」
+    scope_degraded: !!view.degraded,   // true = 组织信息取不到，已退回仅本人
+    month: wantMonth || '',
+    total,                             // 命中总数（不受分页影响）
+    has_more: offset + page.length < total,
+    records: page.map((r) => patrolRecordView(r, false)),
   }, 200, corsHeaders(origin));
 }
 
@@ -2374,10 +2492,11 @@ async function handlePatrolRecords(request, env) {
    存储：与主台账同表，新增 9 个文本列（TODO_FIELDS），由 ensureTodoFields() 幂等创建。
    一条巡查记录最多对应一条待办，语义一致、无需额外建表。
 
-   四个接口：
+   五个接口：
      POST /api/mobile/assign            指派（创建/覆盖待办）
-     GET  /api/mobile/inbox             我的待办（按 整改接收人ID 过滤）
-     GET  /api/mobile/dispatched        我派发出去的未完成记录（按 指派人ID 过滤）
+     GET  /api/mobile/inbox             我的待办（按 整改接收人ID 过滤，含已完成明细）
+     GET  /api/mobile/dispatched        我派发出去的记录（按 指派人ID 过滤，未完成 + 已完成两组）
+     GET  /api/mobile/summary           首页统计（5 个数字与各自下钻源一并下发，保证同源）
      POST /api/mobile/assign/complete   完成待办（仅接收人可操作）
    ============================================================================ */
 
@@ -2486,6 +2605,14 @@ async function handleAssign(request, env) {
     }
   }
 
+  // CF-WPS-58：接收人不得是公司管理角色 —— **身份表角色压过花名册职位**。
+  //   公司管理即便在花名册挂着「XX作业中心经理」，也不是乡镇作业中心经理，
+  //   不能当整改接收人（否则「派给乡镇经理」退化成「派给同级」）。
+  //   ⚠️ isCompany 分支原本「接收人不限」，这是唯一的角色兜底，必须补在这里。
+  if (await assigneeIsCompanyRole(adapter, env, cfg, assigneeId, assigneeName)) {
+    return errRes('FORBIDDEN', '公司管理账号不可作为整改接收人（其身份角色为公司管理，不因花名册职位而改变）', 403, corsHeaders(origin));
+  }
+
   const fields = {
     [TODO_FIELDS.assigneeId]: assigneeId,
     [TODO_FIELDS.assigneeName]: assigneeName || assigneeId,
@@ -2589,9 +2716,17 @@ async function handleInbox(request, env) {
   const sortKey = (r) => fieldText(r.fields[TODO_FIELDS.assignedAt]);
   const byTimeDesc = (a, b) => String(sortKey(b)).localeCompare(String(sortKey(a)));
 
-  const todos = [...pending.sort(byTimeDesc), ...mine.filter((r) => fieldText(r.fields[TODO_FIELDS.status]) === TODO_STATUS.done).sort(byTimeDesc)]
-    .slice(0, PATROL_LIST_LIMIT)
-    .map((r) => todoView(r, false));
+  const doneAll = mine
+    .filter((r) => fieldText(r.fields[TODO_FIELDS.status]) === TODO_STATUS.done)
+    .sort(byTimeDesc);
+
+  // 未完成 / 已完成**分别限量**：原实现把两类拼接后统一 slice(0, LIMIT)，
+  // 未完成一旦超过上限，已完成明细会被整体挤出（数字仍准 —— monthly_done_count 走全量，
+  // 但「已完成」下钻列表会空）—— 2026-09-19 修。
+  // full=true 补全 description / rectify_photo_count，供详情页使用。
+  const pendingPage = pending.sort(byTimeDesc).slice(0, PATROL_LIST_LIMIT);
+  const donePage = doneAll.slice(0, PATROL_LIST_LIMIT);
+  const todos = [...pendingPage, ...donePage].map((r) => todoView(r, true));
   // 老记录（「指派人单位」列上线前建的）没有该值 → 用身份台账按指派人手机号回填。
   // 目的：让「来自 XXX · 单位」对存量待办也显示**指派人自己的单位**，而不是接收方的责任单位。
   // 回填失败静默降级（单位缺失只是显示少一截，不影响待办本身）。
@@ -2610,8 +2745,10 @@ async function handleInbox(request, env) {
     me: { id: String(payload.sub || ''), name: String(payload.name || ''), role: String(payload.role || '') },
     pending_count: pending.length,        // 首页「待整改」红点直接取这个
     monthly_done_count: doneThisMonth.length, // 首页「已整改」（经理/管理员），本月口径
+    done_count: doneAll.length,           // 指派给我且已完成的总数（不限本月）
+    done_more: doneAll.length > donePage.length,
     total: mine.length,
-    todos,
+    todos,                                // 未完成在前、已完成在后，各自独立限量
   }, 200, corsHeaders(origin));
 }
 
@@ -2637,6 +2774,7 @@ async function handleDispatched(request, env) {
   if (!target) return errRes('PATROL_TARGET_NOT_CONFIGURED', '巡查目标表未配置', 503, corsHeaders(origin));
 
   const me = String(payload.sub || '');
+  const url = new URL(request.url);
   await ensureTodoFields(env, cfg.fileId, target.sheetId);
 
   // 与 inbox 同款取数：优先飞书原生 search（单次往返），失败再退回全表扫描兜底。
@@ -2654,18 +2792,115 @@ async function handleDispatched(request, env) {
     sent = recs.filter((r) => fieldText(r.fields[TODO_FIELDS.assignerId]) === me);
   }
 
-  // 列表只放未完成的；已完成的只报个数（页面顶部做上下文提示），不占列表。
-  const open = sent.filter((r) => fieldText(r.fields[TODO_FIELDS.status]) !== TODO_STATUS.done);
   const sortKey = (r) => fieldText(r.fields[TODO_FIELDS.assignedAt]);
-  open.sort((a, b) => String(sortKey(b)).localeCompare(String(sortKey(a))));
+  const byNewest = (a, b) => String(sortKey(b)).localeCompare(String(sortKey(a)));
+
+  // 本月派发数：**始终**按本月算，不受 ?month 参数影响 —— 首页统计卡取它，
+  // 与 /api/mobile/summary 的 month_dispatch 同源同值。
+  // 跨月未整改的会一直留在列表里挂着，但不计入本月派发。
+  const thisYm = todoNowLocal().slice(0, 7);
+  const monthlyDispatch = sent.filter((r) => String(sortKey(r)).slice(0, 7) === thisYm).length;
+
+  // ?month=YYYY-MM 可选：只列「指派时间落在该月」的（供首页「本月派发」卡下钻）。
+  // 不传时返回全部（含跨月挂账），与放开前行为完全一致。
+  const monthRaw = (url.searchParams.get('month') || '').trim();
+  const wantMonth = /^\d{4}-\d{2}$/.test(monthRaw) ? monthRaw : '';
+  const view = wantMonth ? sent.filter((r) => String(sortKey(r)).slice(0, 7) === wantMonth) : sent;
+
+  const open = view
+    .filter((r) => fieldText(r.fields[TODO_FIELDS.status]) !== TODO_STATUS.done)
+    .sort(byNewest);
+  const doneAll = view
+    .filter((r) => fieldText(r.fields[TODO_FIELDS.status]) === TODO_STATUS.done)
+    .sort(byNewest);
+
+  const openPage = open.slice(0, PATROL_LIST_LIMIT);
+  const donePage = doneAll.slice(0, PATROL_LIST_LIMIT);
 
   return jsonRes({
     success: true, code: 'OK',
     me: { id: me, name: String(payload.name || ''), role: String(payload.role || '') },
     pending_count: open.length,   // 未整改完成条数（页签红点可直接取这个）
-    done_count: sent.length - open.length,  // 我派出去且已整改完成的条数
-    total: sent.length,
-    records: open.slice(0, PATROL_LIST_LIMIT).map((r) => todoView(r, false)),
+    done_count: doneAll.length,   // 我派出去且已整改完成的条数
+    total: view.length,
+    month: wantMonth || '',                       // '' = 未按月筛选（全部）
+    monthly_dispatch_count: monthlyDispatch,      // 本月派发数（首页统计卡）
+    done_more: doneAll.length > donePage.length,
+    // records 语义**保持不变**（= 仅未完成），避免打断既有断言；
+    // 已完成走 done_records（「已完成」分组可查）。
+    // 传 full=true 补全 description / rectify_photo_count —— 详情页要用。
+    records: openPage.map((r) => todoView(r, true)),
+    done_records: donePage.map((r) => todoView(r, true)),
+  }, 200, corsHeaders(origin));
+}
+
+/* ---- GET /api/mobile/summary（首页统计的唯一来源）----
+   决策背景（2026-09-19）：首页统计卡要能**点击下钻**，就必须保证「卡上的数字」与
+   「点进去的列表」**同源**。此前「本月派发」走本机 db.records、「派发记录」页签走服务端
+   dispatched ⇒ 换手机 / 清缓存 / 派发动作发生在别人手机上时，两者必然对不上
+   （会呈现为「卡上写 3、点进去 0 条」）。故首页数字统一由服务端一次算出，前端只渲染不计算。
+
+   各数字的过滤键，必须与对应下钻接口**逐字一致**：
+     month_post     = 备注.巡查人ID == 我  且 巡查时间在本月        → patrol/records?month=
+     month_dispatch = 指派人ID     == 我  且 指派时间在本月        → dispatched?month=
+     pending        = 整改接收人ID == 我  且 整改状态 ≠ 已完成     → inbox（未完成部分）
+     rectified      = 整改接收人ID == 我  且 完成时间在本月        → inbox（已完成部分）
+     closed         = 本机口径（主台账没有「整改完成」独立列，服务端无法判断
+                       未经派发的记录是否闭环）→ 前端用本机 db.records 计算，
+                       因此**不在本响应里**，由前端自行填。
+   时区：月份一律用 todoNowLocal() 的字符串前缀 YYYY-MM 比较，不用 Date 解析
+        （Worker 默认 UTC，用 Date 会跨月错位）。 */
+async function handleSummary(request, env) {
+  const origin = corsOrigin(request, env);
+  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
+  if (request.method !== 'GET') return errRes('METHOD_NOT_ALLOWED', '不支持的请求方法', 405, corsHeaders(origin));
+  if (!env.WORKER_SESSION_SECRET) return errRes('SESSION_NOT_CONFIGURED', '会话密钥未配置', 503, corsHeaders(origin));
+  const payload = await verifyWorkerSession(bearerToken(request), env.WORKER_SESSION_SECRET);
+  if (!payload) return errRes('UNAUTHORIZED', '未认证或登录态失效', 401, corsHeaders(origin));
+
+  const adapter = getAdapter(env);
+  const cfg = await storageConfig(env);
+  const target = patrolTarget(env, cfg);
+  if (!target) return errRes('PATROL_TARGET_NOT_CONFIGURED', '巡查目标表未配置', 503, corsHeaders(origin));
+
+  // 五个数字都来自同一份全量台账快照 —— 只扫一次，避免多次往返上游。
+  let recs;
+  try { recs = await adapter.scanRecords(env, cfg.fileId, target.sheetId); }
+  catch { return errRes('WPS_UPSTREAM_ERROR', '统计暂不可用，请稍后再试', 502, corsHeaders(origin)); }
+
+  const me = phoneDigits(payload.sub);
+  const role = String(payload.role || '');
+  const thisYm = todoNowLocal().slice(0, 7);
+  const inMonth = (v) => String(v || '').slice(0, 7) === thisYm;
+  const f = (r, k) => fieldText((r.fields || {})[k]);
+  const isDone = (r) => f(r, TODO_FIELDS.status) === TODO_STATUS.done;
+  const patrolCode = (r) => parsePatrolNote(f(r, '备注')).employeeCode;
+  const patrolTime = (r) => parsePatrolNote(f(r, '备注')).inspectionTime || msToPatrolTime((r.fields || {})['日期']);
+
+  const minePatrol = recs.filter((r) => !!me && patrolCode(r) === me);
+  const mineDispatch = recs.filter((r) => !!me && f(r, TODO_FIELDS.assignerId) === me);
+  const mineInbox = recs.filter((r) => !!me && f(r, TODO_FIELDS.assigneeId) === me);
+
+  return jsonRes({
+    success: true, code: 'OK',
+    me: { id: me, name: String(payload.name || ''), role },
+    month: thisYm,
+    month_post: minePatrol.filter((r) => inMonth(patrolTime(r))).length,
+    month_dispatch: mineDispatch.filter((r) => inMonth(f(r, TODO_FIELDS.assignedAt))).length,
+    pending: mineInbox.filter((r) => !isDone(r)).length,
+    rectified: mineInbox.filter((r) => isDone(r) && inMonth(f(r, TODO_FIELDS.doneAt))).length,
+    // 派发方视角的两个数（供「派发记录」页签角标，省掉首页单独再拉一次 dispatched）
+    dispatch_pending: mineDispatch.filter((r) => !isDone(r)).length,
+    dispatch_done: mineDispatch.filter(isDone).length,
+    // 每张统计卡对应的下钻数据源，随响应下发 —— 前端不必硬编码，
+    // 以后改口径只改这里一处，数字与明细不会各走各的。
+    scopes: {
+      month_post: { api: '/api/mobile/patrol/records', query: 'month=' + thisYm },
+      month_dispatch: { api: '/api/mobile/dispatched', query: 'month=' + thisYm },
+      pending: { api: '/api/mobile/inbox', group: 'pending' },
+      rectified: { api: '/api/mobile/inbox', group: 'done' },
+      closed: { api: 'local', note: '本机口径：未上报记录仅本机可见' },
+    },
   }, 200, corsHeaders(origin));
 }
 
@@ -2825,6 +3060,7 @@ export default {
     if (p === '/api/mobile/assign') return handleAssign(request, env);
     if (p === '/api/mobile/inbox') return handleInbox(request, env);
     if (p === '/api/mobile/dispatched') return handleDispatched(request, env);
+    if (p === '/api/mobile/summary') return handleSummary(request, env);
     if (p === '/api/mobile/assign/complete') return handleAssignComplete(request, env);
     // CF-WPS-41：微信推送绑定（GET 状态 / POST 绑定或解绑）
     if (p === '/api/mobile/wx/status') return handleWxStatus(request, env);
@@ -2879,6 +3115,9 @@ export {
   ledgerTownPeople,
   ledgerNameCount,
   fillUnitHead,
+  // CF-WPS-58（业务口径：身份表角色压过花名册职位 —— 公司管理不得当整改接收人）
+  isCompanyGrade,
+  assigneeIsCompanyRole,
   TOWN_ANCHOR_RE,
   UNIT_ANCHOR_RE,
   handlePatrolMeta,
