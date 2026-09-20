@@ -7,7 +7,7 @@
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-09-20.63">
+<meta name="hse-build" content="2026-09-20.64">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -683,7 +683,7 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
   </div>
   <div class="page">
     <div class="field-label" id="tf-head">第一步：指定作业中心</div>
-    <div class="field-sub" id="tf-sub">选择问题所属的责任单位（乡镇 / 公园 / 作业中心）</div>
+    <div class="field-sub" id="tf-sub">选择问题所属的责任单位（乡镇 / 公园）</div>
     <div id="tf-list"></div>
   </div>
 </section>
@@ -1014,8 +1014,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
      读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
    - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
    - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
-<script src="./config.js?v=2026-09-20.63"></script>
-<script src="./app.js?v=2026-09-20.63"></script>
+<script src="./config.js?v=2026-09-20.64"></script>
+<script src="./app.js?v=2026-09-20.64"></script>
 <script>
 /* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
 (function(){
@@ -3740,7 +3740,7 @@ document.addEventListener("DOMContentLoaded", () => {
     $("#tf-head").textContent = choosingAdmin ? "第二步：指定接收人" : "第一步：指定作业中心";
     $("#tf-sub").textContent = choosingAdmin
       ? "「" + draft.transferTown + "」的负责人 / 管理员，点击发送整改任务"
-      : "选择问题所属的责任单位（乡镇 / 公园 / 作业中心，来自网格长信息台账）";
+      : "选择问题所属的责任单位（乡镇 / 公园，来自网格长信息台账）";
     list.innerHTML = emptyTip("正在读取组织…");
     const body = await loadSubordinates();
     list.innerHTML = "";

@@ -917,6 +917,21 @@ function isUnitName(unit) {
   return UNIT_ANCHOR_RE.test(String(unit || ''));
 }
 
+// ---- CF-WPS-60：公司管理「派发」时的排除名单 ----
+// 业务口径（2026-09-19 用户确认）：环卫作业中心、市政园林作业中心是
+// **乡镇作业中心的上级**、由公司管理直管，它们不是被派发对象 ——
+// 给它们派单等于「公司管理派给公司管理」（这两个中心的经理本人就是公司管理角色，
+// 服务端已由 assigneeIsCompanyRole 拦截 403，见 CF-WPS-58）。
+// 光靠服务端 403 不够：那要等用户点下去才报错，正确做法是**根本不出现在列表里**。
+//
+// ⚠️ 只作用于「派发目标列表」（/org/subordinates 的 towns），
+//    **不影响** /org/towns（那是选人级联，公司管理要能选到全公司的人）
+//    也不影响 /org/teams 的合法性校验（否则查这两个中心的班组会变 404）。
+//
+// 3 个公园**不在**排除之列（公司管理直接派发给公园管理员），
+// 因此按名字精确排除、不用 /作业中心$/ 通配 —— 避免以后新增作业中心被静默吞掉。
+const NON_DISPATCH_UNITS = new Set(['环卫作业中心', '市政园林作业中心']);
+
 // 全部作业中心清单（按名称去重 + 中文排序）。
 // 口径：镇/乡/街道 + 公园 + 作业中心（见 UNIT_ANCHOR_RE）。
 // 只读推导，零额外配置表；数据源 = 网格长信息台账。
@@ -1209,7 +1224,9 @@ async function handleOrgSubordinates(request, env) {
     //    越权防护已由「仅 role==='公司管理' 且 under===meName 才下发 towns」承担，
     //    此处显式传 null 表示不做个人范围收敛。
     const allowed = null;
-    towns = ledgerTowns(rows).map((t) => {
+    // CF-WPS-60：公司管理的派发目标 = 12 个乡镇 + 3 个公园，**不含**环卫/市政园林作业中心
+    const dispatchUnits = ledgerTowns(rows).filter((t) => !NON_DISPATCH_UNITS.has(t.town));
+    towns = dispatchUnits.map((t) => {
       const { admins: ta, managers: tm, others: to } = ledgerTownPeople(rows, t.town, nameCount, allowed);
       return {
         town: t.town,
@@ -3118,6 +3135,8 @@ export {
   // CF-WPS-58（业务口径：身份表角色压过花名册职位 —— 公司管理不得当整改接收人）
   isCompanyGrade,
   assigneeIsCompanyRole,
+  // CF-WPS-60（派发目标列表排除环卫/市政园林作业中心；离线测试用）
+  NON_DISPATCH_UNITS,
   TOWN_ANCHOR_RE,
   UNIT_ANCHOR_RE,
   handlePatrolMeta,
