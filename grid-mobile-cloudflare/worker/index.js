@@ -569,6 +569,9 @@ function mapLedgerRecord(rec) {
     gridLevel: fieldText(f['网格长等级']).trim(),
     phone: phoneDigits(f['手机号']),
     grade: fieldText(f['分级']).trim(),
+    // CF-WPS-61：自定义密码哈希（飞书身份表可选列「密码哈希」）。
+    // 业务方未建该列时恒为空串 → 走「初始派生密码」分支，行为与改造前完全一致。
+    pwdHash: fieldText(f[PWD_HASH_FIELD]).trim(),
   };
 }
 
@@ -611,6 +614,101 @@ async function constantTimeEqual(a, b) {
   let diff = 0;
   for (let i = 0; i < ha.length; i++) diff |= ha.charCodeAt(i) ^ hb.charCodeAt(i);
   return diff === 0;
+}
+
+/* ================= CF-WPS-61 密码保护：首次登录强制改密 =================
+   背景：初始密码是**可推导的** —— 姓名拼音首字母 + 手机号后 4 位（见 pinyinInitials）。
+   知道姓名和手机号就能算出来，等同于没有密码。
+   业务要求：第一次登录后**第一时间**改成自己的密码，改完才能用业务功能。
+
+   存储：自定义密码哈希写在**飞书身份表新增列「密码哈希」**（与「微信推送UID」
+        同一张表、同一条 updateRecord 写入链路，该列已验证可写）。
+        格式：`pbkdf2$<iter>$<saltHex>$<hashHex>`（PBKDF2-HMAC-SHA256，每账号随机 salt）。
+
+   ⚠️ 向后兼容 / 优雅降级（重要）：
+        · 表里**没有**这一列（业务方还没建）→ 该行读到空串 → 一律按「仍在用初始密码」
+          处理，登录照常成功、只是提示改密；此时改密接口写不进飞书，
+          返回 503 并给出明确文案，**不会把任何账号锁死**。
+        · 已建列且该行有值 → 按存储哈希校验。
+        · 管理员重置密码 = 把该行「密码哈希」清空 → 自动回落到初始派生密码。
+
+   CPU 预算：Workers 免费计划 10ms。实测 PBKDF2 20000 次 ≈ 3ms（原生实现）；
+        付费计划可用 wrangler 变量 PWD_PBKDF2_ITER 调高（10 万次 ≈ 7ms）。 */
+const PWD_HASH_FIELD = '密码哈希';         // 飞书身份表列名（文本列，需业务方建）
+const PWD_CHANGED_FIELD = '密码修改时间';   // 可选列；写失败不影响主流程
+const PWD_DEFAULT_ITER = 20000;
+const PWD_MIN_LEN = 6;
+const PWD_MAX_LEN = 32;
+// 仍在用初始密码时，这些**写操作**一律拒绝 —— 前端强制改密的服务端兜底，
+// 防止绕过界面直接调接口。读接口放行（否则用户连改密页都进不去）。
+const PWD_GUARDED_ROUTES = new Set([
+  '/api/mobile/patrol/submit', '/api/mobile/patrol/attach',
+  '/api/mobile/assign', '/api/mobile/assign/complete',
+  '/api/mobile/wx/bind', '/wps/records/create',
+]);
+
+function pwdIter(env) {
+  const n = Number(env && env.PWD_PBKDF2_ITER);
+  return Number.isFinite(n) && n >= 1000 && n <= 200000 ? Math.floor(n) : PWD_DEFAULT_ITER;
+}
+function toHex(u8) {
+  let s = '';
+  for (const b of u8) s += b.toString(16).padStart(2, '0');
+  return s;
+}
+function fromHex(hex) {
+  const h = String(hex || '');
+  const out = new Uint8Array(Math.floor(h.length / 2));
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16) || 0;
+  return out;
+}
+// 初始（默认）密码：姓名拼音首字母(小写) + 手机号后 4 位 —— 与登录校验口径严格一致
+function defaultPassword(name, phone) {
+  const initials = pinyinInitials(name);
+  return initials ? initials + String(phone || '').slice(-4) : '';
+}
+async function hashPassword(pwd, iter) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(pwd), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: iter }, key, 256);
+  return 'pbkdf2$' + iter + '$' + toHex(salt) + '$' + toHex(new Uint8Array(bits));
+}
+// 校验存储哈希；格式损坏一律 false（fail-closed）
+async function verifyStoredPassword(stored, pwd) {
+  try {
+    const parts = String(stored || '').split('$');
+    if (parts.length !== 4 || parts[0] !== 'pbkdf2') return false;
+    const iter = Number(parts[1]);
+    if (!Number.isFinite(iter) || iter < 1000 || iter > 200000) return false;
+    const salt = fromHex(parts[2]);
+    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(pwd), 'PBKDF2', false, ['deriveBits']);
+    const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: iter }, key, 256);
+    return await constantTimeEqual(toHex(new Uint8Array(bits)), parts[3]);
+  } catch { return false; }
+}
+// 新密码强度：返回空串 = 通过；否则返回给用户看的中文原因
+function weakPasswordReason(pwd, identity) {
+  const p = String(pwd || '');
+  if (p.length < PWD_MIN_LEN) return '密码至少 ' + PWD_MIN_LEN + ' 位';
+  if (p.length > PWD_MAX_LEN) return '密码最多 ' + PWD_MAX_LEN + ' 位';
+  if (/[^\x20-\x7e]/.test(p)) return '密码不能包含中文或全角字符';
+  const lower = p.toLowerCase();
+  if (identity) {
+    if (lower === defaultPassword(identity.name, identity.phone)) return '新密码不能与初始密码相同';
+    if (p === String(identity.phone || '').slice(-4)) return '新密码不能是手机号后 4 位';
+    if (p === String(identity.phone || '')) return '新密码不能是手机号';
+  }
+  return '';
+}
+// 统一口令校验：优先按存储哈希，没存过就按初始派生密码
+// 返回 { ok, usingDefault }
+async function checkPassword(identity, password) {
+  if (identity.pwdHash) {
+    return { ok: await verifyStoredPassword(identity.pwdHash, password), usingDefault: false };
+  }
+  const expected = defaultPassword(identity.name, identity.phone);
+  if (!expected) return { ok: false, usingDefault: true };
+  return { ok: await constantTimeEqual(String(password).toLowerCase(), expected), usingDefault: true };
 }
 
 // ---- POST /api/mobile/auth/login ----
@@ -678,19 +776,16 @@ async function handleMobileLogin(request, env) {
       return errRes('AUTH_FAILED', AUTH_FAILED_MSG, 401, corsHeaders(origin));
     }
 
-    // 3) 密码校验：姓名拼音首字母(小写) + 手机号后4位；输入侧大小写不敏感
-    const expectedPwd = pinyinInitials(identity.name);
-    if (!expectedPwd) {
-      // 台账姓名含无法解析的字符 → 该账号 fail-closed 不可登录
-      loginRecordFail(ip);
-      await denyPwd();
-      return errRes('AUTH_FAILED', AUTH_FAILED_MSG, 401, corsHeaders(origin));
-    }
-    const pwdOk = await constantTimeEqual(password.toLowerCase(), expectedPwd + identity.phone.slice(-4));
+    /* 3) 密码校验（CF-WPS-61）：
+          有自定义哈希 → 校验哈希；没有 → 校验初始密码「姓名拼音首字母 + 手机尾号4位」。
+          姓名含无法解析的字符、且又没设过自定义密码 → 该账号 fail-closed 不可登录。 */
+    const { ok: pwdOk, usingDefault } = await checkPassword(identity, password);
     if (!pwdOk) {
       loginRecordFail(ip);
       return errRes('AUTH_FAILED', AUTH_FAILED_MSG, 401, corsHeaders(origin));
     }
+    // 仍在用初始密码 → 登录后必须第一时间改密（前端据此直接进改密页）
+    const mustChange = usingDefault;
 
     // 4) 签发 Worker 专用 Session JWT（最小身份快照；sub=手机号为稳定业务身份）
     const ttl = Math.min(Math.max(Number(env.MOBILE_SESSION_TTL_SECONDS || 7200), 300), 86400 * 7);
@@ -704,6 +799,8 @@ async function handleMobileLogin(request, env) {
       grid_level: identity.gridLevel,
       role,
       superior: identity.superior,
+      // CF-WPS-61：pwd = 0 表示仍在用初始密码（关键写操作会被服务端拒），1 = 已改密
+      pwd: mustChange ? 0 : 1,
       iat: nowSec, exp: nowSec + ttl,
       jti: crypto.randomUUID(),
     }, env.WORKER_SESSION_SECRET);
@@ -711,6 +808,7 @@ async function handleMobileLogin(request, env) {
     return jsonRes({
       success: true, code: 'OK',
       tokenType: 'Bearer', token, expiresIn: ttl,
+      must_change_password: mustChange,
       employee: {
         employee_code: identity.phone,
         name: identity.name,
@@ -735,6 +833,8 @@ async function handleMobileMe(request, env) {
   if (!payload) return errRes('UNAUTHORIZED', '未认证或登录态失效', 401, corsHeaders(origin));
   return jsonRes({
     success: true, code: 'OK',
+    // CF-WPS-61：前端 boot 据此决定是否强制进改密页（刷新/重开也不会绕过）
+    must_change_password: payload.pwd === 0,
     employee: {
       employee_code: payload.sub,
       name: payload.name || '',
@@ -744,6 +844,103 @@ async function handleMobileMe(request, env) {
       role: payload.role || '',
       superior: payload.superior || '',
     },
+  }, 200, corsHeaders(origin));
+}
+
+/* ---- CF-WPS-61：确保身份表有「密码哈希」列（type=1 文本，自动建，业务方无需手动加）----
+   与 ensureWxField 同一套路：只建一次并缓存结果；建列失败（无编辑权限）不抛错，
+   由改密接口在写入失败时给明确文案。 */
+let pwdFieldReady = null;
+async function ensurePwdField(env, fileId, sheetId) {
+  if (pwdFieldReady) return pwdFieldReady;
+  const adapter = getAdapter(env);
+  try {
+    const existing = new Set((await adapter.listFields(env, fileId, sheetId)).map((f) => f.fieldName));
+    if (!existing.has(PWD_HASH_FIELD)) {
+      try { await adapter.ensureField(env, fileId, sheetId, PWD_HASH_FIELD, 1); }
+      catch (e) { console.warn('[pwd] ensureField failed: ' + (e && e.fsMsg)); }
+    }
+    pwdFieldReady = { ok: true };
+  } catch (e) {
+    console.warn('[pwd] listFields failed: ' + (e && e.message));
+    pwdFieldReady = { ok: false };
+  }
+  return pwdFieldReady;
+}
+
+// ---- POST /api/mobile/auth/password（CF-WPS-61：改密码）----
+// 首次登录强制改密的落点。改完**重新签发会话**（pwd=1），前端换成新 token 即可立刻解锁。
+async function handlePasswordChange(request, env) {
+  const origin = corsOrigin(request, env);
+  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
+  if (request.method !== 'POST') return errRes('METHOD_NOT_ALLOWED', '不支持的请求方法', 405, corsHeaders(origin));
+  if (!env.WORKER_SESSION_SECRET) return errRes('SESSION_NOT_CONFIGURED', '会话密钥未配置', 503, corsHeaders(origin));
+  const payload = await verifyWorkerSession(bearerToken(request), env.WORKER_SESSION_SECRET);
+  if (!payload) return errRes('UNAUTHORIZED', '未认证或登录态失效', 401, corsHeaders(origin));
+
+  let body;
+  try { body = await request.json(); } catch { return errRes('BAD_JSON', '请求体解析失败', 400, corsHeaders(origin)); }
+  const oldPwd = String((body && body.old_password) || '');
+  const newPwd = String((body && body.new_password) || '');
+  const confirmPwd = String((body && body.confirm_password) || '');
+  if (!oldPwd || !newPwd) return errRes('BAD_REQUEST', '请填写原密码和新密码', 400, corsHeaders(origin));
+  if (newPwd !== confirmPwd) return errRes('PASSWORD_MISMATCH', '两次输入的新密码不一致', 400, corsHeaders(origin));
+  if (new TextEncoder().encode(newPwd).length > PWD_MAX_LEN) {
+    return errRes('BAD_REQUEST', '请求格式不正确', 400, corsHeaders(origin));
+  }
+
+  const adapter = getAdapter(env);
+  const cfg = await storageConfig(env);
+  let recs;
+  try { recs = await adapter.scanRecords(env, cfg.fileId, cfg.ledgerSheetId); }
+  catch { return errRes('UPSTREAM_ERROR', '身份信息暂不可用，请稍后再试', 502, corsHeaders(origin)); }
+  const me = String(payload.sub || '').replace(/\D/g, '');
+  const hits = recs.map(mapLedgerRecord).filter((r) => r.name && r.phone === me);
+  if (hits.length !== 1) return errRes('NOT_FOUND', '身份表中未找到你的账号', 404, corsHeaders(origin));
+  const identity = hits[0];
+
+  // ① 原密码必须对 —— 防止「拿到会话就能改密码」（会话可能被借手机拿到）
+  const { ok: oldOk } = await checkPassword(identity, oldPwd);
+  if (!oldOk) return errRes('OLD_PASSWORD_WRONG', '原密码不正确', 400, corsHeaders(origin));
+
+  // ② 新密码强度（不能太短 / 不能与初始密码相同 / 不能是手机号尾号）
+  const why = weakPasswordReason(newPwd, identity);
+  if (why) return errRes('WEAK_PASSWORD', why, 400, corsHeaders(origin));
+
+  // ③ 建列（幂等，只建一次）
+  await ensurePwdField(env, cfg.fileId, cfg.ledgerSheetId);
+
+  // ④ 写入 PBKDF2 哈希
+  const hash = await hashPassword(newPwd, pwdIter(env));
+  try {
+    await adapter.updateRecord(env, cfg.fileId, cfg.ledgerSheetId, identity.recordId, { [PWD_HASH_FIELD]: hash });
+    invalidateIdentity(cfg.fileId, cfg.ledgerSheetId);   // 否则 60s 内登录仍读到旧哈希
+  } catch {
+    return errRes('UPSTREAM_ERROR', '密码保存失败，请稍后重试（身份表可能未开通编辑权限）', 502, corsHeaders(origin));
+  }
+
+  // ⑤ 重新签发会话：pwd=1，解锁被拦截的写操作
+  const ttl = Math.min(Math.max(Number(env.MOBILE_SESSION_TTL_SECONDS || 7200), 300), 86400 * 7);
+  const nowSec = Math.floor(Date.now() / 1000);
+  const token = await signJwtHs256({
+    iss: SESSION_ISS, aud: SESSION_AUD,
+    sub: identity.phone,
+    name: identity.name,
+    department: identity.department,
+    position: identity.position,
+    grid_level: identity.gridLevel,
+    role: payload.role,
+    superior: identity.superior,
+    pwd: 1,
+    iat: nowSec, exp: nowSec + ttl,
+    jti: crypto.randomUUID(),
+  }, env.WORKER_SESSION_SECRET);
+
+  return jsonRes({
+    success: true, code: 'OK',
+    tokenType: 'Bearer', token, expiresIn: ttl,
+    must_change_password: false,
+    message: '密码已修改，请牢记新密码',
   }, 200, corsHeaders(origin));
 }
 
@@ -3051,16 +3248,38 @@ async function handleWxBind(request, env) {
   return jsonRes({ success: true, code: 'OK', bound: true, uid }, 200, corsHeaders(origin));
 }
 
+/* CF-WPS-61：仍在用初始密码 → 关键写操作一律拒绝。
+   这是「前端强制改密」的服务端兜底 —— 防止有人绕过界面直接调接口写数据。
+   读接口（组织/花名册/台账/统计）不拦，否则用户连改密页都进不去。
+   OPTIONS 预检必须放行，否则浏览器 CORS 预检失败。 */
+async function guardPasswordChanged(request, env) {
+  const origin = corsOrigin(request, env);
+  if (!env.WORKER_SESSION_SECRET) return errRes('SESSION_NOT_CONFIGURED', '会话密钥未配置', 503, corsHeaders(origin));
+  const payload = await verifyWorkerSession(bearerToken(request), env.WORKER_SESSION_SECRET);
+  if (!payload) return errRes('UNAUTHORIZED', '未认证或登录态失效', 401, corsHeaders(origin));
+  if (payload.pwd === 0) {
+    return errRes('PASSWORD_CHANGE_REQUIRED', '首次登录后必须先修改密码才能使用该功能', 403, corsHeaders(origin));
+  }
+  return null;
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const p = url.pathname;
+
+    if (request.method !== 'OPTIONS' && PWD_GUARDED_ROUTES.has(p)) {
+      const g = await guardPasswordChanged(request, env);
+      if (g) return g;
+    }
 
     if (p === '/wps/records/create') return handleRecordCreate(request, env);
     if (p === '/api/mobile/upload') return handleUploadImage(request, env);
     // CF-WPS-11：移动端身份登录（最小闭环）
     if (p === '/api/mobile/auth/login') return handleMobileLogin(request, env);
     if (p === '/api/mobile/auth/logout') return handleMobileLogout(request, env);
+    // CF-WPS-61：改密码（首次登录强制走这一步）
+    if (p === '/api/mobile/auth/password') return handlePasswordChange(request, env);
     if (p === '/api/mobile/me') return handleMobileMe(request, env);
     // CF-WPS-19：选人数据链（组织关系 + 真实花名册）
     if (p === '/api/mobile/org/subordinates') return handleOrgSubordinates(request, env);
@@ -3137,6 +3356,16 @@ export {
   assigneeIsCompanyRole,
   // CF-WPS-60（派发目标列表排除环卫/市政园林作业中心；离线测试用）
   NON_DISPATCH_UNITS,
+  // CF-WPS-61（密码保护：首次登录强制改密）
+  handlePasswordChange,
+  guardPasswordChanged,
+  defaultPassword,
+  hashPassword,
+  verifyStoredPassword,
+  weakPasswordReason,
+  checkPassword,
+  PWD_HASH_FIELD,
+  PWD_GUARDED_ROUTES,
   TOWN_ANCHOR_RE,
   UNIT_ANCHOR_RE,
   handlePatrolMeta,

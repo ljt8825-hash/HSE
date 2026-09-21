@@ -7,7 +7,7 @@
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-09-20.64">
+<meta name="hse-build" content="2026-09-21.65">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -218,6 +218,14 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
 .sd-seg button.on{color:#fff;border-color:transparent}
 .sd-seg button.on.warn{background:var(--warn);box-shadow:0 6px 16px -2px rgba(217,119,6,.25)}
 .sd-seg button.on.ok{background:var(--success);box-shadow:0 6px 16px -2px rgba(22,163,74,.25)}
+
+/* CF-WPS-61：改密表单（首次登录强制改密页） */
+.pwd-input{width:100%;height:var(--h-btn-row);padding:0 var(--pad-card);border-radius:var(--r-btn);
+  border:1px solid var(--line);background:var(--card);color:var(--t1);
+  font-size:var(--fs-body);font-family:inherit;outline:none;-webkit-appearance:none;box-sizing:border-box}
+.pwd-input:focus{border-color:var(--primary)}
+.pwd-row{display:flex;flex-direction:column;gap:6px;width:100%}
+.pwd-row .lab{font-size:var(--fs-sub);color:var(--t2)}
 .big-cta{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--cta-icon-gap);height:var(--h-cta);border-radius:var(--r-card);background:var(--primary);color:#fff;cursor:pointer;border:none;box-shadow:0 10px 24px -4px rgba(29,78,216,.3)}
 .big-cta:active{transform:scale(.985)}
 .big-cta:disabled{background:#B6C4E8;box-shadow:none}
@@ -540,6 +548,41 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
       <div id="todo-list" style="font-size:var(--fs-body);color:var(--t2);line-height:1.9"></div>
     </div>
     <div style="flex:1"></div>
+  </div>
+</section>
+
+<!-- ============ CF-WPS-61：首次登录强制改密 ============ -->
+<section class="view" id="view-changepwd">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div style="width:40px"></div>
+    <div class="nav-title">修改密码</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <div class="card" style="border-left:3px solid var(--warn)">
+      <div style="font-size:var(--fs-title);font-weight:600">请先修改密码</div>
+      <div class="muted" style="margin-top:6px;line-height:1.7">
+        你现在用的是<b>初始密码</b>（姓名首字母 + 手机尾号 4 位），别人只要知道你的姓名和手机号就能算出来。
+        为了保护你的账号和巡查记录，请<b>改成只有你自己知道的密码</b>，改完即可正常使用。
+      </div>
+    </div>
+    <div class="btn-stack" style="margin-top:var(--gap)">
+      <div class="pwd-row">
+        <div class="lab">原密码</div>
+        <input class="pwd-input" id="pwd-old" type="password" autocomplete="current-password" placeholder="初始密码＝姓名首字母+手机尾号4位">
+      </div>
+      <div class="pwd-row">
+        <div class="lab">新密码</div>
+        <input class="pwd-input" id="pwd-new" type="password" autocomplete="new-password" placeholder="6~32 位，字母 / 数字 / 符号">
+      </div>
+      <div class="pwd-row">
+        <div class="lab">确认新密码</div>
+        <input class="pwd-input" id="pwd-new2" type="password" autocomplete="new-password" placeholder="再输入一次新密码">
+      </div>
+    </div>
+    <button class="btn-primary" id="btn-pwd-submit" style="margin-top:var(--gap)">确认修改</button>
+    <div class="muted" id="pwd-err" style="text-align:center;color:var(--danger);min-height:20px"></div>
+    <button class="btn-ghost btn-row" id="btn-pwd-logout" style="margin-top:var(--gap)">退出登录</button>
   </div>
 </section>
 
@@ -1014,8 +1057,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
      读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
    - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
    - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
-<script src="./config.js?v=2026-09-20.64"></script>
-<script src="./app.js?v=2026-09-20.64"></script>
+<script src="./config.js?v=2026-09-21.65"></script>
+<script src="./app.js?v=2026-09-21.65"></script>
 <script>
 /* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
 (function(){
@@ -1438,6 +1481,10 @@ let viewStack = [];      // 与历史条目一一对应的页内视图栈
 let navSuppress = false; // popstate 驱动的切换不重复入栈
 function showView(name){
   name = String(name || "").replace(/^view-/, "");   // 个别调用传了「view-」前缀（原实现会取错元素直接报错）
+  // CF-WPS-61：仍在用初始密码 → 任何「回首页」的动作都改去改密页。
+  // 必须拦在 showView 这一层：所有 `data-back="home"` 的返回箭头都走这里，
+  // 只拦 enterHome() 的话，点返回键就能绕过改密直接进首页（CDP C1 实测复现）。
+  if(name === "home" && mustChangePwd){ showChangePassword(); return; }
   if(navSuppress){ navSuppress = false; }
   else if(name !== viewStack[viewStack.length - 1]){
     if(viewStack.length >= 2 && viewStack[viewStack.length - 2] === name){
@@ -1553,6 +1600,10 @@ async function boot(){
   STORE_KEY = "hse_check_v1_" + session.id; // 记录按登录账号隔离
   loadDB();
   clearPickCache();
+  // CF-WPS-61：仍在用初始密码 → 强制先改密，改完才能进首页
+  // （放在 /me 之后、进首页之前：新登录 / 刷新 / 重开三条路都会经过这里）
+  mustChangePwd = !!r.body.must_change_password;
+  if(mustChangePwd){ showChangePassword(); return; }
   // 登录后立即后台预热：花名册 → 三违库 → 组织关系 → 作业中心（见 startPrefetch）。
   // **不 await** —— 预热只是加速，绝不能挡住进首页。原来这里只预热组织关系，
   // 且顺序上让 patrol/meta 抢在花名册前面，反而触发一次冷拉取。
@@ -1669,7 +1720,56 @@ function renderIdentity(){
     });
   }
 }
+/* ================= CF-WPS-61：首次登录强制改密 =================
+   初始密码 = 姓名首字母 + 手机尾号 4 位 —— 是**可推导**的弱密码，
+   知道姓名和手机号就能算出来。业务要求：第一次登录后**第一时间**改掉。
+   三层拦截，保证绕不过去：
+     ① boot 里 /me 返回 must_change_password → 直接进改密页（新登录/刷新/重开都拦）
+     ② enterHome() 开头再兜一次 —— 任何想绕回首页的路径都被拽回改密页
+     ③ 改密页清空页内历史并占用当前历史条目 → 按返回键 = 退出 H5，回不到首页
+   改完服务端重签会话（JWT pwd=1），前端换 token 后正常进首页。 */
+let mustChangePwd = false;
+function showChangePassword(){
+  clearBootWatchdog();   // 否则 15 秒后启动看门狗会在改密页上弹出「重试」
+  // 清空页内历史 + 占用当前历史条目：返回键/上一步直接退出 H5，不给「返回绕过」留口子
+  viewStack = ["changepwd"];
+  try{ history.replaceState({ h5view: "changepwd" }, "", location.href); }catch(e){}
+  renderView("changepwd");
+  const e = $("#pwd-err"); if(e) e.textContent = "";
+  ["#pwd-old","#pwd-new","#pwd-new2"].forEach(s => { const el = $(s); if(el) el.value = ""; });
+}
+async function submitChangePassword(){
+  const errEl = $("#pwd-err");
+  const oldPwd = ($("#pwd-old") || {}).value || "";
+  const newPwd = ($("#pwd-new") || {}).value || "";
+  const newPwd2 = ($("#pwd-new2") || {}).value || "";
+  const btn = $("#btn-pwd-submit");
+  errEl.textContent = "";
+  if(!oldPwd || !newPwd){ errEl.textContent = "请填写原密码和新密码"; return; }
+  if(newPwd !== newPwd2){ errEl.textContent = "两次输入的新密码不一致"; return; }
+  if(newPwd.length < 6){ errEl.textContent = "新密码至少 6 位"; return; }
+  btn.disabled = true; btn.textContent = "提交中…";
+  try{
+    const r = await mobileApi("/api/mobile/auth/password",
+      { old_password: oldPwd, new_password: newPwd, confirm_password: newPwd2 }, "POST");
+    if(r.status === 200 && r.body && r.body.success){
+      setSession(r.body.token, r.body.expiresIn);   // 换成 pwd=1 的新会话，解锁写操作
+      mustChangePwd = false;
+      // 本机「记住我」存的是初始密码，必须清掉，否则下次自动登录仍用老密码
+      try{ clearLoginCreds(); }catch(e){}
+      flashMsg("密码已修改，请牢记新密码");
+      renderIdentity();
+      enterHome();
+      return;
+    }
+    errEl.textContent = (r.body && r.body.message) || ("修改失败（HTTP " + r.status + "）");
+  }catch{ errEl.textContent = "网络异常，请稍后再试"; }
+  finally{ btn.disabled = false; btn.textContent = "确认修改"; }
+}
+
 function enterHome(){
+  // CF-WPS-61：仍在用初始密码 → 任何想进首页的路径都被拽回改密页
+  if(mustChangePwd){ showChangePassword(); return; }
   clearBootWatchdog();
   renderIdentity();
   renderGPSBar();      // 后台定位结果（可能已回填 / 仍在重试）
@@ -3687,6 +3787,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // 返回按钮（data-back）；回到首页时底部导航高亮同步回「首页」
   $$("[data-back]").forEach(el => el.onclick = () => showView(el.dataset.back));
+
+  // CF-WPS-61：改密页（首次登录强制）
+  $("#btn-pwd-submit").onclick = submitChangePassword;
+  $("#btn-pwd-logout").onclick = () => { clearSession(); clearLoginCreds(); redirectToLogin(); };
 
   // 拍照
   $("#btn-capture").onclick = () => $("#file-camera").click();
