@@ -7,7 +7,7 @@
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-09-21.67">
+<meta name="hse-build" content="2026-09-21.68">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -409,8 +409,6 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
 .login-input label{font-size:var(--fs-body);font-weight:500;color:var(--t2)}
 .login-input input{height:var(--h-input);border-radius:var(--r-card);border:1px solid var(--line);background:var(--card);padding:0 18px;font-size:var(--fs-title);font-family:inherit;outline:none}
 .login-input input:focus{border-color:var(--primary)}
-.demo-chips{display:flex;gap:8px;flex-wrap:wrap}
-.demo-chip{padding:8px 12px;border-radius:var(--r-pill);background:var(--primary-soft);color:var(--primary);font-size:var(--fs-sub);font-weight:600;border:none;cursor:pointer;font-family:inherit}
 .login-err{color:var(--danger);font-size:var(--fs-body);min-height:20px}
 /* 分段控件：外框圆角 = 内项圆角 + 内边距（视觉同心），故用 calc 而非硬编码 */
 .seg{display:flex;height:var(--h-btn-sm);padding:4px;gap:4px;border-radius:var(--r-pill);background:#E8EAED}
@@ -1038,8 +1036,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
      读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
    - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
    - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
-<script src="./config.js?v=2026-09-21.67"></script>
-<script src="./app.js?v=2026-09-21.67"></script>
+<script src="./config.js?v=2026-09-21.68"></script>
+<script src="./app.js?v=2026-09-21.68"></script>
 <script>
 /* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
 (function(){
