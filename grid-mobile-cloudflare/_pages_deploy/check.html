@@ -7,7 +7,7 @@
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-09-21.65">
+<meta name="hse-build" content="2026-09-21.66">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -987,25 +987,6 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
       </div>
       <div style="font-size:var(--fs-sub);color:var(--t3);margin-top:2px" id="add-home-hint">点桌面图标直接进入，下次打开自动登录</div>
     </div>
-    <!-- CF-WPS-41：微信提醒（WxPusher）。
-         未绑定 → 引导关注 + 填 UID；已绑定 → 显示开启状态 + 可关闭。
-         绑定后，上级指派你整改时会收到一条微信（服务端已接 wxSend）。 -->
-    <div class="card" id="wx-card">
-      <div style="display:flex;align-items:center;justify-content:space-between">
-        <div style="font-size:var(--fs-title);font-weight:600">微信提醒</div>
-        <div class="town-badge warn" id="wx-state">未开启</div>
-      </div>
-      <div style="font-size:var(--fs-sub);color:var(--t3);margin-top:2px" id="wx-hint">开启后，上级指派你整改时会收到微信通知</div>
-      <div id="wx-unbound" style="margin-top:10px">
-        <a id="wx-follow" href="#" target="_blank" rel="noopener" class="btn-primary" style="display:flex;justify-content:center;text-decoration:none">① 点此关注推送应用</a>
-        <div style="font-size:var(--fs-sub);color:var(--t3);margin-top:8px;line-height:1.6">关注后在微信里进「WxPusher」公众号 → 菜单「我的」→「我的UID」，复制后填到下面。</div>
-        <input id="wx-uid" type="text" inputmode="text" autocomplete="off" placeholder="粘贴你的 UID（UID_ 开头）" style="width:100%;box-sizing:border-box;height:44px;margin-top:8px;padding:0 12px;border:1px solid var(--line);border-radius:var(--r-card);font-size:var(--fs-body);font-family:inherit;background:var(--card);color:var(--t1)">
-        <button class="btn-primary" id="wx-bind" style="margin-top:8px;width:100%">② 绑定并开启</button>
-      </div>
-      <div id="wx-bound" style="margin-top:10px;display:none">
-        <button class="btn-ghost" id="wx-unbind" style="width:100%">关闭微信提醒</button>
-      </div>
-    </div>
     <div class="card">
       <div class="info-line" id="me-info"></div>
     </div>
@@ -1057,8 +1038,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
      读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
    - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
    - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
-<script src="./config.js?v=2026-09-21.65"></script>
-<script src="./app.js?v=2026-09-21.65"></script>
+<script src="./config.js?v=2026-09-21.66"></script>
+<script src="./app.js?v=2026-09-21.66"></script>
 <script>
 /* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
 (function(){
@@ -4067,60 +4048,9 @@ function openEntry(go){
     $("#me-meta").innerHTML = "网格长等级　" + esc(session.grid) + "<br>所属部门　" + esc(session.dept) + "<br>所属班组　" + esc(session.team);
     $("#me-info").innerHTML = "职位：" + esc(session.roleTag) + "<br>直接上级：" + esc(session.superior || "—") + "<br>手机：" + esc(session.phone ? maskTel(session.phone) : "—");
     showView("me");
-    wireWxCard(); refreshWxCard();   // CF-WPS-41：进「我的」时刷新微信提醒状态
   }
 }
 
-/* ===== CF-WPS-41：微信提醒（WxPusher 绑定） =====
-   绑定后才会在「被指派整改」时收到微信。UID 存在服务端身份表，换手机登录依然有效。 */
-function wxMsg(text, isErr){
-  const h = $("#wx-hint"); if(!h) return;
-  h.textContent = text;
-  h.style.color = isErr ? "var(--danger)" : "var(--t3)";
-}
-async function refreshWxCard(){
-  const card = $("#wx-card"); if(!card) return;
-  const st = $("#wx-state"), un = $("#wx-unbound"), bd = $("#wx-bound");
-  const r = await mobileApi("/api/mobile/wx/status");
-  if(!r.status || !r.body || r.body.enabled === false){
-    st.textContent = "未开通"; st.className = "town-badge warn";
-    wxMsg("管理员尚未开通微信推送通道，暂无法开启");
-    un.style.display = "none"; bd.style.display = "none";
-    return;
-  }
-  const bound = !!r.body.bound;
-  st.textContent = bound ? "已开启" : "未开启";
-  st.className = "town-badge" + (bound ? "" : " warn");
-  if(bound) wxMsg("上级指派你整改时，会收到一条微信");
-  un.style.display = bound ? "none" : "";
-  bd.style.display = bound ? "" : "none";
-  const f = $("#wx-follow");
-  if(f && r.body.follow_url) f.href = r.body.follow_url;
-}
-function wireWxCard(){
-  const b = $("#wx-bind");
-  if(b && !b._wired){ b._wired = true;
-    b.onclick = async () => {
-      const uid = String(($("#wx-uid") || {}).value || "").trim();
-      if(!uid){ wxMsg("请先粘贴你的 UID（UID_ 开头）", true); return; }
-      b.disabled = true; b.textContent = "绑定中…";
-      const r = await mobileApi("/api/mobile/wx/bind", { uid });
-      b.disabled = false; b.textContent = "② 绑定并开启";
-      if(r.status === 200 && r.body && r.body.bound){ wxMsg("微信提醒已开启"); await refreshWxCard(); }
-      else wxMsg((r.body && r.body.message) || "绑定失败，请确认已关注并填对 UID", true);
-    };
-  }
-  const u = $("#wx-unbind");
-  if(u && !u._wired){ u._wired = true;
-    u.onclick = async () => {
-      u.disabled = true;
-      const r = await mobileApi("/api/mobile/wx/bind", { unbind: true });
-      u.disabled = false;
-      if(r.status === 200){ wxMsg("已关闭微信提醒"); await refreshWxCard(); }
-      else wxMsg("关闭失败，请稍后再试", true);
-    };
-  }
-}
 // 下属检查分段切换
 document.addEventListener("click", e => {
   const seg = e.target.closest(".seg-item");
