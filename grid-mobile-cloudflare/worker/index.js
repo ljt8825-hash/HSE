@@ -896,7 +896,12 @@ async function handleMobileMe(request, env) {
   return jsonRes({
     success: true, code: 'OK',
     // CF-WPS-61：前端 boot 据此决定是否强制进改密页（刷新/重开也不会绕过）
-    must_change_password: payload.pwd === 0,
+    // ⚠️ 必须用 `!== 1` 而不是 `=== 0`：
+    //    部署前签发的**老会话没有 pwd claim**（undefined），用 `=== 0` 会判成 false
+    //    → 那些在改造前就登录、会话还没过期的账号**永远不会被强制改密**，
+    //      要等 2 小时会话自然过期重登才生效。
+    //    改成「不是明确的已改密(1) 就算未改密」后，部署即对所有人生效。
+    must_change_password: payload.pwd !== 1,
     employee: {
       employee_code: payload.sub,
       name: payload.name || '',
