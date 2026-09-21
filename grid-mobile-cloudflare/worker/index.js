@@ -339,6 +339,8 @@ const FEISHU_FIELD_WHITELIST = new Set([
   'employee_code', '测试编号', '三违行为描述', '照片状态', '测试状态',
   // 重映射源键（必须先过白名单，才能被下面的 if 改写成「日期」/「提交时间」）
   '巡查时间', '创建时间',
+  // ── CF-WPS-62 巡查身份三件套（从「备注」拆出的独立列）────────────────────
+  '巡查人ID', '幂等键',
   // ── CF-WPS-36 整改待办（跨账号指派）新增列 ──────────────────────────────
   // 指派关系必须落在**服务端**才能被被指派人读到（此前只写指派人本机 localStorage，
   // 导致「转给责任乡镇」后对方永远收不到，见 docs/三级账号权限与流程测试报告.md）。
@@ -363,10 +365,50 @@ const TODO_FIELDS = {
   doneAt: '整改完成时间',
   note: '整改说明',
 };
+
+/* CF-WPS-62：巡查身份三件套 —— 从「备注」里拆出来，落成主台账的**独立文本列**。
+   ---------------------------------------------------------------------------
+   历史包袱：主台账「日期」是 type=1001 创建时间**只读**列，写不进去，
+   于是把「巡查人手机号 / 巡查时间 / 幂等键」三样结构化信息压进唯一的自由文本列
+   「备注」（格式 `巡查人ID:<phone> · 巡查时间:<t> · req:<cid>`）。
+   代价：判定「这条是不是我上报的」「本月上报多少条」全靠正则解析备注 ——
+   脆弱、不可索引、飞书里做视图/筛选/仪表盘根本没法用。
+   现按业务要求拆成独立列。迁移期**双写 + 读时回退**（详见 patrolIdentity）：
+     · 新记录：独立列 + 备注都写
+     · 历史记录：只有备注 → 读时自动回退解析，行为不变
+     · 列不存在（建列失败）：只写备注，**绝不阻塞提交** */
+const PATROL_META_FIELDS = {
+  userId: '巡查人ID',      // 巡查人手机号（= employee_code）
+  time: '巡查时间',        // YYYY-MM-DD HH:mm
+  req: '幂等键',           // 客户端幂等键（防重复提交）
+};
 const TODO_STATUS = { pending: '待整改', done: '已完成' };
 
 // 幂等建列：表内缺哪列补哪列（同名已存在时飞书返回 duplicated，视为成功）。
 // 建列失败**不阻断业务**（降级：待办写入会失败但巡查提交照常），只记日志。
+/* CF-WPS-62：确保主台账有巡查身份三件套的独立列（type=1 文本，自动建）。
+   与 ensureTodoFields 同套路（只建一次并缓存），但**多返回一份实际存在的列名集合**：
+   调用方据此决定「写不写新列」—— 建列失败时只写备注，**绝不阻塞提交**。 */
+let patrolFieldsReady = null;
+async function ensurePatrolMetaFields(env, fileId, sheetId) {
+  if (patrolFieldsReady) return patrolFieldsReady;
+  const adapter = getAdapter(env);
+  try {
+    const existing = new Set((await adapter.listFields(env, fileId, sheetId)).map((f) => f.fieldName));
+    const missing = Object.values(PATROL_META_FIELDS).filter((n) => !existing.has(n));
+    for (const n of missing) {
+      try { await adapter.ensureField(env, fileId, sheetId, n, 1); existing.add(n); }
+      catch (e) { console.warn('[patrol-meta] ensureField failed: ' + n + ' ' + (e && e.fsMsg)); }
+    }
+    patrolFieldsReady = { ok: true, has: existing };
+  } catch (e) {
+    console.warn('[patrol-meta] listFields failed: ' + (e && e.message));
+    // 读不到列清单就当「三列都不存在」→ 调用方退回只写备注，历史行为完全不变
+    patrolFieldsReady = { ok: false, has: new Set() };
+  }
+  return patrolFieldsReady;
+}
+
 async function ensureTodoFields(env, fileId, sheetId) {
   if (todoFieldsReady) return todoFieldsReady;
   const adapter = getAdapter(env);
@@ -542,11 +584,31 @@ function parsePatrolNote(note) {
   return { employeeCode: mE ? mE[1] : '', inspectionTime: mT ? mT[1] : '', clientRequestId: mR ? mR[1] : '' };
 }
 
+/* CF-WPS-62：统一的「巡查身份」读取入口 —— **优先读独立列，读不到才回退解析备注**。
+   迁移期必然是新旧数据混存：
+     · 新记录：独立列 + 备注都写了
+     · 历史记录：只有备注
+   所以读取必须两边都能吃，否则要么老数据「凭空消失」，要么必须一次性回填完才能上线。
+   所有原来直接 parsePatrolNote(备注) 的地方都改成走这里。 */
+function patrolIdentity(fields) {
+  const f = fields || {};
+  const t = (k) => fieldText(f[k]).trim();
+  const n = parsePatrolNote(fieldText(f['备注']));
+  return {
+    employeeCode: t(PATROL_META_FIELDS.userId) || n.employeeCode,
+    inspectionTime: t(PATROL_META_FIELDS.time) || n.inspectionTime,
+    clientRequestId: t(PATROL_META_FIELDS.req) || n.clientRequestId,
+  };
+}
+
 function feishuTypedRecord(record) {
   const out = {};
   for (const [k, v] of Object.entries(record || {})) {
     if (!FEISHU_FIELD_WHITELIST.has(k)) continue; // 未知字段丢弃，防飞书自动补列
-    if (k === '巡查时间') { const ms = patrolTimeToMs(v); if (ms !== '') out['日期'] = ms; continue; }
+    // CF-WPS-62：「巡查时间」现在有独立文本列了 —— 除原样重映射到「日期」外，
+    // 同时写独立列。**调用方只在确认该列存在时才会传这个 key**（见 ensurePatrolMetaFields），
+    // 所以这里无需再判断，列不存在时根本不会走到这儿。
+    if (k === '巡查时间') { const ms = patrolTimeToMs(v); if (ms !== '') out['日期'] = ms; out[PATROL_META_FIELDS.time] = v; continue; }
     if (k === '创建时间') { const ms = patrolTimeToMs(v); if (ms !== '') out['提交时间'] = ms; continue; }
     if (k === '日期' || k === '提交时间') { const ms = patrolTimeToMs(v); if (ms !== '') out[k] = ms; continue; }
     out[k] = v;
@@ -2330,6 +2392,10 @@ async function handlePatrolSubmit(request, env) {
     // ⚠️ 列名必须是主台账**实测**列名（见 FEISHU_FIELD_WHITELIST 上方注释）：
     //    用旧列名会被飞书 1254045 FieldNameNotFound 拒掉，前端只看到 502「存储写入失败」。
     const isVio = values.isViolation === '是';
+    // CF-WPS-62：巡查身份三件套落成独立列。建列失败时 meta.has 为空 → 退回只写「备注」，
+    // 提交流程完全不受影响（不能因为多了三个列就把现场上报搞挂）。
+    const metaFields = await ensurePatrolMetaFields(env, cfg.fileId, target.sheetId);
+
     const record = {
       '检查人姓名': payload.name || '',                       // 提交人姓名（主台账权威）
       '网格等级': payload.grid_level || '',                    // 台账「网格长等级」
@@ -2340,9 +2406,13 @@ async function handlePatrolSubmit(request, env) {
       '年龄': isVio ? values.violationAge : '',                // 违章人档案 → 主台账「年龄」
       '车辆类型|保洁员': isVio ? values.violationJob : '',      // 违章人职位 → 主台账「车辆类型|保洁员」
       '描述': values.description,                              // 问题描述 / 巡查结果
-      // 主台账无「巡查人员ID」列、日期列只读 → 身份/时间/幂等键一并进「备注」
+      // 「备注」仍然写（历史数据与兜底都靠它，见 patrolIdentity 的回退逻辑）
       '备注': buildPatrolNote(employeeCode, values.inspectionTime, values.clientRequestId),
     };
+    // CF-WPS-62：独立列 —— 只有确认列存在才写，否则飞书会 1254045 FieldNameNotFound
+    if (metaFields.has.has(PATROL_META_FIELDS.userId)) record[PATROL_META_FIELDS.userId] = employeeCode;
+    if (metaFields.has.has(PATROL_META_FIELDS.time)) record[PATROL_META_FIELDS.time] = values.inspectionTime;
+    if (metaFields.has.has(PATROL_META_FIELDS.req)) record[PATROL_META_FIELDS.req] = String(values.clientRequestId || '');
 
     // 照片附件（飞书后端）：file_token 数组落入主台账附件列「违章照片」
     // （旧代码写「三违照片」——那是「表格视图」表的列名，主台账里没有，同样会 1254045）
@@ -2512,7 +2582,7 @@ function patrolRecordView(rec, full) {
   //   违章人员姓名 / 描述 / 备注 / 违章照片 / 整改后照片 …
   // 旧列名（巡查时间/网格/问题类型/问题描述/是否三违/涉及人员）在主台账里**不存在**，
   // 继续按旧名读只会得到一串空字符串 —— 台账页会显示成空白行。
-  const note = parsePatrolNote(fieldText(f['备注']));
+  const note = patrolIdentity(f);
   const behavior = fieldText(f['违章行为']);
   const isVio = !!behavior && behavior !== NO_VIOLATION_TEXT;
   const base = {
@@ -2562,7 +2632,7 @@ function patrolRecordView(rec, full) {
 // 「本人记录」判定：主台账没有 employee_code 列，只能靠「备注」里的 巡查人ID:<手机号>。
 // 姓名不参与判定（重名会串号），手机号才是唯一身份。
 function patrolIsMine(fields, sub) {
-  const note = parsePatrolNote(fieldText((fields || {})['备注']));
+  const note = patrolIdentity(fields);
   return note.employeeCode === String(sub);
 }
 
@@ -2581,7 +2651,7 @@ const deptScopeCache = new Map();   // 'DEPT|<姓名>' → { at, phones:Set }
 
 function patrolInScope(fields, view) {
   if (!view || view.scope === 'ALL') return true;
-  const code = parsePatrolNote(fieldText((fields || {})['备注'])).employeeCode;
+  const code = patrolIdentity(fields).employeeCode;
   return !!code && view.phones.has(String(code));
 }
 
@@ -2659,7 +2729,7 @@ async function handlePatrolRecords(request, env) {
   const wantMonth = /^\d{4}-\d{2}$/.test(monthRaw) ? monthRaw : '';
   const inWantMonth = (r) => {
     if (!wantMonth) return true;
-    const t = parsePatrolNote(fieldText(r.fields['备注'])).inspectionTime || msToPatrolTime(r.fields['日期']);
+    const t = patrolIdentity(r.fields).inspectionTime || msToPatrolTime(r.fields['日期']);
     return String(t).slice(0, 7) === wantMonth;
   };
 
@@ -2668,8 +2738,8 @@ async function handlePatrolRecords(request, env) {
     .filter(inWantMonth)
     .sort((a, b) => {
       // 排序键：备注里的巡查时间 → 退到 日期（创建时间，毫秒）
-      const ta = parsePatrolNote(fieldText(a.fields['备注'])).inspectionTime || msToPatrolTime(a.fields['日期']);
-      const tb = parsePatrolNote(fieldText(b.fields['备注'])).inspectionTime || msToPatrolTime(b.fields['日期']);
+      const ta = patrolIdentity(a.fields).inspectionTime || msToPatrolTime(a.fields['日期']);
+      const tb = patrolIdentity(b.fields).inspectionTime || msToPatrolTime(b.fields['日期']);
       return String(tb).localeCompare(String(ta));
     });
   const total = visible.length;
@@ -3088,8 +3158,8 @@ async function handleSummary(request, env) {
   const inMonth = (v) => String(v || '').slice(0, 7) === thisYm;
   const f = (r, k) => fieldText((r.fields || {})[k]);
   const isDone = (r) => f(r, TODO_FIELDS.status) === TODO_STATUS.done;
-  const patrolCode = (r) => parsePatrolNote(f(r, '备注')).employeeCode;
-  const patrolTime = (r) => parsePatrolNote(f(r, '备注')).inspectionTime || msToPatrolTime((r.fields || {})['日期']);
+  const patrolCode = (r) => patrolIdentity(r.fields).employeeCode;
+  const patrolTime = (r) => patrolIdentity(r.fields).inspectionTime || msToPatrolTime((r.fields || {})['日期']);
 
   const minePatrol = recs.filter((r) => !!me && patrolCode(r) === me);
   const mineDispatch = recs.filter((r) => !!me && f(r, TODO_FIELDS.assignerId) === me);
@@ -3419,5 +3489,8 @@ export {
   patrolIsMine,
   buildPatrolNote,
   parsePatrolNote,
+  patrolIdentity,
+  PATROL_META_FIELDS,
+  ensurePatrolMetaFields,
   NO_VIOLATION_TEXT,
 };
