@@ -7,7 +7,7 @@
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-09-21.66">
+<meta name="hse-build" content="2026-09-21.67">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -1038,8 +1038,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
      读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
    - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
    - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
-<script src="./config.js?v=2026-09-21.66"></script>
-<script src="./app.js?v=2026-09-21.66"></script>
+<script src="./config.js?v=2026-09-21.67"></script>
+<script src="./app.js?v=2026-09-21.67"></script>
 <script>
 /* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
 (function(){
@@ -3568,7 +3568,7 @@ function renderDetail(rec, from){
             btn.textContent = "✓ 已转派给 " + p.name;
             if(msg){
               msg.textContent = (r.body.notify === "no_uid")
-                ? "已转派（对方未开微信提醒，仅在 App 内可见）"
+                ? "已转派"
                 : (r.body.notify === "sent" ? "已转派，并已发微信通知对方" : "已转派");
               msg.style.color = "var(--success)";
             }
@@ -3640,7 +3640,7 @@ function renderDelegateBlock(rec){
         b.textContent = "✓ 已转派给 " + p.name;
         if(msg){
           msg.textContent = (r.body.notify === "no_uid")
-            ? "已转派（对方未开微信提醒，仅在 App 内可见）"
+            ? "已转派"
             : (r.body.notify === "sent" ? "已转派，并已发微信通知对方" : "已转派");
           msg.style.color = "var(--success)";
         }
