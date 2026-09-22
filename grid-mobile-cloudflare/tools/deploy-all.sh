@@ -22,7 +22,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 # ── 目标与期望值 ────────────────────────────────────────────────
 PAGES_URL="https://grid-mobile-cloudflare.pages.dev"   # 默认域名（有边缘缓存延迟）
-CUSTOM_URL="https://grid1ns.dpdns.org"                 # 现场实际入口（自定义域名，先查它）
+CUSTOM_URL="https://grid1ns.dpdns.org"                 # 现场实际入口（Pages 自定义域名）
 WORKER_URL="https://grid-mobile-cloudflare-worker.ljt8825.workers.dev"
 WRANGLER="$ROOT/worker/node_modules/.bin/wrangler"
 PAGES_PROJECT="grid-mobile-cloudflare"
