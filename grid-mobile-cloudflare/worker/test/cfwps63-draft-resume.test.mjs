@@ -6,6 +6,7 @@
  *   D 配额满：先腾空间，仍失败必须可见（不再静默吞掉）
  *   E 自动续传窗口 30 分钟 / 草稿 TTL 2 小时的边界
  *   F 历史栈：陈旧条目（上次页面加载遗留）绝不渲染；本次加载的条目正常回放
+ *   G 启动期续传接线：enterHome → loadDraft → resumeCheck（空草稿也续回拍照页 = D1 落点）
  * Run: node test/cfwps63-draft-resume.test.mjs
  */
 import fs from 'node:fs';
@@ -275,6 +276,62 @@ console.log('\n═══ F. 历史栈：陈旧条目防护 ═══');
     api.showView('home'); api.showView('photo');
     ck(ctx.history.replace.length === 1 && ctx.history.replace[0].nav === api.nav, 'F10 replaceState 带 nav', JSON.stringify(ctx.history.replace[0]));
     ck(ctx.history.push.length === 1 && ctx.history.push[0].nav === api.nav, 'F11 pushState 带 nav', JSON.stringify(ctx.history.push[0]));
+  }
+}
+
+console.log('\n═══ G. 启动期续传接线（enterHome → loadDraft → resumeCheck）═══');
+{
+  // 复刻 check.html 第 1790 / 1809-1810 行的落地逻辑：
+  //   const d0 = loadDraft();
+  //   if(d0 && !d0.parked && Date.now() - d0.at < DRAFT_AUTO_RESUME_MS) resumeCheck(d0.draft, d0.lastView);
+  // 这是「整页重载后从草稿续回原屏」的总开关；原 bug「第一张照片被弹回首页」的根因，
+  // 就是这条接线在「还没拍照」时没有可用的草稿可续。用离线方式跑，不依赖浏览器/网络。
+  const boot = (ls, seed) => {
+    if (seed) ls.setItem('hse_draft_v1', JSON.stringify(seed));
+    const { api, ctx } = buildDraftApi({ ls });
+    const enterHome = () => {
+      ctx.rendered.push('home');                          // enterHome 先落首页骨架
+      const d0 = api.loadDraft();
+      if (d0 && !d0.parked && Date.now() - d0.at < api.DRAFT_AUTO_RESUME_MS) {
+        api.resumeCheck(d0.draft, d0.lastView);           // 启动期续传接线（1790/1809）
+      }
+      return d0;
+    };
+    return { enterHome, api, ctx };
+  };
+  const now = Date.now();
+  const seedDraft = (over) => Object.assign({ at: now, draft: { scenePhoto: null }, lastView: 'photo', parked: false }, over);
+
+  // G1（D1 精确落点）：刚进拍照页、未拍照即被回收 → 重载后落拍照页
+  {
+    const { enterHome, ctx } = boot(makeLocalStorage(), seedDraft({ draft: { scenePhoto: null } }));
+    enterHome();
+    ck(ctx.rendered.join(',') === 'home,photo', 'G1 空草稿(lastView=photo) → 启动落拍照页（不是首页）', ctx.rendered.join(','));
+    ck(ctx.setPhotoCalls.length === 0, 'G1b 空草稿：未调用 setScenePhoto（不会写出 src="null"）', ctx.setPhotoCalls.length);
+  }
+  // G2：有照片、停在 classify → 落到 classify
+  {
+    const { enterHome, ctx } = boot(makeLocalStorage(), seedDraft({ draft: { scenePhoto: 'data:x' }, lastView: 'classify' }));
+    enterHome();
+    ck(ctx.rendered.join(',') === 'home,classify', 'G2 有照片 + classify → 落 classify', ctx.rendered.join(','));
+  }
+  // G3：parked 草稿 → 不续传，停首页（返回键仍有效）
+  {
+    const { enterHome, ctx } = boot(makeLocalStorage(), seedDraft({ parked: true }));
+    enterHome();
+    ck(ctx.rendered.join(',') === 'home', 'G3 parked 草稿 → 不续传，停首页', ctx.rendered.join(','));
+  }
+  // G4：草稿超 30 分钟窗口 → 不续传
+  {
+    const { enterHome, ctx } = boot(makeLocalStorage(), seedDraft({ at: now - 40 * 60 * 1000 }));
+    enterHome();
+    ck(ctx.rendered.join(',') === 'home', 'G4 草稿超 30 分钟 → 不续传', ctx.rendered.join(','));
+  }
+  // G5：无草稿 → 正常首次启动，停首页
+  {
+    const { enterHome, ctx } = boot(makeLocalStorage(), null);
+    enterHome();
+    ck(ctx.rendered.join(',') === 'home', 'G5 无草稿 → 停首页（正常启动）', ctx.rendered.join(','));
   }
 }
 
