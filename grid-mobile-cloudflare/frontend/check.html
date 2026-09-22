@@ -7,7 +7,7 @@
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-09-21.68">
+<meta name="hse-build" content="2026-09-23.69">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -46,7 +46,8 @@
       '</div>' +
       '<button id="hse-fatal-reload" style="width:100%;max-width:320px;padding:15px;border:none;border-radius:14px;' +
         'background:#1D4ED8;color:#fff;font-size:16px;font-weight:600">清空缓存并重新加载</button>' +
-      '<div style="margin-top:14px;font-size:12px;color:#9CA3AF">版本 2026-09-18.50</div>';
+      '<div style="margin-top:14px;font-size:12px;color:#9CA3AF">版本 ' +
+        ((document.querySelector('meta[name="hse-build"]') || {}).content || '未知') + '</div>';
     (document.body || document.documentElement).appendChild(box);
     document.getElementById('hse-fatal-reload').onclick = function(){
       var btn = this; btn.disabled = true; btn.textContent = '正在清理…';
@@ -1036,8 +1037,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
      读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
    - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
    - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
-<script src="./config.js?v=2026-09-21.68"></script>
-<script src="./app.js?v=2026-09-21.68"></script>
+<script src="./config.js?v=2026-09-23.69"></script>
+<script src="./app.js?v=2026-09-23.69"></script>
 <script>
 /* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
 (function(){
@@ -1434,6 +1435,8 @@ const selPersonMode = u => u.role === "经理" ? "two-step" : (u.role === "管�
 
 // 底部导航常驻的四个主屏（与微信一致：二级页面不显示，返回主屏即恢复）
 const TAB_VIEWS = ["home", "dispatch", "my-checks", "my-rectify", "me"];
+// CF-WPS-63：当前正在显示的视图名。草稿续传要靠它记住「用户离开时停在哪一步」。
+let currentView = "boot";
 function syncTabbar(view){
   const on = TAB_VIEWS.includes(view);
   $("#tabbar-wrap").classList.toggle("hidden", !on);
@@ -1447,6 +1450,7 @@ function renderView(name){   // 原 showView：只负责切换 DOM（CF-WPS-27 �
   if(page) page.scrollTop = 0;   // 每屏独立滚动容器，切换时回到顶部
   window.scrollTo(0,0);
   syncTabbar(name);
+  currentView = name;   // CF-WPS-63：唯一记录「当前在第几屏」的地方，供草稿续传使用
 }
 
 /* ================= CF-WPS-27：系统返回键 = 页内返回 =================
@@ -1458,12 +1462,23 @@ function renderView(name){   // 原 showView：只负责切换 DOM（CF-WPS-27 �
    整条页内历史收拢回首页起点，避免返回键重走已完成的检查流程。 */
 let viewStack = [];      // 与历史条目一一对应的页内视图栈
 let navSuppress = false; // popstate 驱动的切换不重复入栈
+/* CF-WPS-63：本次页面加载的唯一标识，写进每一条 history state。
+   为什么要它 —— 低端安卓机调起相机时页面会被系统回收，点「确定」返回时页面已**整页重载**：
+   浏览器历史里重载前的条目**一条没少**，但它们的 state 属于「上一次加载」。
+   旧实现只认 state.h5view，于是按返回键会把这些陈旧条目当成有效目标渲染出来
+   （表现为「空照片框的拍照页 / 未选中的分类页」—— 用户反馈的「异常跳转」）。
+   带上 nav 后，popstate 一眼就能分辨「本次加载的条目」与「陈旧条目」，后者一律不渲染。 */
+const H5_NAV_ID = Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
 function showView(name){
   name = String(name || "").replace(/^view-/, "");   // 个别调用传了「view-」前缀（原实现会取错元素直接报错）
   // CF-WPS-61：仍在用初始密码 → 任何「回首页」的动作都改去改密页。
   // 必须拦在 showView 这一层：所有 `data-back="home"` 的返回箭头都走这里，
   // 只拦 enterHome() 的话，点返回键就能绕过改密直接进首页（CDP C1 实测复现）。
   if(name === "home" && mustChangePwd){ showChangePassword(); return; }
+  // CF-WPS-63：用户**主动**离开检查流程回首页 → 把草稿标记为「停靠」，
+  // 避免放宽自动续传窗口后，一次页面重载又把已经退出的用户硬拽回拍照页。
+  // 放在 showView 入口，所有「回首页」路径（返回箭头 / 完成页按钮 / 底部导航）都覆盖到。
+  if(name === "home" && isCheckFlowView(currentView)) parkDraft();
   if(navSuppress){ navSuppress = false; }
   else if(name !== viewStack[viewStack.length - 1]){
     if(viewStack.length >= 2 && viewStack[viewStack.length - 2] === name){
@@ -1471,31 +1486,57 @@ function showView(name){
       return;
     }
     if(name === "home" && viewStack.length > 1 && viewStack[0] === "home"){
-      history.go(1 - viewStack.length);  // 回首页（检查/整改完成后）：收拢整条页内历史
+      const steps = viewStack.length;
+      history.go(1 - steps);  // 回首页（检查/整改完成后）：收拢整条页内历史
+      // 兜底：history.go 越界或被老 WebView 忽略时**不会触发 popstate**，界面会「点了没反应」。
+      // 300ms 后若仍没切到首页就直接渲染，保证点击一定有效果（此时历史栈不再同步，仅影响返回键）。
+      setTimeout(() => {
+        const hv = document.getElementById("view-home");
+        if(hv && !hv.classList.contains("active")){ viewStack = ["home"]; enterHome(); }
+      }, 300);
       return;
     }
     try{
       if(viewStack.length === 0){
         viewStack = [name];    // 首个落地视图：占用当前历史条目，不新增
-        history.replaceState({ h5view: name }, "", location.href);
+        history.replaceState({ h5view: name, nav: H5_NAV_ID }, "", location.href);
       } else {
         viewStack.push(name);
-        history.pushState({ h5view: name }, "", location.href);
+        history.pushState({ h5view: name, nav: H5_NAV_ID }, "", location.href);
       }
     }catch(e){ viewStack = [name]; } // 个别老 WebView 禁用 history API：退化为无返回栈
   }
   renderView(name);
 }
+let staleBackGuard = 0;   // CF-WPS-63：连续遇到陈旧条目的次数上限，防极端情况下无限后退
 window.addEventListener("popstate", (ev) => {
-  const v = ev.state && ev.state.h5view;
+  const st = ev.state || null;
+  const v = st && st.h5view;
   if(!v) return;               // 已退到页内历史边界：交还浏览器/微信处理（= 退出 H5）
+  /* CF-WPS-63：陈旧条目（上一次页面加载留下的）**绝不渲染**。
+     渲染它就会出现「空照片框的拍照页」「未选中的分类页」—— 用户看到的「异常跳转」。
+     · 已在首页 → 继续把这一批陈旧条目交还浏览器（= 退出 H5），别把用户困在应用里；
+     · 不在首页 → 一律回首页，保证不会停在半成品页面上。 */
+  if(st.nav !== H5_NAV_ID){
+    if(viewStack[viewStack.length - 1] === "home" && staleBackGuard < 8){
+      staleBackGuard++;
+      try{ history.back(); }catch(e){}
+      return;
+    }
+    staleBackGuard = 0;
+    navSuppress = true;
+    viewStack = ["home"];
+    enterHome();
+    return;
+  }
+  staleBackGuard = 0;
   while(viewStack.length && viewStack[viewStack.length - 1] !== v) viewStack.pop();
   if(!viewStack.length) viewStack = [v];
   navSuppress = true;
   // 系统返回键 = 页内返回箭头：在级联页内先按层级回退（人员→班组→乡镇），回不到就交还历史栈
   if(v !== "co-search" && viewStack[viewStack.length - 1] === "co-search" && !coBackStep()){
     viewStack.push("co-search");
-    try{ history.pushState({ h5view: "co-search" }, "", location.href); }catch(e){}
+    try{ history.pushState({ h5view: "co-search", nav: H5_NAV_ID }, "", location.href); }catch(e){}
     renderView("co-search");
     return;
   }
@@ -1712,7 +1753,7 @@ function showChangePassword(){
   clearBootWatchdog();   // 否则 15 秒后启动看门狗会在改密页上弹出「重试」
   // 清空页内历史 + 占用当前历史条目：返回键/上一步直接退出 H5，不给「返回绕过」留口子
   viewStack = ["changepwd"];
-  try{ history.replaceState({ h5view: "changepwd" }, "", location.href); }catch(e){}
+  try{ history.replaceState({ h5view: "changepwd", nav: H5_NAV_ID }, "", location.href); }catch(e){}
   renderView("changepwd");
   const e = $("#pwd-err"); if(e) e.textContent = "";
   ["#pwd-old","#pwd-new","#pwd-new2"].forEach(s => { const el = $(s); if(el) el.value = ""; });
@@ -1759,14 +1800,14 @@ function enterHome(){
   startPrefetch();     // 幂等；boot 里已经发过，这里兜底防止从别处进首页时漏掉
   migrateTransferIds(); // CF-WPS-41：历史转派回填（只跑一次，见函数内注释）
 
-  // CF-WPS-42：只在**本次页面加载的第一次进首页**时判断自动续传。
-  // 若草稿是 5 分钟内刚存的，说明用户正拍到一半被系统打断（相机回收页面）→ 直接送回拍照页；
-  // 之后的 enterHome（含用户主动按返回键回到首页）只显示卡片，绝不强行跳回去
-  // —— 否则返回键就失效了。
+  // CF-WPS-42 / CF-WPS-63：只在**本次页面加载的第一次进首页**时判断自动续传。
+  // 判定条件：草稿未过期、未被「停靠」（= 用户没主动退出流程）、存盘时间在自动续传窗口内。
+  // 命中 → 直接送回用户离开时那一屏；之后的 enterHome（含主动按返回键回首页）只显示卡片，
+  // 绝不强行跳回去 —— 否则返回键就失效了。
   if(!autoResumeChecked){
     autoResumeChecked = true;
     const d0 = loadDraft();
-    if(d0 && d0.draft.scenePhoto && Date.now() - d0.at < 5 * 60 * 1000) resumeCheck(d0.draft);
+    if(d0 && !d0.parked && Date.now() - d0.at < DRAFT_AUTO_RESUME_MS) resumeCheck(d0.draft, d0.lastView);
   }
 }
 let autoResumeChecked = false;   // 每次页面加载重置（模块级变量，reload 后重新为 false）
@@ -2363,51 +2404,110 @@ function isMySubordinateRec(rec){
 }
 function esc(s){ return String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
 
-/* ================= CF-WPS-42：检查草稿「断点续传」 =================
+/* ================= CF-WPS-42 / CF-WPS-63：检查草稿「断点续传」 =================
    真机问题：低端安卓机调起系统相机时页面常被系统回收，拍照返回后页面已重载 →
    落在首页，照片与已选内容全丢。桌面 Chrome 复现不了（_t43 P1–P5 全绿），
    但现场机是高发场景，必须兜住。
-   做法：草稿（照片 + 已选行为/人员）落 localStorage；首页出现「继续上次检查」卡片，
-        一点即带着草稿回到拍照页，照片与已选项都在，「下一步」直接可见。 */
+   做法：草稿（照片 + 已选行为/人员 + 停在哪一屏）落 localStorage；
+        重载后自动带回原步骤；首页另有「继续上次检查」卡片可手动进入。
+
+   ⚠️ CF-WPS-63 修正 —— 原实现有一个**结构性漏洞**（就是「时常掉回首页」的根因）：
+     ① saveDraft 要求 draft.scenePhoto 为真，而唯一有效落盘点在「照片压缩成功之后」；
+     ② startCheck 每次开新检查又 clearDraft()。
+     ⇒ 每一次检查的**第一张照片**必然处于「零草稿」状态，而页面被回收恰恰发生在
+        「照片还没进到页面」的那一刻 —— 需要草稿兜住的场景，草稿必然还不存在。
+     修法：进入拍照页即落一份空草稿（allowEmpty），并放开续传门槛；
+           草稿同时记录 lastView，续传回到用户离开时那一屏，而不是死板回到拍照页。 */
 const DRAFT_KEY = "hse_draft_v1";
 const DRAFT_TTL_MS = 2 * 3600 * 1000;   // 超过 2 小时视为放弃，不长期占着入口
-function saveDraft(){
-  try{
-    if(!draft || !draft.scenePhoto) return;   // 没拍照不值得续（避免空草稿占位）
-    localStorage.setItem(DRAFT_KEY, JSON.stringify({ at: Date.now(), draft }));
-  }catch(e){ /* 配额不足：宁可不续，也绝不能让拍照流程崩 */ }
+// CF-WPS-63：自动续传窗口。原为 5 分钟 —— 但现场「调起相机 → 排队 → 拍照」超过 5 分钟很常见，
+// 草稿明明还在却不自动续传，用户依然看到「回到首页」。放宽到 30 分钟后，
+// 由下面的「停靠(parked)」机制来保证**用户主动离开时不会被硬拽回去**，两者不再互相牵制。
+const DRAFT_AUTO_RESUME_MS = 30 * 60 * 1000;
+// CF-WPS-63：续传可以安全落地的几屏（纯静态 / 自愈渲染，不依赖异步级联数据）。
+// 更深的级联页（选人 / 转派 / 处理方式）需要异步拉组织树，续传会落到半成品页面，一律退回拍照页。
+const RESUME_VIEWS = ["photo", "classify", "vio", "patrol"];
+const CHECK_FLOW_VIEWS = RESUME_VIEWS.concat(["pick-admin", "pick-person", "co-search", "handle", "transfer", "confirm"]);
+function isCheckFlowView(v){ return CHECK_FLOW_VIEWS.includes(String(v || "")); }
+function saveDraft(opt){
+  if(!draft) return false;
+  // CF-WPS-63：allowEmpty = 允许「还没拍照」的空草稿落盘。
+  // 这正是兜住第一张照片的关键 —— 用户按下快门那一刻页面就可能被回收，
+  // 若非要等到照片压缩成功才落盘，那份草稿永远来不及写。
+  if(!draft.scenePhoto && !(opt && opt.allowEmpty)) return false;
+  const payload = JSON.stringify({ at: Date.now(), draft, lastView: currentView });
+  try{ localStorage.setItem(DRAFT_KEY, payload); return true; }
+  catch(e){
+    // CF-WPS-63：原实现静默吞掉 QuotaExceededError —— 用户以为拍上了，重载后却没有草稿。
+    // 现在照 saveDB 的思路先腾空间（丢已同步记录的照片），仍失败就必须让人看见，不能无声失败。
+    try{ saveDB(); }catch(_){}
+    try{ localStorage.setItem(DRAFT_KEY, payload); return true; }
+    catch(_){
+      flashMsg("本机存储已满，草稿无法保存。请先联网上传已完成的记录后再继续检查。");
+      return false;
+    }
+  }
 }
 function clearDraft(){ try{ localStorage.removeItem(DRAFT_KEY); }catch(e){} }
-function loadDraft(){   // 返回 { at, draft } 或 null
+// CF-WPS-63：用户**主动**离开检查流程回到首页时，把草稿标记为「停靠」。
+// 否则放宽自动续传窗口后，用户明明已经退出来了，一次页面重载又会被硬拽回拍照页。
+function parkDraft(){
+  try{
+    const o = JSON.parse(localStorage.getItem(DRAFT_KEY) || "null");
+    if(!o || !o.draft || o.parked) return;
+    o.parked = true;
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(o));
+  }catch(e){ /* 配额/隐私模式：停靠失败只会退化为「可能被自动续传」，不影响主流程 */ }
+}
+function loadDraft(){   // 返回 { at, draft, lastView, parked } 或 null
   try{
     const o = JSON.parse(localStorage.getItem(DRAFT_KEY) || "null");
     if(!o || !o.draft || !o.at || Date.now() - o.at > DRAFT_TTL_MS) return null;
     return o;
   }catch(e){ return null; }
 }
-// 带着草稿回到拍照页（照片 + 已选项都在，「下一步」直接可见）
-function resumeCheck(d){
+// 续传落点：优先回到用户离开时那一屏；拿不到或不在安全名单内则退回拍照页
+function resumeTargetView(lastView){
+  const v = String(lastView || "");
+  if(v === "patrol") return draft.scenePhoto ? "patrol" : "photo";   // 巡查结果页需要照片
+  if(RESUME_VIEWS.includes(v)) return v;
+  return "photo";
+}
+// 带着草稿回到原步骤（照片 + 已选项都在）
+function resumeCheck(d, lastView){
   draft = Object.assign({ scenePhoto: null, behavior: null, person: null, patrolResult: null, afterPhoto: null,
-                          coTown: null, coTeamDept: null, coTeamMgr: "", coTeamAdmins: [] }, d);
+                          coTown: null, coTeamDept: null, coTeamMgr: "", coTeamAdmins: [] }, d || {});
   resetScenePhotoUI();
-  renderPatrolChoice();          // 依据草稿恢复选中高亮
-  setScenePhoto(d.scenePhoto);   // 重新展示照片 + 露出「下一步」
-  showView("photo");
+  renderPatrolChoice();                  // 依据草稿恢复选中高亮
+  if(draft.scenePhoto) setScenePhoto(draft.scenePhoto);   // 重新展示照片 + 露出「下一步」
+  const target = resumeTargetView(lastView);
+  if(target === "vio") renderVioGrid();                    // 宫格自愈：三违库没就绪会自己重渲染
+  if(target === "patrol"){ const p = $("#patrol-photo"); if(p && draft.scenePhoto) p.src = draft.scenePhoto; }
+  showView(target);
+  // 修正 lastView 为续传后的真实落点（下一次被回收时才知道该回哪一屏）；
+  // 同时清掉 parked —— 用户已经在流程里了，不该再被视为「已退出」。
+  saveDraft({ allowEmpty: true });
 }
 function draftStepText(d){
   if(d.person) return "已选人员：" + (d.person.name || "—") + "，继续确认";
   if(d.behavior) return "已选三违行为：" + d.behavior + "，继续";
   if(d.patrolResult) return "已选巡查结果：" + d.patrolResult + "，继续";
+  if(!d.scenePhoto) return "还没拍照，继续拍现场照片";
   return "照片已拍，继续下一步";
 }
 function renderResumeCard(){
   const card = $("#resume-card"); if(!card) return;
   const d0 = loadDraft();
-  if(!d0 || !d0.draft.scenePhoto){ card.style.display = "none"; return; }
+  // CF-WPS-63：不再要求草稿里有照片 —— 空草稿（刚进拍照页就被回收）同样要能续回。
+  if(!d0 || !d0.draft){ card.style.display = "none"; return; }
   card.style.display = "";
-  const th = $("#resume-thumb"); if(th) th.src = d0.draft.scenePhoto;
+  const th = $("#resume-thumb");
+  if(th){
+    if(d0.draft.scenePhoto) th.src = d0.draft.scenePhoto;
+    else { th.removeAttribute("src"); th.style.background = "#E8E6E0"; }   // 无照片时不留破图
+  }
   const st = $("#resume-step"); if(st) st.textContent = draftStepText(d0.draft);
-  if(!card._wired){ card._wired = true; card.onclick = () => resumeCheck(d0.draft); }
+  if(!card._wired){ card._wired = true; card.onclick = () => resumeCheck(d0.draft, d0.lastView); }
 }
 
 /* ================= 检查流程 ================= */
@@ -2420,6 +2520,10 @@ function startCheck(){
   resetScenePhotoUI();
   renderPatrolChoice();   // 清掉上一次的选中高亮，避免「看着选过了、其实没选」
   showView("photo");
+  // CF-WPS-63：**进入拍照页立刻落一份空草稿** —— 这是兜住「第一张照片」的关键。
+  // 用户按下快门那一刻页面就可能被系统回收，而照片要到压缩成功后才进得了页面；
+  // 若等到那时才落盘，需要草稿兜住的场景永远等不到草稿。
+  saveDraft({ allowEmpty: true });
 }
 /* 巡查结果不再让用户选：点「不是三违」即视为「现场正常」（见 #opt-no），
    所以这里只负责把「完成检查」按钮的可用态与草稿值对齐。
@@ -2462,21 +2566,25 @@ function compressImage(file, cb){
     }catch(e){ fail(); }
     finally{ try{ release && release(); }catch(e){} }
   };
-  // ① 现代内核：解码期降采样（内存最省）
+  // ① 现代内核：**一次解码 + 解码期降采样**（内存最省）
+  //    ⚠️ CF-WPS-63：原实现在这里先做一次 `createImageBitmap(file)` 只为拿原始宽高算缩放比 ——
+  //    那一步是**不带 resize 的全尺寸解码**（4000×3000×4B ≈ 48MB），而它恰好发生在
+  //    页面刚从相机回来、内存最紧张的时刻，等于把刚躲过的内存峰值又请了回来。
+  //    改为直接带 resizeWidth 解码：宽高由返回值给出（浏览器按规范保持等比），
+  //    全程不产生全尺寸位图，峰值从 ~48MB 降到 ~2.5MB。
   if(typeof createImageBitmap === "function"){
     (async () => {
-      let probe = null;
+      let src = null;
       try{
-        probe = await createImageBitmap(file);
-        const scale = Math.min(1, PHOTO_MAX_EDGE / Math.max(probe.width, probe.height));
-        const w = Math.max(1, Math.round(probe.width * scale));
-        const h = Math.max(1, Math.round(probe.height * scale));
-        try{ probe.close && probe.close(); }catch(e){}
-        probe = null;                                   // 立刻释放 48MB 全尺寸位图
-        const small = await createImageBitmap(file, { resizeWidth: w, resizeHeight: h, resizeQuality: "medium" });
-        draw(small, w, h, () => { try{ small.close && small.close(); }catch(e){} });
+        src = await createImageBitmap(file, { resizeWidth: PHOTO_MAX_EDGE, resizeQuality: "medium" });
+        const sw = src.width || 1, sh = src.height || 1;
+        // 兜底：个别内核会忽略 resize 选项而返回原尺寸 → 这里再收敛一次，
+        // 保证 canvas 尺寸一定 ≤ PHOTO_MAX_EDGE（canvas 小，内存就不会爆）。
+        const s = Math.min(1, PHOTO_MAX_EDGE / Math.max(sw, sh));
+        const w = Math.max(1, Math.round(sw * s)), h = Math.max(1, Math.round(sh * s));
+        draw(src, w, h, () => { try{ src.close && src.close(); }catch(e){} });
         return;
-      }catch(e){ try{ probe && probe.close && probe.close(); }catch(_){} }
+      }catch(e){ try{ src && src.close && src.close(); }catch(_){} }
       legacy();   // 内核不支持带 resize 的 bitmap（或解码失败）→ 回退 ②
     })();
     return;
@@ -3772,10 +3880,20 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#btn-pwd-logout").onclick = () => { clearSession(); clearLoginCreds(); redirectToLogin(); };
 
   // 拍照
+  // ⚠️ CF-WPS-63：清空 input 必须等压缩**真正结束**再执行。
+  // 原实现是同步 `e.target.value = ""` 紧跟异步 compressImage，构成竞态：
+  // 部分安卓 WebView（尤其微信 X5）在清空 file input 后会让底层 Blob 失效 →
+  // createImageBitmap 直接抛错 → 照片既没进页面、也没落草稿，
+  // 此时任何一次页面重载都会掉回首页。改为在回调里清空。
+  const pickScenePhoto = (input) => {
+    const file = input.files && input.files[0];
+    if(!file) return;
+    compressImage(file, (dataUrl) => { setScenePhoto(dataUrl); try{ input.value = ""; }catch(e){} });
+  };
   $("#btn-capture").onclick = () => $("#file-camera").click();
   $("#btn-album").onclick = () => $("#file-album").click();
-  $("#file-camera").onchange = e => { if(e.target.files[0]) compressImage(e.target.files[0], setScenePhoto); e.target.value = ""; };
-  $("#file-album").onchange = e => { if(e.target.files[0]) compressImage(e.target.files[0], setScenePhoto); e.target.value = ""; };
+  $("#file-camera").onchange = e => pickScenePhoto(e.target);
+  $("#file-album").onchange = e => pickScenePhoto(e.target);
   // 拍完/选完照片后按钮收起省空间；点照片区重新展开「拍现场照片 / 从相册上传」——
   // 相册通道必须始终可达（此前点照片区只会再开相机，想换用相册照片无入口）
   $("#scene-photo-box").onclick = () => { if(draft.scenePhoto) $("#photo-actions").classList.remove("hidden"); };
@@ -3973,8 +4091,14 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#btn-rf-capture").onclick = () => $("#file-camera-2").click();
   $("#btn-rf-album").onclick = () => $("#file-album-2").click();
   $("#btn-rf-recapture").onclick = () => $("#file-camera-2").click();
-  $("#file-camera-2").onchange = e => { if(e.target.files[0]) compressImage(e.target.files[0], setAfterPhoto); e.target.value = ""; };
-  $("#file-album-2").onchange = e => { if(e.target.files[0]) compressImage(e.target.files[0], setAfterPhoto); e.target.value = ""; };
+  // CF-WPS-63：同拍照链路，清空 input 延后到压缩回调，避免 File 被提前失效
+  const pickAfterPhoto = (input) => {
+    const file = input.files && input.files[0];
+    if(!file) return;
+    compressImage(file, (dataUrl) => { setAfterPhoto(dataUrl); try{ input.value = ""; }catch(e){} });
+  };
+  $("#file-camera-2").onchange = e => pickAfterPhoto(e.target);
+  $("#file-album-2").onchange = e => pickAfterPhoto(e.target);
   $("#btn-submit-rectify").onclick = submitRectify;  // 拍前：禁用态的提交按钮
   $("#btn-submit-after").onclick = submitRectify;    // 拍后：两列行的提交行
 
