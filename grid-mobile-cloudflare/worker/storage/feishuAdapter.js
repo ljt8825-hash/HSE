@@ -347,4 +347,40 @@ export async function uploadMedia(env, buf, fileName, mime) {
   return String(json.data.file_token);
 }
 
-export default { backend: 'feishu', scanRecords, createRecords, updateRecord, batchDelete, getFsToken, uploadMedia, listTables, listFields, ensureField, getRecord, searchRecords };
+// CF-WPS-派发图：对称 uploadMedia，按 file_token 取回飞书附件原图二进制流。
+// GET /drive/v1/medias/{file_token}/download 直接返回图片二进制（HTTP 200 + content-type=MIME），
+// 鉴权用 Bearer tenant_access_token。调用方原样转发该 Response（含 body 流）即可，无需解析临时 URL。
+export async function downloadMedia(env, fileToken) {
+  if (!fileToken) {
+    const e = new Error('feishu media download: empty token');
+    e.isBadRequest = true;
+    throw e;
+  }
+  const token = await getFsToken(env);
+  const res = await fetch(`${FS_BASE}/drive/v1/medias/${encodeURIComponent(String(fileToken))}/download`, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (res.status === 404) {
+    const e = new Error('feishu media not found');
+    e.isNotFound = true;
+    throw e;
+  }
+  if (res.status === 429) {
+    const e = new Error('feishu rate limited');
+    e.isRateLimit = true;
+    throw e;
+  }
+  if (!res.ok) {
+    const json = await safeJson(res);
+    throw Object.assign(new Error('feishu media download failed'), {
+      fsHttpStatus: res.status,
+      fsCode: json && json.code,
+      fsMsg: json && json.msg,
+      isUpstream: true,
+    });
+  }
+  return res; // 直接返回 Response（含二进制 body + content-type），交给图片代理转发
+}
+
+export default { backend: 'feishu', scanRecords, createRecords, updateRecord, batchDelete, getFsToken, uploadMedia, downloadMedia, listTables, listFields, ensureField, getRecord, searchRecords };

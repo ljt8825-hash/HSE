@@ -2631,6 +2631,9 @@ function patrolRecordView(rec, full) {
     photo_status: (Array.isArray(f['违章照片']) && f['违章照片'].length) ? '已上传' : 'PENDING_EXTERNAL',
     photo_count: Array.isArray(f['违章照片']) ? f['违章照片'].length : 0,
     rectify_photo_count: Array.isArray(f['整改后照片']) ? f['整改后照片'].length : 0,
+    // CF-WPS-派发图：台账详情也能下发派发原图 file_token（前端凭 token 取图）
+    scene_photo_tokens: photoTokens(f['违章照片']),
+    rectify_photo_tokens: photoTokens(f['整改后照片']),
     client_request_id: note.clientRequestId || fieldText(f['client_request_id']),
   };
 }
@@ -2799,6 +2802,15 @@ function todoNowLocal(d) {
     + ' ' + pad(cn.getUTCHours()) + ':' + pad(cn.getUTCMinutes());
 }
 
+// 飞书附件列（违章照片 / 整改后照片）是 [{ file_token }] 数组，不可直接访问。
+// 这里只抽出 file_token（前端再经 /api/mobile/photo 代理取图），不把附件对象原样下发。
+function photoTokens(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr
+    .map((x) => (x && (x.file_token || x.fileToken || '')) || '')
+    .filter(Boolean);
+}
+
 // 待办视图：给被指派人看的字段（含「谁派给我的」来源信息 —— 测试报告 D2 要求）
 function todoView(rec, full) {
   const f = rec.fields || {};
@@ -2822,6 +2834,10 @@ function todoView(rec, full) {
     ...base, ...todo,
     rectify_photo_count: Array.isArray(f['整改后照片']) ? f['整改后照片'].length : 0,
     description: fieldText(f['描述']),
+    // CF-WPS-派发图：把派发原图的 file_token 一并下发（非图片本身），
+    // 前端凭 token 调 /api/mobile/photo 取回原图，解决「接任务的人看不到派发图」问题。
+    scene_photo_tokens: photoTokens(f['违章照片']),
+    rectify_photo_tokens: photoTokens(f['整改后照片']),
   };
 }
 
@@ -3338,6 +3354,41 @@ async function guardPasswordChanged(request, env) {
   return null;
 }
 
+// CF-WPS-派发图：图片代理。被指派人在整改页/详情页凭 file_token 取回派发原图。
+// 飞书附件不可直链，这里用服务端 tenant_access_token 拉取后原样转发；前端带登录 JWT 鉴权，
+// 避免图片被未登录方盗刷。?ft=<file_token>
+async function handleServerPhoto(request, env) {
+  const origin = corsOrigin(request, env);
+  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
+  if (request.method !== 'GET') return errRes('METHOD_NOT_ALLOWED', '不支持的请求方法', 405, corsHeaders(origin));
+  // 门 1：登录态（只有登录的移动端用户才能取图）
+  if (!env.WORKER_SESSION_SECRET) return errRes('SESSION_NOT_CONFIGURED', '会话密钥未配置', 503, corsHeaders(origin));
+  const payload = await verifyWorkerSession(bearerToken(request), env.WORKER_SESSION_SECRET);
+  if (!payload) return errRes('UNAUTHORIZED', '未认证或登录态失效', 401, corsHeaders(origin));
+
+  const url = new URL(request.url);
+  const fileToken = String(url.searchParams.get('ft') || '').trim();
+  if (!fileToken) return errRes('BAD_REQUEST', '缺少 ft 参数（图片 file_token）', 400, corsHeaders(origin));
+
+  let fsRes;
+  try {
+    const { downloadMedia } = await import('./storage/feishuAdapter.js');
+    fsRes = await downloadMedia(env, fileToken);
+  } catch (e) {
+    if (e && e.isNotFound) return errRes('NOT_FOUND', '图片不存在或已删除', 404, corsHeaders(origin));
+    if (e && e.isRateLimit) return errRes('UPSTREAM_RATE_LIMITED', '飞书图片服务限流，请稍后重试', 429, corsHeaders(origin));
+    if (e && e.isBadRequest) return errRes('BAD_REQUEST', '图片参数无效', 400, corsHeaders(origin));
+    return errRes('WPS_UPSTREAM_ERROR', '图片暂不可用，请稍后再试', 502, corsHeaders(origin));
+  }
+
+  // 原样转发飞书返回的二进制流 + content-type；同源部署无需跨域，仍带上 CORS 头保险。
+  const ct = fsRes.headers.get('content-type') || 'image/jpeg';
+  const cl = fsRes.headers.get('content-length');
+  const headers = { ...corsHeaders(origin), 'content-type': ct, 'cache-control': 'private, max-age=300' };
+  if (cl) headers['content-length'] = cl;
+  return new Response(fsRes.body, { status: 200, headers });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -3370,6 +3421,8 @@ export default {
     // CF-WPS-36：整改待办（跨账号指派）
     if (p === '/api/mobile/assign') return handleAssign(request, env);
     if (p === '/api/mobile/inbox') return handleInbox(request, env);
+    // CF-WPS-派发图：图片代理（凭 file_token 取派发原图）。放 inbox 之后、dispatched 之前。
+    if (p === '/api/mobile/photo') return handleServerPhoto(request, env);
     if (p === '/api/mobile/dispatched') return handleDispatched(request, env);
     if (p === '/api/mobile/summary') return handleSummary(request, env);
     if (p === '/api/mobile/assign/complete') return handleAssignComplete(request, env);

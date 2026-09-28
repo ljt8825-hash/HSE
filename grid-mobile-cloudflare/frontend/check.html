@@ -7,7 +7,7 @@
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-09-23.69">
+<meta name="hse-build" content="2026-09-23.70">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -795,6 +795,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
     <div class="nav-title">整改</div><div style="width:40px"></div>
   </div>
   <div class="page">
+    <!-- CF-WPS-派发图：接任务的人点开即见「派发原图 + 上下文」，知道要改什么 -->
+    <div id="rf-context"></div>
     <div class="photo-box" id="after-photo-box"></div>
     <!-- 拍前：恢复原版大按钮（CF-WPS-34b 应用户要求改回） -->
     <div id="rf-pre" class="btn-stack">
@@ -1037,8 +1039,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
      读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
    - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
    - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
-<script src="./config.js?v=2026-09-23.69"></script>
-<script src="./app.js?v=2026-09-23.69"></script>
+<script src="./config.js?v=2026-09-23.70"></script>
+<script src="./app.js?v=2026-09-23.70"></script>
 <script>
 /* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
 (function(){
@@ -3394,6 +3396,39 @@ let inboxRecs = null, inboxAt = 0, inboxPending = 0;
 // CF-WPS-44：服务端「本月已整改」计数（指派给我 + 完成时间在本自然月），首页「已整改」卡片取它。
 // 由服务端按全量台账统计，不受 todos 列表 50 条上限影响。
 let inboxMonthlyDone = 0;
+/* ---- CF-WPS-派发图：派发原图加载（后端 /api/mobile/photo 代理飞书附件）----
+   飞书附件不可直链，前端凭 file_token + 登录 JWT 取图，避免 token 进 URL、
+   也避免被未登录方盗刷。loadServerPhoto 返回 blob URL（单页生命周期短，不主动 revoke）。 */
+async function loadServerPhoto(ft){
+  if(!ft) return null;
+  try{
+    const r = await fetch(API_BASE + "/api/mobile/photo?ft=" + encodeURIComponent(ft), {
+      headers: { "Authorization": "Bearer " + (typeof getToken === "function" ? getToken() : "") },
+    });
+    if(!r.ok) return null;
+    const blob = await r.blob();
+    if(!blob || !blob.size) return null;
+    return URL.createObjectURL(blob);
+  }catch{ return null; }
+}
+// 把一组 file_token 渲染成照片墙（异步加载；失败项静默跳过，不残留破图）。
+async function renderServerPhotos(container, tokens){
+  if(!container) return;
+  const arr = Array.isArray(tokens) ? tokens : [];
+  if(!arr.length){ container.innerHTML = '<div style="font-size:var(--fs-sub);color:var(--t4)">无照片</div>'; return; }
+  container.innerHTML = "";
+  await Promise.all(arr.map(async (ft) => {
+    const url = await loadServerPhoto(ft);
+    if(!url) return;
+    const img = document.createElement("img");
+    img.alt = "派发照片"; img.loading = "lazy"; img.src = url;
+    img.onerror = () => img.remove();
+    container.appendChild(img);
+  }));
+  if(!container.children.length){
+    container.innerHTML = '<div style="font-size:var(--fs-sub);color:var(--t4)">照片加载失败，请稍后重试</div>';
+  }
+}
 function todoToRec(t){
   // "2026-09-19 06:59" → Date（用于分组与排序；解析失败退到当前时间）
   const m = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/.exec(String(t.inspection_time || t.assigned_at || ""));
@@ -3421,6 +3456,10 @@ function todoToRec(t){
     assignedAt: t.assigned_at || "",
     doneAt: t.done_at || "",
     todoNote: t.todo_note || "",
+    // CF-WPS-派发图：把派发原图 / 整改后原图的 file_token 带到卡片，
+    // 接任务的人点开即可看到派发账号拍的图，不再「不知要改什么」。
+    scenePhotoTokens: (t.scene_photo_tokens || []).slice(),
+    rectifyPhotoTokens: (t.rectify_photo_tokens || []).slice(),
     // CF-WPS-58：保留服务端原始视图供详情页直接渲染（含 description / rectify_photo_count）
     _srv: t,
   };
@@ -3582,19 +3621,46 @@ function renderServerDetail(x, opts){
     b.appendChild(mk('<div class="card"><div style="font-size:var(--fs-body);color:var(--t2);line-height:1.9">' + esc(x.description) + "</div></div>"));
   }
 
-  // 照片：服务端只拿得到数量（飞书附件不下发 URL）
+  // 照片：服务端现在能下发飞书原图 file_token（CF-WPS-派发图），优先显示原图；
+  // 没有 token 时退回数量提示（兼容老 Worker / 未配图记录）。
+  const sTok = Array.isArray(x.scene_photo_tokens) ? x.scene_photo_tokens : [];
+  const rTok = Array.isArray(x.rectify_photo_tokens) ? x.rectify_photo_tokens : [];
   const pn = Number(x.photo_count) || 0;
   const rn = Number(x.rectify_photo_count) || 0;
   b.appendChild(mk('<div class="section-label">照片</div>'));
-  b.appendChild(mk('<div class="card"><div style="font-size:var(--fs-body);color:var(--t2);line-height:1.9">' +
-    (pn ? "现场照片 " + pn + " 张" : "现场照片：未记录") + "<br>" +
-    (rn ? "整改后照片 " + rn + " 张" : "整改后照片：无") +
-    '<div style="font-size:var(--fs-sub);color:var(--t4);margin-top:6px">照片存在飞书台账附件里，手机端暂不显示原图</div>' +
-    "</div></div>"));
+  const pbox = mk('<div class="card" style="display:flex;flex-direction:column;gap:10px"></div>');
+  if(sTok.length){
+    const lab = document.createElement("div");
+    lab.style.fontSize = "var(--fs-sub)"; lab.style.color = "var(--t3)"; lab.textContent = "现场照片（派发原图）";
+    pbox.appendChild(lab);
+    const sp = mk('<div class="photo-box"></div>');
+    pbox.appendChild(sp);
+    renderServerPhotos(sp, sTok);
+  }else if(pn){
+    pbox.appendChild(mk('<div style="font-size:var(--fs-body);color:var(--t2)">现场照片 ' + pn + " 张（无可用原图）</div>"));
+  }else{
+    pbox.appendChild(mk('<div style="font-size:var(--fs-body);color:var(--t2)">现场照片：未记录</div>'));
+  }
+  if(rTok.length){
+    const lab = document.createElement("div");
+    lab.style.fontSize = "var(--fs-sub)"; lab.style.color = "var(--t3)"; lab.textContent = "整改后照片";
+    pbox.appendChild(lab);
+    const rp = mk('<div class="photo-box"></div>');
+    pbox.appendChild(rp);
+    renderServerPhotos(rp, rTok);
+  }else if(rn){
+    pbox.appendChild(mk('<div style="font-size:var(--fs-body);color:var(--t2)">整改后照片 ' + rn + " 张（无可用原图）</div>"));
+  }else{
+    pbox.appendChild(mk('<div style="font-size:var(--fs-body);color:var(--t2)">整改后照片：无</div>'));
+  }
+  b.appendChild(pbox);
 
   $("#dt-back").onclick = () => { opts.from ? showView(opts.from) : showView("home"); };
   showView("detail");
 }
+// CF-WPS-58/派发图：serverRecCard 等调用 openServerDetail，但真正实现名为 renderServerDetail，
+// 这里补别名，让「已上报台账 / 服务端卡片」点击能正常打开详情（原 openServerDetail 未定义会抛错）。
+function openServerDetail(x, opts){ return renderServerDetail(x, opts); }
 
 function renderDetail(rec, from){
   setDetailTitle("三违详情");
@@ -3625,6 +3691,13 @@ function renderDetail(rec, from){
     b.appendChild(mk('<div class="section-label">现场照片</div>'));
     const ph = mk('<div class="photo-box"><img alt="现场照片" src="' + rec.scenePhoto + '"></div>');
     b.appendChild(ph);
+  }
+  // CF-WPS-派发图：服务端记录（无本机 scenePhoto）凭 token 显示派发原图
+  else if(rec.scenePhotoTokens && rec.scenePhotoTokens.length){
+    b.appendChild(mk('<div class="section-label">现场照片（派发原图）</div>'));
+    const sp = mk('<div class="photo-box"></div>');
+    b.appendChild(sp);
+    renderServerPhotos(sp, rec.scenePhotoTokens);
   }
   if(rec.type === "三违"){
     b.appendChild(mk('<div class="section-label">整改信息</div>'));
@@ -3707,6 +3780,16 @@ function openRectify(rec, from){
   rectifying = rec; rectifyFrom = from || "view-home";
   // 顶部「未完成 · 行为 · 人名」信息卡已删（CF-WPS 整改页统一），无需再设 rf-chip / rf-summary
   $("#after-photo-box").innerHTML = "";
+  // CF-WPS-派发图：派发来的待整改任务，顶部渲染「派发原图 + 上下文」，接任务的人不再两眼一抹黑；
+  // 本人自建的整改（非派发）不显示派发卡。
+  const ctxBox = $("#rf-context");
+  if(ctxBox){
+    if(rec && rec.fromServer && rec.todoStatus === "待整改"){
+      renderRectifyContext(rec);
+    }else{
+      ctxBox.innerHTML = "";
+    }
+  }
   // 拍前用大按钮三件套（big-cta + 从相册上传 + 提交）；拍后才切到两列轻量行
   $("#rf-pre").style.display = "";
   $("#rf-post").style.display = "none";
@@ -3714,6 +3797,31 @@ function openRectify(rec, from){
   $("#rf-back").onclick = () => showView(rectifyFrom);
   renderDelegateBlock(rec);   // CF-WPS-41：经理可把这条转派给本作业中心下级
   showView("rectify");
+}
+
+// CF-WPS-派发图：派发任务上下文卡（行为 + 涉及人员 + 派发来源 + 派发原图）。
+// 接任务的人据此明白「是谁派的、要改什么、现场长什么样」。
+function renderRectifyContext(rec){
+  const box = $("#rf-context"); if(!box) return;
+  const s = rec._srv || {};
+  const isVio = rec.type === "三违";
+  const src = [];
+  if(rec.assignerName) src.push("派发人：" + esc(rec.assignerName) + (rec.assignerDept ? "（" + esc(rec.assignerDept) + "）" : ""));
+  if(rec.assignedAt) src.push("派发时间：" + esc(rec.assignedAt));
+  if(rec.todoNote) src.push("整改说明：" + esc(rec.todoNote));
+  // 描述：_srv.description 是完整问题说明；若与行为标题相同则不重复
+  const desc = (s.description && s.description !== rec.behavior) ? s.description : "";
+  box.innerHTML =
+    '<div class="section-label">派发任务 · 待你整改</div>' +
+    '<div class="card" style="display:flex;flex-direction:column;gap:8px">' +
+      '<div style="font-size:var(--fs-h2);font-weight:700">' + esc(isVio ? (rec.behavior || "三违") : "普通巡查") + "</div>" +
+      (rec.personName ? '<div style="font-size:var(--fs-body);color:var(--t3)">涉及人员：' + esc(rec.personName) + "</div>" : "") +
+      (desc ? '<div style="font-size:var(--fs-body);color:var(--t2);line-height:1.9">' + esc(desc) + "</div>" : "") +
+      (src.length ? '<div style="font-size:var(--fs-sub);color:var(--t3);line-height:1.9">' + src.join("<br>") + "</div>" : "") +
+    "</div>" +
+    '<div class="section-label">派发原图</div>' +
+    '<div class="photo-box" id="rf-photos"></div>';
+  renderServerPhotos($("#rf-photos"), rec.scenePhotoTokens || []);
 }
 
 /* CF-WPS-41：整改页的「转派给本作业中心」区块（仅乡镇作业中心经理 + 上级指派来的待办可见）。
