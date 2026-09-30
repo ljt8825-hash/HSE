@@ -7,7 +7,7 @@
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-09-23.70">
+<meta name="hse-build" content="2026-09-23.73">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -298,6 +298,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
 .vio-cell .vio-icon svg{width:100%;height:100%;display:block}
 .vio-cell .vio-label{line-height:1.25;word-break:break-word}
 .vio-cell:active{transform:scale(.96);border-color:var(--primary)}
+/* CF-WPS-被指派人确认：预填派发值高亮（可改选别的） */
+.vio-cell.sel{border-color:var(--primary);background:var(--primary-soft)}
 .person-row{display:flex;align-items:center;gap:var(--gap);padding:var(--pad-row);background:var(--card);border:1px solid var(--line);border-radius:var(--r-card);cursor:pointer}
 .person-row:active{transform:scale(.98);border-color:var(--primary)}
 .avatar{width:var(--icon-avatar);height:var(--icon-avatar);border-radius:var(--r-pill);display:flex;align-items:center;justify-content:center;font-size:var(--fs-btn);font-weight:600;flex:none}
@@ -798,6 +800,14 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
     <!-- CF-WPS-派发图：接任务的人点开即见「派发原图 + 上下文」，知道要改什么 -->
     <div id="rf-context"></div>
     <div class="photo-box" id="after-photo-box"></div>
+    <!-- CF-WPS-被指派人确认：派发任务先「下一步」确认三违行为 → 选择违章人员，再拍整改后照片 -->
+    <div id="rf-next" class="btn-stack" style="display:none">
+      <button class="big-cta" id="btn-rf-next">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M9 5l7 7-7 7" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <div class="cta-title">下一步</div>
+        <div class="cta-sub">选择违章人员</div>
+      </button>
+    </div>
     <!-- 拍前：恢复原版大按钮（CF-WPS-34b 应用户要求改回） -->
     <div id="rf-pre" class="btn-stack">
       <button class="big-cta" id="btn-rf-capture">
@@ -1039,8 +1049,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
      读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
    - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
    - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
-<script src="./config.js?v=2026-09-23.70"></script>
-<script src="./app.js?v=2026-09-23.70"></script>
+<script src="./config.js?v=2026-09-23.73"></script>
+<script src="./app.js?v=2026-09-23.73"></script>
 <script>
 /* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
 (function(){
@@ -2519,6 +2529,7 @@ function startCheck(){
   draft = { scenePhoto: null, behavior: null, person: null, patrolResult: null, afterPhoto: null,
             coTown: null, coTeamDept: null, coTeamMgr: "", coTeamAdmins: [] };  // co*：级联选人的三层状态
   clearDraft();      // CF-WPS-42：开新检查即作废旧草稿，避免两个草稿互相打架
+  rectifyFlow = null;   // CF-WPS-被指派人确认：开新检查即退出「被指派人整改」上下文，防返回键/选人误分流
   resetScenePhotoUI();
   renderPatrolChoice();   // 清掉上一次的选中高亮，避免「看着选过了、其实没选」
   showView("photo");
@@ -2761,17 +2772,18 @@ function vioIconOf(name){
 }
 
 /* ---- 三违宫格 ---- */
-function renderVioGrid(){
+function renderVioGrid(selected){
   const g = $("#vio-grid");
   if(!VIO_LIB_READY){
     g.innerHTML = emptyTip("三违库加载中…");
-    loadPatrolMeta().then(() => renderVioGrid());
+    loadPatrolMeta().then(() => renderVioGrid(selected));
     return;
   }
   g.innerHTML = "";
   VIO_LIB.forEach(name => {
     const d = document.createElement("div");
-    d.className = "vio-cell";
+    // selected：被指派人整改前「预填派发值」——命中的格子高亮，可直接点它确认或改选别的
+    d.className = "vio-cell" + (selected && name === selected ? " sel" : "");
     // 图标 + 行为名（图标纯装饰，用 aria-hidden 避免读屏重复念）
     d.innerHTML = '<div class="vio-icon" aria-hidden="true">' + vioSvg(vioIconOf(name)) + '</div>' +
                   '<div class="vio-label">' + esc(name) + '</div>';
@@ -2784,6 +2796,12 @@ function renderVioGrid(){
    · 其它角色（管理员 / 片区经理）：进入「选违章人员」流程
    统一入口，保证「选行为」这一步对所有角色都是必经的。 */
 function selectViolation(name){
+  // 被指派人整改：选完行为直接进入「选违章人员」，不写 draft、不按角色分流（CF-WPS-被指派人确认）
+  if(rectifyFlow && rectifyFlow.classifying){
+    rectifyFlow.behavior = name;
+    goPersonSelect();
+    return;
+  }
   draft.behavior = name;
   saveDraft();   // CF-WPS-42
   if(session.role === "公司管理"){ renderHandle(); showView("handle"); }
@@ -2850,6 +2868,14 @@ function renderPersonList(list, body, ctx){
     list.appendChild(tip);
   }
 }
+/* CF-WPS-被指派人确认：整改流程中「选人」是独立一步（没有三违宫格可回），
+   所以这一层的返回键要回「整改」页（保留「下一步」态）；非整改流程走原 fallback。 */
+function rectifyBackOr(fallback){
+  return () => {
+    if(rectifyFlow && rectifyFlow.classifying){ rectifyFlow.classifying = false; showView("rectify"); return; }
+    fallback();
+  };
+}
 async function goPersonSelect(){
   const mode = selPersonMode(session);
   if(mode === "direct"){
@@ -2859,6 +2885,7 @@ async function goPersonSelect(){
     $("#pp-crumbs").classList.add("hidden");
     $("#btn-repick-admin").classList.add("hidden");
     $("#pp-back").dataset.back = "vio";
+    $("#pp-back").onclick = rectifyBackOr(() => showView("vio"));
     const list = $("#person-list"); list.innerHTML = emptyTip("正在读取花名册…");
     showView("pick-person");
     const body = await loadRoster({ area: session.dept });
@@ -2886,6 +2913,12 @@ async function renderAdminPick(under, listEl){
     return;
   }
   const admins = body.admins || [], managers = body.managers || [];
+  // 乡镇作业中心经理：选择单元改为「本镇班组」（含台账无管理员的班，如宁城街道二班/三班），
+  // 否则这些班有花名册人员却无入口，整班人无法被选中（CF-WPS-经理选班）。
+  if(!under && session.role === "经理"){
+    await renderManagerTownTeams(list);
+    return;
+  }
   if(!admins.length && !managers.length){
     list.innerHTML = emptyTip("台账中未配置你的下级，请联系管理员在「网格长信息台账」补充「直接上级」");
     appendSearchAll(list);
@@ -2896,6 +2929,54 @@ async function renderAdminPick(under, listEl){
   managers.forEach(m => list.appendChild(
     orgRow(m, [m.department, "点击查看其管理员"].filter(Boolean).join(" · "), () => renderAdminPick(m.name, list))));
   if(!listEl) appendSearchAll(list);
+}
+// 乡镇作业中心经理：列出本镇所有班组（含无管理员的班），点击班组查看其花名册人员。
+// 复用 org/teams（与「自己处理」级联同源，已对台账无管理员的班做并集，见 worker townTeams）。
+async function renderManagerTownTeams(list){
+  const town = managerTown(session.dept);
+  if(!town){
+    list.innerHTML = emptyTip("无法确定你的责任乡镇，请检查台账「所属部门」是否形如「XX片区」");
+    appendSearchAll(list);
+    return;
+  }
+  list.innerHTML = emptyTip("正在读取「" + esc(town) + "」班组…");
+  const body = await loadTeams(town);
+  list.innerHTML = "";
+  if(!body){
+    list.innerHTML = emptyTip("班组信息读取失败：" + (lastApiError || "请稍后重试"));
+    appendSearchAll(list);
+    return;
+  }
+  const teams = (body.teams || []).filter((t) => (t.rosterCount || t.adminCount));
+  if(!teams.length){
+    list.innerHTML = emptyTip("本镇暂无班组人员，可搜索姓名选择");
+    appendSearchAll(list);
+    return;
+  }
+  teams.forEach((t) => list.appendChild(orgRow(
+    { name: t.dept },
+    [ t.rosterCount ? (t.rosterCount + " 人") : "", t.adminCount ? (t.adminCount + " 名管理员") : "" ].filter(Boolean).join(" · "),
+    () => showCrewOfTeam(t)
+  )));
+  appendSearchAll(list);
+}
+// 经理责任乡镇 = 所属部门剥掉「片区 / N班」后缀（与后端 townLabel 同口径）
+function managerTown(dept){
+  return String(dept || "").replace(/(片区|[\d一二三四五六七八九十百]+班)$/u, "").trim();
+}
+// 点击某班组 → 加载该班组花名册人员（与 showCrewOf 同理，只是入口是班组而非管理员）
+async function showCrewOfTeam(team){
+  $("#pp-title").textContent = "选择人员";
+  $("#pp-head").textContent = "第二步：选择违章人员";
+  $("#pp-sub").textContent = team.dept + " 的人员";
+  $("#crumb-admin").textContent = team.dept;
+  $("#pp-crumbs").classList.remove("hidden");
+  $("#btn-repick-admin").classList.remove("hidden");
+  $("#pp-back").onclick = () => renderAdminPick();
+  const list = $("#person-list"); list.innerHTML = emptyTip("正在读取花名册…");
+  showView("pick-person");
+  const body = await loadRoster({ area: team.dept });
+  renderPersonList(list, body, { area: team.dept, adminName: team.dept });
 }
 async function showCrewOf(admin){
   $("#pp-title").textContent = "选择人员";
@@ -3100,6 +3181,12 @@ function renderCoSearch(q){
   }, 250);
 }
 function pickPerson(p){
+  // 被指派人整改：选定违章人员后回到「整改」页拍整改后照片（CF-WPS-被指派人确认）
+  if(rectifyFlow && rectifyFlow.classifying){
+    rectifyFlow.person = p;
+    finishRectifyConfirm();
+    return;
+  }
   draft.person = p;
   saveDraft();   // CF-WPS-42
   const lines = ["姓名：" + esc(p.name)];
@@ -3776,26 +3863,62 @@ function mySubordinatePeople(){
 
 /* ---- 整改 ---- */
 let rectifying = null, rectifyFrom = null;
+// CF-WPS-被指派人确认：被指派人打开派发任务后，先「选违章人员」，再拍整改后照片。
+//   { rec, person, classifying }；classifying=true 表示正处在「选人」这一步。
+let rectifyFlow = null;
 function openRectify(rec, from){
   rectifying = rec; rectifyFrom = from || "view-home";
   // 顶部「未完成 · 行为 · 人名」信息卡已删（CF-WPS 整改页统一），无需再设 rf-chip / rf-summary
   $("#after-photo-box").innerHTML = "";
   // CF-WPS-派发图：派发来的待整改任务，顶部渲染「派发原图 + 上下文」，接任务的人不再两眼一抹黑；
   // 本人自建的整改（非派发）不显示派发卡。
+  const dispatched = !!(rec && rec.fromServer && rec.todoStatus === "待整改");
   const ctxBox = $("#rf-context");
   if(ctxBox){
-    if(rec && rec.fromServer && rec.todoStatus === "待整改"){
-      renderRectifyContext(rec);
-    }else{
-      ctxBox.innerHTML = "";
-    }
+    ctxBox.style.display = "";   // 复位：上一次拍完照可能把它收起了
+    if(dispatched){ renderRectifyContext(rec); }else{ ctxBox.innerHTML = ""; }
   }
+  // CF-WPS-被指派人确认：派发来的任务，先「下一步」选违章人员，再拍整改后照片；
+  //   本机自建的整改（非派发）沿用原流程，直接拍整改后照片。
+  const needConfirm = dispatched && !rec._rectifyConfirmed;
+  rectifyFlow = needConfirm ? { rec, person: null, classifying: false } : null;
+  $("#rf-next").style.display = needConfirm ? "" : "none";
   // 拍前用大按钮三件套（big-cta + 从相册上传 + 提交）；拍后才切到两列轻量行
-  $("#rf-pre").style.display = "";
+  $("#rf-pre").style.display = needConfirm ? "none" : "";
   $("#rf-post").style.display = "none";
   $("#btn-submit-rectify").disabled = true;
   $("#rf-back").onclick = () => showView(rectifyFrom);
   renderDelegateBlock(rec);   // CF-WPS-41：经理可把这条转派给本作业中心下级
+  showView("rectify");
+}
+/* CF-WPS-被指派人确认：点「下一步」→ 直接进入「选择违章人员」（三违行为沿用派发值，不再选）。 */
+function startRectifyConfirm(){
+  if(!rectifyFlow) return;
+  rectifyFlow.classifying = true;
+  goPersonSelect();
+}
+/* 选完违章人员 → 回「整改」页切到「拍整改后照片」，并把人员回填派发卡。 */
+function finishRectifyConfirm(){
+  const f = rectifyFlow; if(!f) return;
+  const rec = f.rec;
+  if(f.person){
+    rec.personName = f.person.name || rec.personName;
+    rec.personTel = f.person.tel || rec.personTel;
+  }
+  rec._rectifyPersonName = rec.personName || "";
+  rec._rectifyConfirmed = true;
+  const pr = $("#rf-person");
+  if(pr) pr.innerHTML = rec.personName
+    ? ("涉及人员：" + esc(rec.personName))
+    : '<span style="color:var(--t4)">涉及人员：待确认</span>';
+  $("#rf-next").style.display = "none";
+  $("#rf-pre").style.display = "";
+  f.classifying = false;
+  showView("rectify");
+}
+/* 从「选人」中途返回整改页（保留「下一步」态） */
+function backToRectify(){
+  if(rectifyFlow) rectifyFlow.classifying = false;
   showView("rectify");
 }
 
@@ -3814,8 +3937,9 @@ function renderRectifyContext(rec){
   box.innerHTML =
     '<div class="section-label">派发任务 · 待你整改</div>' +
     '<div class="card" style="display:flex;flex-direction:column;gap:8px">' +
-      '<div style="font-size:var(--fs-h2);font-weight:700">' + esc(isVio ? (rec.behavior || "三违") : "普通巡查") + "</div>" +
-      (rec.personName ? '<div style="font-size:var(--fs-body);color:var(--t3)">涉及人员：' + esc(rec.personName) + "</div>" : "") +
+      '<div id="rf-behavior" style="font-size:var(--fs-h2);font-weight:700">' + esc(isVio ? (rec.behavior || "三违") : "普通巡查") + "</div>" +
+      '<div id="rf-person" style="font-size:var(--fs-body);color:var(--t3)">' +
+        (rec.personName ? "涉及人员：" + esc(rec.personName) : '<span style="color:var(--t4)">涉及人员：待确认</span>') + "</div>" +
       (desc ? '<div style="font-size:var(--fs-body);color:var(--t2);line-height:1.9">' + esc(desc) + "</div>" : "") +
       (src.length ? '<div style="font-size:var(--fs-sub);color:var(--t3);line-height:1.9">' + src.join("<br>") + "</div>" : "") +
     "</div>" +
@@ -3872,6 +3996,8 @@ function setAfterPhoto(dataUrl){
   if(!dataUrl){ flashMsg("整改照片读取失败，请重拍一次，或改用「从相册上传」"); return; }   // CF-WPS-59
   draft.afterPhoto = dataUrl; rectifying.afterPhoto = dataUrl;
   $("#after-photo-box").innerHTML = '<img alt="整改后照片" src="' + dataUrl + '">';
+  // CF-WPS-被指派人确认：拍完「只显示整改后照片」—— 收起派发原图/上下文卡，避免两张照片混淆
+  const ctx = $("#rf-context"); if(ctx) ctx.style.display = "none";
   // 拍后切到两列轻量行（与「未完成 违章停车·王同池」那行视觉同量级）
   $("#rf-pre").style.display = "none";
   $("#rf-post").style.display = "flex";
@@ -3902,6 +4028,8 @@ function submitRectify(){
         record_id: done.serverRecordId,
         note: "已现场整改完成",
         photo_tokens: tokens,
+        // CF-WPS-被指派人确认：把被指派人选定的违章人员写回台账（三违行为沿用派发值，不再选）
+        violation_people: done._rectifyPersonName || done.personName || "",
       });
       done.completedToServer = r.status === 200 && r.body && r.body.success;
       done.completeError = done.completedToServer ? "" : ((r.body && (r.body.message || r.body.code)) || ("HTTP " + r.status));
@@ -3982,6 +4110,18 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // 返回按钮（data-back）；回到首页时底部导航高亮同步回「首页」
   $$("[data-back]").forEach(el => el.onclick = () => showView(el.dataset.back));
+  // CF-WPS-被指派人确认：「选择三违」页的返回键在被指派人整改流程里要回「整改」页，而非「问题分类」
+  const vioBack = document.querySelector("#view-vio [data-back]");
+  if(vioBack) vioBack.onclick = () => {
+    if(rectifyFlow && rectifyFlow.classifying){ rectifyFlow.classifying = false; showView("rectify"); return; }
+    showView("classify");
+  };
+  // 同上：经理「第一步选管理员」页（pick-admin）的返回键，在整改流程里也要回「整改」页
+  const adminBack = document.querySelector("#view-pick-admin [data-back]");
+  if(adminBack) adminBack.onclick = () => {
+    if(rectifyFlow && rectifyFlow.classifying){ rectifyFlow.classifying = false; showView("rectify"); return; }
+    showView("vio");
+  };
 
   // CF-WPS-61：改密页（首次登录强制）
   $("#btn-pwd-submit").onclick = submitChangePassword;
@@ -4005,7 +4145,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // 拍完/选完照片后按钮收起省空间；点照片区重新展开「拍现场照片 / 从相册上传」——
   // 相册通道必须始终可达（此前点照片区只会再开相机，想换用相册照片无入口）
   $("#scene-photo-box").onclick = () => { if(draft.scenePhoto) $("#photo-actions").classList.remove("hidden"); };
-  $("#btn-photo-next").onclick = () => showView("classify");
+  $("#btn-photo-next").onclick = () => { rectifyFlow = null; showView("classify"); };
 
   // 分类
   // 「不是三违」即现场无异常 ⇒ 直接按「现场正常」归档。
@@ -4209,6 +4349,8 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#file-album-2").onchange = e => pickAfterPhoto(e.target);
   $("#btn-submit-rectify").onclick = submitRectify;  // 拍前：禁用态的提交按钮
   $("#btn-submit-after").onclick = submitRectify;    // 拍后：两列行的提交行
+  // CF-WPS-被指派人确认：派发任务整改前的「下一步」→ 选三违行为 → 选违章人员
+  $("#btn-rf-next").onclick = startRectifyConfirm;
 
   // 巡查结果不再需要用户选择（见 #opt-no），这里只保留「完成检查」的提交逻辑
   $("#btn-patrol-done").onclick = () => {

@@ -3210,7 +3210,7 @@ async function handleSummary(request, env) {
 }
 
 // ---- POST /api/mobile/assign/complete ----
-// body: { record_id, note, photo_tokens? }
+// body: { record_id, note, photo_tokens?, violation_desc?, violation_people? }
 // 权限：**仅接收人**（整改接收人ID == 我）可完成 —— 别人不能替他结案。
 async function handleAssignComplete(request, env) {
   const origin = corsOrigin(request, env);
@@ -3249,6 +3249,19 @@ async function handleAssignComplete(request, env) {
     [TODO_FIELDS.doneAt]: todoNowLocal(),
     [TODO_FIELDS.note]: patrolText((body && body.note) || '', 200),
   };
+  // CF-WPS-被指派人确认：被指派人打开派发任务后，先「确认三违行为 → 选择违章人员」再拍整改后照片。
+  //   两项均可选（向后兼容旧前端：不传就不动台账原值）；提供则校验并写回「违章行为」「违章人员姓名」。
+  //   三违行为必须命中服务端权威三违库（与 patrol/submit 同口径），否则拒绝，避免自造项污染统计。
+  const vDesc = patrolText(body && body.violation_desc, PATROL_VIOL_DESC_MAX);
+  if (vDesc) {
+    const lib = patrolViolationLib(env);
+    if (lib.length && !lib.includes(vDesc) && !lib.includes(vDesc.split('（')[0].trim())) {
+      return errRes('VIOLATION_DESC_NOT_IN_LIB', '三违行为不在标准库内', 400, corsHeaders(origin));
+    }
+    fields['违章行为'] = vDesc;
+  }
+  const vPeople = patrolText(body && body.violation_people, PATROL_PEOPLE_MAX);
+  if (vPeople) fields['违章人员姓名'] = vPeople;
   const tokens = Array.isArray(body.photo_tokens) ? body.photo_tokens.filter((t) => typeof t === 'string' && t) : [];
   if (tokens.length) fields['整改后照片'] = [...new Set(tokens)].slice(0, 3).map((t) => ({ file_token: t }));
 
