@@ -364,7 +364,56 @@ const TODO_FIELDS = {
   assignedAt: '指派时间',
   doneAt: '整改完成时间',
   note: '整改说明',
+  // CF-WPS-派发链路（2026-09-30）：这条记录**经手过的所有派发人**，只追加、不覆盖。
+  //   背景：公司管理派给乡镇经理 → 经理再转派给管理员时，「指派人ID」被经理覆盖，
+  //   公司管理的「派发记录」（按 指派人ID == 我 过滤）里这条就**直接消失**了。
+  //   链路与「派发链路ID」**等长、同序**：第 i 段文本对应第 i 个 id，用于反查「我是什么时候派的」。
+  chainId: '派发链路ID',
+  chainText: '派发链路',
 };
+
+/* ── 派发链路工具（CF-WPS-派发链路）──────────────────────────────
+   两个列都是文本列，用固定分隔符拼接，保证「顺序一致 + 可反查」：
+     派发链路ID  = `13900000452,13900000450`                     （纯 id，供过滤）
+     派发链路    = `张三（安环管理部） 2026-09-30 17:20 → 李四（甲片区） 2026-09-30 17:25`
+   取「我的派发时间」时按 id 的下标去文本列取对应段，再抠出末尾时间戳。 */
+const CHAIN_SEP = ' → ';
+function chainSplitIds(v) {
+  return fieldText(v).split(',').map((s) => s.trim()).filter(Boolean);
+}
+function chainSplitLabels(v) {
+  return fieldText(v).split(CHAIN_SEP).map((s) => s.trim()).filter(Boolean);
+}
+function chainLabel(name, dept, time) {
+  const n = String(name || '').trim();
+  const d = String(dept || '').trim();
+  const t = String(time || '').trim();
+  return n + (d ? '（' + d + '）' : '') + (t ? ' ' + t : '');
+}
+/* 这条记录算不算「我派出去的」：
+   ① 我是最新指派人（正常路径）；或 ② 我在派发链路里（我派过，但已被下游转派）。
+   两者缺一：只判 ① 就是本次线上缺陷（公司管理的记录被经理转派后消失）。 */
+function isMyDispatch(fields, me) {
+  const f = fields || {};
+  if (!me) return false;
+  if (fieldText(f[TODO_FIELDS.assignerId]) === me) return true;
+  return chainSplitIds(f[TODO_FIELDS.chainId]).includes(me);
+}
+/* 我在这条记录里的**派发时间**（派发方视角的排序 / 挂账 / 本月派发都要用它）：
+   我是最新指派人 → 「指派时间」；我只在链路里 → 链路里属于我的那一段的时间。
+   兜底返回空串，调用方再退回「指派时间」，避免老数据排序错乱。 */
+function myDispatchTime(fields, me) {
+  const f = fields || {};
+  if (!me) return '';
+  if (fieldText(f[TODO_FIELDS.assignerId]) === me) return fieldText(f[TODO_FIELDS.assignedAt]);
+  const ids = chainSplitIds(f[TODO_FIELDS.chainId]);
+  const i = ids.indexOf(me);
+  if (i < 0) return '';
+  const seg = chainSplitLabels(f[TODO_FIELDS.chainText])[i] || '';
+  const m = seg.match(/(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2})?)\s*$/);
+  return m ? m[1] : '';
+}
+
 
 /* CF-WPS-62：巡查身份三件套 —— 从「备注」里拆出来，落成主台账的**独立文本列**。
    ---------------------------------------------------------------------------
@@ -2785,9 +2834,9 @@ async function handlePatrolRecords(request, env) {
    一条巡查记录最多对应一条待办，语义一致、无需额外建表。
 
    五个接口：
-     POST /api/mobile/assign            指派（创建/覆盖待办）
+     POST /api/mobile/assign            指派（创建/覆盖待办；同时把派发人追加进「派发链路」）
      GET  /api/mobile/inbox             我的待办（按 整改接收人ID 过滤，含已完成明细）
-     GET  /api/mobile/dispatched        我派发出去的记录（按 指派人ID 过滤，未完成 + 已完成两组）
+     GET  /api/mobile/dispatched        我派发出去的记录（指派人ID == 我 或 我在派发链路里）
      GET  /api/mobile/summary           首页统计（5 个数字与各自下钻源一并下发，保证同源）
      POST /api/mobile/assign/complete   完成待办（仅接收人可操作）
    ============================================================================ */
@@ -2918,18 +2967,44 @@ async function handleAssign(request, env) {
     return errRes('FORBIDDEN', '公司管理账号不可作为整改接收人（其身份角色为公司管理，不因花名册职位而改变）', 403, corsHeaders(origin));
   }
 
+  // CF-WPS-派发链路：把「这条记录经手过的所有派发人」记下来（只追加、不覆盖）。
+  //   否则公司管理派给经理、经理再转派给管理员后，记录上的「指派人ID」变成经理，
+  //   公司管理的「派发记录」里这条就消失了（2026-09-30 用户反馈的线上缺陷）。
+  const meId = String(payload.sub || '');
+  const meName = String(payload.name || '');
+  const meDept = patrolText(payload.department || '', 40);
+  const prevAssignerId = fieldText(hit.fields[TODO_FIELDS.assignerId]);
+  const prevAssignerName = fieldText(hit.fields[TODO_FIELDS.assignerName]);
+  const prevAssignerDept = fieldText(hit.fields[TODO_FIELDS.assignerDept]);
+  const prevAssignedAt = fieldText(hit.fields[TODO_FIELDS.assignedAt]);
+  const linkIds = chainSplitIds(hit.fields[TODO_FIELDS.chainId]);
+  let linkText = fieldText(hit.fields[TODO_FIELDS.chainText]);
+  // 老数据升级：链路列还空着、但已有指派人 → 用现任指派人把链路起点补上
+  if (!linkIds.length && prevAssignerId) linkIds.push(prevAssignerId);
+  if (!linkText && prevAssignerId && prevAssignerName) {
+    linkText = chainLabel(prevAssignerName, prevAssignerDept, prevAssignedAt);
+  }
+  // 同一人重复指派（改派）不重复记账 —— 链路记的是「谁经手过」，不是「派了几次」
+  if (meId && !linkIds.includes(meId)) {
+    linkIds.push(meId);
+    const meLabel = chainLabel(meName, meDept, todoNowLocal());
+    linkText = linkText ? (linkText + CHAIN_SEP + meLabel) : meLabel;
+  }
+
   const fields = {
     [TODO_FIELDS.assigneeId]: assigneeId,
     [TODO_FIELDS.assigneeName]: assigneeName || assigneeId,
     [TODO_FIELDS.town]: patrolText((body && body.town) || '', 40),
     [TODO_FIELDS.status]: TODO_STATUS.pending,
-    [TODO_FIELDS.assignerId]: String(payload.sub || ''),
-    [TODO_FIELDS.assignerName]: String(payload.name || ''),
+    [TODO_FIELDS.assignerId]: meId,
+    [TODO_FIELDS.assignerName]: meName,
     // 指派人单位 = 指派人自己的所属部门（如 公司管理=安环管理部），供「来自 XXX · 单位」显示
-    [TODO_FIELDS.assignerDept]: patrolText(payload.department || '', 40),
+    [TODO_FIELDS.assignerDept]: meDept,
     [TODO_FIELDS.assignedAt]: todoNowLocal(),
     [TODO_FIELDS.doneAt]: '',
     [TODO_FIELDS.note]: patrolText((body && body.note) || '', 200),
+    [TODO_FIELDS.chainId]: linkIds.join(','),
+    [TODO_FIELDS.chainText]: linkText,
   };
   try {
     await adapter.updateRecord(env, cfg.fileId, target.sheetId, recordId, fields);
@@ -3062,7 +3137,10 @@ async function handleInbox(request, env) {
 // 上个月派的到今天没整改完，这个月继续挂在列表里，直到整改完成才消失。
 // 与 /api/mobile/inbox 互为镜像：
 //   inbox      = 整改接收人ID == 我（别人派给我的）
-//   dispatched = 指派人ID     == 我（我派出去的）
+//   dispatched = 我派出去的 = 指派人ID == 我 **或** 我在「派发链路」里
+//                （后者覆盖「公司管理 → 经理 → 管理员」这种转派：
+//                 经理一转派，记录上的指派人ID 就变成经理了，只看指派人ID 会让
+//                 公司管理这条记录凭空消失 —— 2026-09-30 用户反馈的线上缺陷）
 // 门槛在前端：只有实际会派发的角色（公司管理 / 乡镇作业中心经理）挂这个页签；
 // 管理员不转派（前端转派页对管理员直接跳过），列表恒空，故不给它挂。
 async function handleDispatched(request, env) {
@@ -3085,19 +3163,39 @@ async function handleDispatched(request, env) {
   // 与 inbox 同款取数：优先飞书原生 search（单次往返），失败再退回全表扫描兜底。
   // 退路必须保留：指派人ID 列在极早的老数据上可能为空，search 不匹配时会返回空集而不是报错，
   // 所以兜底只在**抛异常**时走（列不存在 / search 列不过滤）。
+  //
+  // CF-WPS-派发链路：要取**两路**再合并 ——
+  //   ① 指派人ID == 我       （我现在就是这条的派发方）
+  //   ② 派发链路ID contains 我（我派过，但已被下游转派；只查 ① 会让记录凭空消失）
+  // 任一路抛错都退回全表扫描，保证结果集与旧口径**单调变多**、不会漏。
   let sent;
   try {
-    sent = await adapter.searchRecords(env, cfg.fileId, target.sheetId, {
-      field: TODO_FIELDS.assignerId, value: me, maxPages: 5,
-    });
+    const [asAssigner, inChain] = await Promise.all([
+      adapter.searchRecords(env, cfg.fileId, target.sheetId, {
+        field: TODO_FIELDS.assignerId, value: me, maxPages: 5,
+      }),
+      adapter.searchRecords(env, cfg.fileId, target.sheetId, {
+        field: TODO_FIELDS.chainId, value: me, operator: 'contains', maxPages: 5,
+      }),
+    ]);
+    const seen = new Set();
+    sent = [];
+    for (const r of asAssigner.concat(inChain)) {
+      if (!r || seen.has(r.id)) continue;
+      seen.add(r.id);
+      sent.push(r);
+    }
   } catch {
     let recs;
     try { recs = await adapter.scanRecords(env, cfg.fileId, target.sheetId); }
     catch { return errRes('WPS_UPSTREAM_ERROR', '派发记录暂不可用，请稍后再试', 502, corsHeaders(origin)); }
-    sent = recs.filter((r) => fieldText(r.fields[TODO_FIELDS.assignerId]) === me);
+    sent = recs.filter((r) => isMyDispatch(r.fields, me));
   }
 
-  const sortKey = (r) => fieldText(r.fields[TODO_FIELDS.assignedAt]);
+  // 排序 / 挂账 / 本月派发都用**我方视角**的派发时间：
+  //   我是最新指派人 → 指派时间；我已被下游转派 → 链路里属于我的那一段时间。
+  //   否则公司管理看到的会是「经理转派的时间」，挂账天数与本月派发都会被算错。
+  const sortKey = (r) => myDispatchTime(r.fields, me) || fieldText(r.fields[TODO_FIELDS.assignedAt]);
   const byNewest = (a, b) => String(sortKey(b)).localeCompare(String(sortKey(a)));
 
   // 本月派发数：**始终**按本月算，不受 ?month 参数影响 —— 首页统计卡取它，
@@ -3122,6 +3220,17 @@ async function handleDispatched(request, env) {
   const openPage = open.slice(0, PATROL_LIST_LIMIT);
   const donePage = doneAll.slice(0, PATROL_LIST_LIMIT);
 
+  // 派发方视角的视图：把「派发时间」换成**我方**的时间，并带上转派信息，
+  //   让公司管理一眼看出「这条我已转派下去，现在在谁手上」。
+  const viewForMe = (r) => {
+    const v = todoView(r, true);
+    const mine = myDispatchTime(r.fields, me);
+    if (mine) v.assigned_at = mine;
+    v.reassigned = fieldText(r.fields[TODO_FIELDS.assignerId]) !== me;   // 我已不是最新派发方
+    v.chain = fieldText(r.fields[TODO_FIELDS.chainText]);
+    return v;
+  };
+
   return jsonRes({
     success: true, code: 'OK',
     me: { id: me, name: String(payload.name || ''), role: String(payload.role || '') },
@@ -3134,8 +3243,8 @@ async function handleDispatched(request, env) {
     // records 语义**保持不变**（= 仅未完成），避免打断既有断言；
     // 已完成走 done_records（「已完成」分组可查）。
     // 传 full=true 补全 description / rectify_photo_count —— 详情页要用。
-    records: openPage.map((r) => todoView(r, true)),
-    done_records: donePage.map((r) => todoView(r, true)),
+    records: openPage.map(viewForMe),
+    done_records: donePage.map(viewForMe),
   }, 200, corsHeaders(origin));
 }
 
@@ -3147,7 +3256,7 @@ async function handleDispatched(request, env) {
 
    各数字的过滤键，必须与对应下钻接口**逐字一致**：
      month_post     = 备注.巡查人ID == 我  且 巡查时间在本月        → patrol/records?month=
-     month_dispatch = 指派人ID     == 我  且 指派时间在本月        → dispatched?month=
+     month_dispatch = 我派过的（指派人ID==我 或 我在派发链路里） 且 我方派发时间在本月 → dispatched?month=
      pending        = 整改接收人ID == 我  且 整改状态 ≠ 已完成     → inbox（未完成部分）
      rectified      = 整改接收人ID == 我  且 完成时间在本月        → inbox（已完成部分）
      closed         = 本机口径（主台账没有「整改完成」独立列，服务端无法判断
@@ -3183,7 +3292,9 @@ async function handleSummary(request, env) {
   const patrolTime = (r) => patrolIdentity(r.fields).inspectionTime || msToPatrolTime((r.fields || {})['日期']);
 
   const minePatrol = recs.filter((r) => !!me && patrolCode(r) === me);
-  const mineDispatch = recs.filter((r) => !!me && f(r, TODO_FIELDS.assignerId) === me);
+  // CF-WPS-派发链路：含「我派过但已被下游转派」的（只看指派人ID 会让公司管理的记录消失）
+  const mineDispatch = recs.filter((r) => isMyDispatch(r.fields, me));
+  const myDispatchAt = (r) => myDispatchTime(r.fields, me) || f(r, TODO_FIELDS.assignedAt);
   const mineInbox = recs.filter((r) => !!me && f(r, TODO_FIELDS.assigneeId) === me);
 
   return jsonRes({
@@ -3191,7 +3302,7 @@ async function handleSummary(request, env) {
     me: { id: me, name: String(payload.name || ''), role },
     month: thisYm,
     month_post: minePatrol.filter((r) => inMonth(patrolTime(r))).length,
-    month_dispatch: mineDispatch.filter((r) => inMonth(f(r, TODO_FIELDS.assignedAt))).length,
+    month_dispatch: mineDispatch.filter((r) => inMonth(myDispatchAt(r))).length,
     pending: mineInbox.filter((r) => !isDone(r)).length,
     rectified: mineInbox.filter((r) => isDone(r) && inMonth(f(r, TODO_FIELDS.doneAt))).length,
     // 派发方视角的两个数（供「派发记录」页签角标，省掉首页单独再拉一次 dispatched）

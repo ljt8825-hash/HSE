@@ -7,7 +7,7 @@
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-09-23.73">
+<meta name="hse-build" content="2026-09-23.74">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -1049,8 +1049,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
      读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
    - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
    - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
-<script src="./config.js?v=2026-09-23.73"></script>
-<script src="./app.js?v=2026-09-23.73"></script>
+<script src="./config.js?v=2026-09-23.74"></script>
+<script src="./app.js?v=2026-09-23.74"></script>
 <script>
 /* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
 (function(){
@@ -2122,6 +2122,10 @@ function dispatchedToRec(t){
     assignedAt: t.assigned_at || "",
     doneAt: t.done_at || "",
     note: t.note || "",
+    // CF-WPS-派发链路：我已不是最新派发方（被下游转派了）→ 卡片要提示，
+    // 否则「派给 XXX」会让人以为活还在原接收人手上（其实已经在下一手那里）。
+    reassigned: t.reassigned === true,
+    chain: t.chain || "",
     // CF-WPS-58：保留服务端原始视图供详情页直接渲染，不再二次拼字段 ——
     // 否则「列表能显示的字段」与「详情能显示的字段」会各自演化、迟早对不上。
     _srv: t,
@@ -2173,6 +2177,11 @@ function dispatchCard(rec, opts){
     ? '<span class="chip" style="margin-left:6px;background:' + (days >= 30 ? '#FEE2E2;color:#B91C1C' : '#EEF2FF;color:#4338CA') + '" title="从派发当天算起">挂账 ' + days + ' 天</span>'
     : "";
   const who = rec.assigneeName ? "派给 " + rec.assigneeName + (rec.town ? " · " + rec.town : "") : "未指定接收人";
+  // CF-WPS-派发链路：已被下游转派时回显完整链路（「公司管理 → 经理 → 管理员」），
+  // 并保留「派给 <当前接收人>」—— 一眼看出这条现在挂在谁名下。
+  const chainLine = rec.reassigned
+    ? '<div class="r-sub" style="color:var(--t3)">已转派 · ' + esc(rec.chain || "") + "</div>"
+    : "";
   const tail = (done && rec.doneAt)
     ? '<div class="r-sub" style="color:var(--success)">完成于 ' + esc(String(rec.doneAt).slice(0, 16)) + "</div>"
     : '<div class="r-sub" style="color:var(--t4)">派发于 ' + esc(String(rec.assignedAt || "").slice(0, 16)) + "</div>";
@@ -2180,6 +2189,7 @@ function dispatchCard(rec, opts){
     '<div class="r-top">' + chip + daysChip + "</div>" +
     '<div class="r-title">' + esc(rec.type === "三违" ? rec.behavior : "普通巡查") + "</div>" +
     '<div class="r-sub">' + esc(who) + "</div>" +
+    chainLine +
     (rec.personName ? '<div class="r-sub">涉及人员 ' + esc(rec.personName) + "</div>" : "") +
     tail;
   // CF-WPS-58：可点开详情。仍然是**只读**的 —— 详情页不给任何写入口，
