@@ -36,14 +36,15 @@ function fnBody(name) {
   return html.slice(start, nxt < 0 ? html.length : start + m[0].length + nxt);
 }
 
-console.log('═══ 1. 版本自洽（.73）═══');
+console.log('═══ 1. 版本自洽（≥ .73）═══');
 {
   const build = (html.match(/<meta name="hse-build" content="([^"]+)">/) || [])[1];
   const cfg = (html.match(/config\.js\?v=([^"]+)"/) || [])[1];
   const app = (html.match(/app\.js\?v=([^"]+)"/) || [])[1];
   ck(!!build, 'hse-build meta 存在', build);
   ck(build === cfg && build === app, 'hse-build / config.js / app.js 三处版本一致', `${build} / ${cfg} / ${app}`);
-  ck(build === '2026-09-23.73', '版本 = .73', build);
+  // 不硬编码具体 build：只要求「不早于引入本流程的 .73」，后续版本升级不再弄红这条用例
+  ck(!!build && build >= '2026-09-23.73', '版本 ≥ .73（引入本流程的基线）', build);
 }
 
 console.log('\n═══ 2. openRectify：派发任务进「下一步」态 ═══');

@@ -7,7 +7,7 @@
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-09-23.74">
+<meta name="hse-build" content="2026-09-23.75">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -1049,8 +1049,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
      读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
    - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
    - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
-<script src="./config.js?v=2026-09-23.74"></script>
-<script src="./app.js?v=2026-09-23.74"></script>
+<script src="./config.js?v=2026-09-23.75"></script>
+<script src="./app.js?v=2026-09-23.75"></script>
 <script>
 /* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
 (function(){
@@ -3284,8 +3284,23 @@ function makeRecord(extra){
 }
 
 /* ---- 上报后端（后台执行，不阻塞用户看到「完成」页） ----
-   幂等键已在 makeRecord 固定 → 重复调用只落一条，安全重试。 */
-async function syncRecord(rec, assignTo){
+   幂等键已在 makeRecord 固定 → 重复调用只落一条，安全重试。
+   CF-WPS-重复台账：再叠一层**单飞锁** —— 同一记录在途时，后续调用直接复用同一个 Promise。
+   根因：从 pending 到 synced 的整段过程（照片上传 + 建单 ≈2~4s）记录一直可被重入，
+   而 retryPendingSync 有 6 个独立触发点（回首页 / 进台账 / online / 40s 轮询 / 完成页 / boot），
+   两次并发提交用同一个 clientRequestId → 服务端「先查后写」双双落空 → 台账重复建单。 */
+const syncInFlight = new Map();   // rec.id -> 在途 Promise
+function syncRecord(rec, assignTo){
+  if(!rec || rec.syncState === "synced") return Promise.resolve(rec);
+  const running = syncInFlight.get(rec.id);
+  if(running) return running;     // 已有在途请求 → 复用，绝不再发第二次
+  const p = syncRecordOnce(rec, assignTo).finally(() => {
+    if(syncInFlight.get(rec.id) === p) syncInFlight.delete(rec.id);
+  });
+  syncInFlight.set(rec.id, p);
+  return p;
+}
+async function syncRecordOnce(rec, assignTo){
   if(!rec || rec.syncState === "synced") return rec;
   try {
     // ── 提交前置校验：把「必然被服务端 400 拒掉」的情况拦在本地 ──────────────
@@ -3346,7 +3361,18 @@ function makeAndSync(extra){
   return rec;
 }
 // 补传所有未同步记录（进「巡查台账」时调用）
-async function retryPendingSync(){
+/* CF-WPS-重复台账：全局互斥 —— 六个触发点（enterHome / 台账入口 / online / 40s 轮询 /
+   完成页按钮 / boot）共用同一个在途 Promise，避免多路补传同时跑、把同一条记录并发提交。 */
+let retrySyncInFlight = null;
+function retryPendingSync(){
+  if(retrySyncInFlight) return retrySyncInFlight;
+  const p = retryPendingSyncOnce();
+  retrySyncInFlight = p;
+  // 静默吞掉 rejection（所有调用点都是 fire-and-forget「失败静默」语义），并保证锁一定释放
+  p.catch(() => {}).finally(() => { if(retrySyncInFlight === p) retrySyncInFlight = null; });
+  return p;
+}
+async function retryPendingSyncOnce(){
   const pend = db.records.filter(r => r.syncState !== "synced");
   if(!pend.length) return;
   for(const r of pend) await syncRecord(r);

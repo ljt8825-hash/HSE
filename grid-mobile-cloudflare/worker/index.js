@@ -2366,8 +2366,50 @@ function validatePatrolBody(body, problemTypes, violationLib) {
   };
 }
 
+/* ---- CF-WPS-重复台账：并发提交的写后自愈 ------------------------------------
+   背景：/patrol/submit 的幂等是「先查后写」——findExistingByClientRequestId 查一次
+   （~200-400ms），没命中就 createRecords。客户端只要在第一次提交**在途期间**又发一次
+   （同一个 client_request_id），两条请求就会都在对方落库前完成预查 → 双双建单 →
+   台账里出现逐字段一致、只有创建时间差几秒的多条记录。
+   实测生产：112 条里 27 组重复、多出 53 条。
+
+   这里在建单成功后按 req 回查一次，>1 条时保留创建最早的一条、删掉其余重复。
+   只删「本次建单前后 10 分钟内创建」的，避免误伤任何历史记录。
+   全程静默失败：自愈是附加保护，绝不能把一次已经成功的提交变成 502。
+   调用方用 ctx.waitUntil 触发 → 不给提交链路增加延迟。 */
+async function healDuplicatePatrolRecords(adapter, env, fileId, sheetId, clientRequestId) {
+  try {
+    if (!clientRequestId || typeof adapter.searchRecords !== 'function') return 0;
+    const rows = await adapter.searchRecords(env, fileId, sheetId, {
+      field: '备注', operator: 'contains', value: 'req:' + clientRequestId, maxPages: 2,
+    });
+    if (!rows || rows.length < 2) return 0;
+    // 创建时间：主台账「日期」是日期型自动列（毫秒）。取不到就退化为「保持返回顺序」。
+    const at = (r) => {
+      const v = r && r.fields && r.fields['日期'];
+      const n = Number(v && typeof v === 'object' ? (v.value ?? v.text) : v);
+      return Number.isFinite(n) && n > 0 ? n : Number.MAX_SAFE_INTEGER;
+    };
+    const sorted = [...rows].sort((a, b) => at(a) - at(b));
+    const keep = sorted[0];
+    const now = Date.now();
+    const victims = sorted.slice(1)
+      .filter((r) => r.id && r.id !== keep.id)
+      .filter((r) => { const t = at(r); return t === Number.MAX_SAFE_INTEGER || (now - t) < 10 * 60 * 1000; })
+      .map((r) => r.id);
+    if (!victims.length) return 0;
+    await adapter.batchDelete(env, fileId, sheetId, victims);
+    invalidateMainLedger(fileId, sheetId);
+    console.warn('[patrol-dedupe] req=' + clientRequestId + ' removed=' + victims.length + ' kept=' + keep.id);
+    return victims.length;
+  } catch (e) {
+    console.warn('[patrol-dedupe] skipped: ' + (e && e.message));
+    return 0;
+  }
+}
+
 // ---- POST /api/mobile/patrol/submit ----
-async function handlePatrolSubmit(request, env) {
+async function handlePatrolSubmit(request, env, ctx) {
   const origin = corsOrigin(request, env);
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
   try {
@@ -2542,6 +2584,13 @@ async function handlePatrolSubmit(request, env) {
       return errRes('WPS_UPSTREAM_ERROR', '存储写入失败', 502, corsHeaders(origin));
     }
     invalidateMainLedger(fileId, sheetId);   // CF-WPS-43：写后失效缓存，下次查重可见新记录
+    // CF-WPS-重复台账：并发提交自愈（写后回查去重）。挂在 waitUntil 上 → 不加提交延迟；
+    // 测试环境（无 ctx）退化为直接 await，行为一致。
+    {
+      const heal = healDuplicatePatrolRecords(adapter, env, fileId, sheetId, values.clientRequestId);
+      if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(heal);
+      else await heal;
+    }
     const notify = assignInfo
       ? await notifyAssign(env, cfg, {
           assigneeId: assignInfo[TODO_FIELDS.assigneeId],
@@ -3514,7 +3563,7 @@ async function handleServerPhoto(request, env) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const p = url.pathname;
 
@@ -3539,7 +3588,7 @@ export default {
     if (p === '/api/mobile/geo/regeo') return handleGeoRegeo(request, env);
     // CF-WPS-13：网格长巡查文字业务链
     if (p === '/api/mobile/patrol/meta') return handlePatrolMeta(request, env);
-    if (p === '/api/mobile/patrol/submit') return handlePatrolSubmit(request, env);
+    if (p === '/api/mobile/patrol/submit') return handlePatrolSubmit(request, env, ctx);
     if (p === '/api/mobile/patrol/attach') return handlePatrolAttach(request, env);
     if (p === '/api/mobile/patrol/records') return handlePatrolRecords(request, env);
     // CF-WPS-36：整改待办（跨账号指派）
@@ -3623,6 +3672,8 @@ export {
   handlePatrolMeta,
   handlePatrolSubmit,
   handlePatrolAttach,
+  // CF-WPS-重复台账：并发提交的写后自愈（离线测试用）
+  healDuplicatePatrolRecords,
   // CF-WPS-36 整改待办
   handleAssign,
   handleInbox,
