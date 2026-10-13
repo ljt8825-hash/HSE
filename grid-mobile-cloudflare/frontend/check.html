@@ -7,7 +7,7 @@
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-09-23.75">
+<meta name="hse-build" content="2026-10-13.76">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -1049,8 +1049,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
      读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
    - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
    - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
-<script src="./config.js?v=2026-09-23.75"></script>
-<script src="./app.js?v=2026-09-23.75"></script>
+<script src="./config.js?v=2026-10-13.76"></script>
+<script src="./app.js?v=2026-10-13.76"></script>
 <script>
 /* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
 (function(){
@@ -4293,6 +4293,13 @@ document.addEventListener("DOMContentLoaded", () => {
           transferAdminId: node.phone || node.name, transferAdminName: node.name,
           transferAdminJob: node.position || node.grade || "",
           transferAdminRole: kind });
+        // CF-WPS-派发草稿残留：转派流程绕开了 makeAndSync（因为要建单即指派并合并写入），
+        // 忘了清草稿 ⇒ 首页会一直挂着「继续上次未完成的检查 · 已选三违行为：XXX」，
+        // 点那张卡片就 resumeTargetView("vio") 回到「选择三违」界面（selectViolation 里
+        // 写下的 lastView），给人「上一步/返回首页又回到三违」的错觉。
+        // 必须在 syncRecord 之前 clearDraft，失败时记录留在本机 db.records 待重试 —— 与
+        // makeAndSync 同口径（3357-3361）。
+        clearDraft();
         // CF-WPS-43：一次 submit 同时完成「建单 + 指派」（服务端合并写入），
         // 原来要串行跑 submit(4s) → assign(3s) 两段，用户干等 7~8 秒。
         const assignTo = node.phone ? {
