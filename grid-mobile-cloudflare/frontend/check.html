@@ -7,7 +7,7 @@
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-10-13.81">
+<meta name="hse-build" content="2026-10-13.82">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -1049,8 +1049,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
      读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
    - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
    - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
-<script src="./config.js?v=2026-10-13.81"></script>
-<script src="./app.js?v=2026-10-13.81"></script>
+<script src="./config.js?v=2026-10-13.82"></script>
+<script src="./app.js?v=2026-10-13.82"></script>
 <script>
 /* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
 (function(){
@@ -2020,6 +2020,37 @@ function applySummary(s){
   setBadge("badge-dispatch", DISPATCH_TAB_ROLES.indexOf(session.role) >= 0 ? inboxDispatchPending : 0);
 }
 function myChecks(){ return db.records.filter(r => r.checkerId === session.id && r.type === "三违"); }
+/* CF-WPS-82：本机「还没传上去」的记录 —— **不限三违**。
+   为什么必须单独抽出来：台账页的「待上报」分组与页顶同步条说的是同一件事，
+   但前者走 myChecks()（type==="三违"），后者走全量 db.records ⇒ 同一个概念出现两个数。
+   实测（经理，本机 1 条三违 + 1 条普通巡查未上报）：
+     同步条「有 2 条记录待上报」，点进台账却是「待上报（1）」，
+   差的那条是普通巡查 —— 它被 myChecks() 滤掉，于是**在台账页完全看不到**
+   （既不进「待上报」，也不在服务端「已上报台账」里），只能靠同步条盲点重试。
+   服务端那半边的「已上报台账」是**不分类型**的（serverRecCard 对普通巡查显示「普通巡查 · 结果」），
+   所以本机这半边也不该分类型。两处共用本函数 = 数字必然一致。 */
+function myUnsyncedRecords(){
+  if(!session || !db || !db.records) return [];
+  return (db.records || []).filter(r => r.syncState !== "synced");
+}
+/* CF-WPS-82：本机「已经传上去了、但还没整改完」的三违 —— 台账页「未闭环（N）」分组
+   与「巡查台账」页签角标（badge-checks）共用它，保证角标数字在页面上一定找得到对应分组。
+   为什么限定三违：普通巡查走 makeAndSync({type:"巡查"}) 建单后 status 恒为 unfinished
+   （它没有整改环节，submitRectify 只服务三违）⇒ 按「未完成」数普通巡查会永远数不清。
+   为什么限定 synced：未上报的那些属于「待上报」分组（页顶同步条同数），
+   两边按 syncState 严格二分，同一条记录不会在页面上出现两次。 */
+function myOpenLoopedRecords(){
+  if(!session || !db || !db.records) return [];
+  return (db.records || []).filter(r =>
+    r.checkerId === session.id && r.type === "三违" &&
+    r.status === "unfinished" && r.syncState === "synced");
+}
+/* 「巡查台账」页签角标的**唯一**写入口（数字只在 myOpenLoopedRecords() 一处算）。
+   refreshHomeStats 与 renderSyncBar 都调它 —— 后者在补传成功 / 进台账时跑，
+   保证「补传成功 ⇒ 记录从待上报挪进未闭环 ⇒ 角标当场跟着变」，不必等 25s 轮询。 */
+function refreshLedgerBadge(){
+  setBadge("badge-checks", myOpenLoopedRecords().length);
+}
 // 本月上报：本自然月内本人提交的全部记录（三违上报 + 普通巡查），按自然月统计
 function isSameMonth(t, ref){
   const a = new Date(t), b = new Date(ref);
@@ -2052,7 +2083,7 @@ function updateRectifiedStat(){
   const el = document.getElementById("stat-rectified");
   if(el) el.textContent = inboxMonthlyDone + localRectifiedThisMonth();
 }
-function refreshHomeStats(){
+function refreshHomeStats(force){
   const mine = myChecks();
   const monthCount = db.records.filter(r => r.checkerId === session.id && isSameMonth(r.time, Date.now())).length;
   const pending = db.records.filter(r => r.status !== "done" && r.status !== "reviewed" && (r.rectifierId === session.id || r.transferAdminName === session.name));
@@ -2067,7 +2098,11 @@ function refreshHomeStats(){
   updateRectifiedStat();   // CF-WPS-44：先按本机值占位，服务端计数到手后 refreshInboxStats 会再刷一次
   refreshDispatchBadge();  // CF-WPS-45：让「派发记录」页签角标在首页就可见，不必点进去才知道有活挂着
   const unfinished = mine.filter(r => r.status === "unfinished");
-  setBadge("badge-checks", unfinished.length);
+  // CF-WPS-82：角标改与台账页「未闭环（N）」分组严格同源。
+  // 原来数的是「本机未完成三违（不分是否上报）」，可台账页只分「待上报 / 已上报台账」两组
+  // —— 实测角标写 2，页面上找不到任何一组是 2（待上报 1、服务端台账 3）。
+  // 现在按 syncState 二分：未上报 → 待上报（页顶同步条同数）；已上报未完成 → 未闭环（角标同数）。
+  refreshLedgerBadge();
   setBadge("badge-rectify", pending.length);
   // CF-WPS-40：原 setBadge("badge-review") 指向的 DOM 不存在，角标从未显示；
   // 改为落进首页待办文案，让「已整改、待复查」的记录真正可见。
@@ -2084,7 +2119,7 @@ function refreshHomeStats(){
   // CF-WPS-36b：上级指派给我的待办存在**服务端**，不在本机 db。
   // 不补这一步的话，被指派人登录后首页「待整改」是 0、红点也不亮，
   // 只有主动点进「我的整改」才发现有人派了活给他 —— 等于没有提醒。
-  refreshInboxStats(pending.length, lines.slice());
+  refreshInboxStats(pending.length, lines.slice(), force);
 }
 
 /* 页签角标（异步，失败静默）：派发方在首页就能看到还有几条挂着没整改完。
@@ -2095,9 +2130,17 @@ async function refreshDispatchBadge(){
   try{ await loadDispatched(false); setBadge("badge-dispatch", inboxDispatchPending); }catch(e){ /* 拉取失败：不亮角标，不打断首页 */ }
 }
 // 首页统计：数字统一由 /api/mobile/summary 出（与下钻明细同源）；inbox 只用来生成待办文案
-async function refreshInboxStats(localPending, baseLines){
+/* CF-WPS-82：`force` 必须一路透传到 loadSummary。
+   原来这里写死 loadSummary(false)，而 loadSummary 全文件**没有任何一处**传过 true
+   ⇒ SUMMARY_TTL(20s) 缓存永远命中，注释里承诺的「强制回源跳过缓存」只对 inbox 生效。
+   实测：把 summary.pending 从 2 改成 0 后走整改完成路径（loadInbox(true)+refreshHomeStats()），
+   「待整改」卡与「整改任务」角标**仍是 2**，要等 21s 越过 TTL 才归零
+   ⇒ 被指派人整改完，红点最长 20 秒不灭，用户以为没提交成功。
+   只有显式用户动作（整改完成）才 force；25s 后台轮询不 force —— /summary 是整表扫描，
+   轮询周期(25s)本就大于 TTL(20s)，每次都会自然回源，不需要再强制。 */
+async function refreshInboxStats(localPending, baseLines, force){
   try{
-    const s = await loadSummary(false);
+    const s = await loadSummary(!!force);
     if(s) applySummary(s);
     const inbox = await loadInbox(false);          // 60s 缓存，不会每次进首页都回源
     const localIds = new Set((db.records || []).map(r => r.serverRecordId).filter(Boolean));
@@ -3468,7 +3511,9 @@ async function retryPendingSyncOnce(){
 function renderSyncBar(){
   const bar = $("#sync-bar");
   if(!bar) return;
-  const pend = db.records.filter(r => r.syncState !== "synced");
+  // CF-WPS-82：与台账页「待上报（N）」分组共用同一函数 —— 两个数字必须永远相等
+  const pend = myUnsyncedRecords();
+  refreshLedgerBadge();   // CF-WPS-82：角标与「未闭环」分组同源，每次重算同步条时一起对齐
   if(!pend.length){ bar.classList.add("hidden"); bar.innerHTML = ""; return; }
   const failed = pend.filter(r => r.syncState === "failed").length;
   bar.classList.remove("hidden");
@@ -3765,7 +3810,8 @@ function serverRecCard(x, opts){
 async function renderMyChecks(){
   const el = document.getElementById("my-checks-list");
   if(!el) return;
-  const pend = myChecks().filter(r => r.syncState !== "synced");
+  const pend = myUnsyncedRecords();        // CF-WPS-82：与页顶同步条同口径（原来走 myChecks() 会漏掉普通巡查）
+  const open = myOpenLoopedRecords();      // CF-WPS-82：与「巡查台账」页签角标同口径
   el.innerHTML = '<div class="empty-tip">正在读取台账…</div>';
   const list = await loadServerRecs(true);
   el.innerHTML = "";
@@ -3775,13 +3821,22 @@ async function renderMyChecks(){
     el.appendChild(lab);
     pend.forEach(r => el.appendChild(recordCard(r, { from: "view-my-checks" })));
   }
+  // CF-WPS-82：已上报但还没整改完的三违。以前这组记录在台账页**没有任何分组**
+  // （既不进「待上报」，服务端那张卡也只写「已上报」+ 可选 todo_status），
+  // 而页签角标却在数它们 ⇒ 数字无家可归。现在补上这一组，角标 = 这一组的条数。
+  if(open.length){
+    const lab = document.createElement("div");
+    lab.className = "section-label"; lab.textContent = "未闭环（" + open.length + "）";
+    el.appendChild(lab);
+    open.forEach(r => el.appendChild(recordCard(r, { from: "view-my-checks" })));
+  }
   if(list && list.length){
     const lab = document.createElement("div");
     lab.className = "section-label"; lab.textContent = "已上报台账（" + list.length + "）";
     el.appendChild(lab);
     list.forEach(x => el.appendChild(serverRecCard(x)));
   }
-  if(!pend.length && (!list || !list.length)){
+  if(!pend.length && !open.length && (!list || !list.length)){
     el.innerHTML = '<div class="empty-tip">' + (serverRecsErr ? "台账读取失败：" + esc(serverRecsErr) : "暂无记录") + "</div>";
   }
 }
@@ -4298,9 +4353,10 @@ function submitRectify(){
       done.completeError = done.completedToServer ? "" : ((r.body && (r.body.message || r.body.code)) || ("HTTP " + r.status));
       saveDB();
       // CF-WPS-44：整改完成即时回显（首页「待整改」-1、「已整改」+1），不必等 25s 轮询。
-      // 强制回源跳过 60s 缓存，否则服务端计数还是整改前的旧值。
+      // CF-WPS-82：必须 refreshHomeStats(true) 把 force 透到 loadSummary —— 只 force inbox
+      // 是不够的：「待整改」卡与「整改任务」角标取的是 summary.pending，照样被 20s 缓存挡住。
       if(done.completedToServer){
-        try{ await loadInbox(true); refreshHomeStats(); }catch(e){ /* 静默：下次轮询会补上 */ }
+        try{ await loadInbox(true); refreshHomeStats(true); }catch(e){ /* 静默：下次轮询会补上 */ }
       }
     })();
   } else if(done.afterPhoto && !done.rectifyPhotoToken && done.serverRecordId){
