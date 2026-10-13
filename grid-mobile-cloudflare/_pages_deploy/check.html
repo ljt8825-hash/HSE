@@ -7,7 +7,7 @@
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-10-13.80">
+<meta name="hse-build" content="2026-10-13.81">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -1049,8 +1049,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
      读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
    - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
    - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
-<script src="./config.js?v=2026-10-13.80"></script>
-<script src="./app.js?v=2026-10-13.80"></script>
+<script src="./config.js?v=2026-10-13.81"></script>
+<script src="./app.js?v=2026-10-13.81"></script>
 <script>
 /* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
 (function(){
@@ -2341,14 +2341,24 @@ async function renderStatDetail(drill){
 
   let nodes = [];
   let err = "";
+  /* CF-WPS-81：本组**真实总数**（服务端全量口径，与统计卡同源）。
+     列表有 PATROL_LIST_LIMIT=50 上限，而卡片数字是全量 —— 后端早就把 total /
+     pending_count / done_count / monthly_done_count 一起下发了，前端却**一处都没消费**
+     ⇒「卡上写 60、点进去 50」，连明细页自己的标题都写 50，跟卡片当面打架且毫无解释。
+     （派发记录页早就有「（仅列最近 N 条）」的先例，这里补齐其余四处。）
+     null = 本机口径（closed），没有上限，nodes.length 就是真值。 */
+  let trueTotal = null;
 
   if(drill === "closed"){
     const mine = myChecks().filter(r => r.status === "done" || r.status === "reviewed");
     nodes = mine.map(r => recordCard(r, back));
   } else if(drill === "month_post"){
     const r = await mobileApi("/api/mobile/patrol/records?mine=1&month=" + localYm() + "&limit=50", null, "GET");
-    if(r.status === 200 && r.body && r.body.success) nodes = (r.body.records || []).map(x => serverRecCard(x, back));
-    else err = (r.body && r.body.message) || ("HTTP " + r.status);
+    if(r.status === 200 && r.body && r.body.success){
+      const recs = r.body.records || [];
+      nodes = recs.map(x => serverRecCard(x, back));
+      trueTotal = Number(r.body.total) || recs.length;   // total = 命中总数，不受分页影响
+    } else err = (r.body && r.body.message) || ("HTTP " + r.status);
   } else if(drill === "month_dispatch"){
     // 一次拉全「未完成 + 已完成」两组；切分段时直接用缓存，不再请求
     if(!sdDispatchData){
@@ -2357,6 +2367,9 @@ async function renderStatDetail(drill){
         sdDispatchData = {
           pending: (r.body.records || []).map(dispatchedToRec).map(x => ({ s: x })),
           done: (r.body.done_records || []).map(dispatchedToRec).map(x => ({ s: x })),
+          // 两组的真实总数（已按月过滤，见 handleDispatched 的 view）
+          pendingTotal: Number(r.body.pending_count) || 0,
+          doneTotal: Number(r.body.done_count) || 0,
         };
       } else err = (r.body && r.body.message) || ("HTTP " + r.status);
     }
@@ -2365,6 +2378,9 @@ async function renderStatDetail(drill){
     const want = drill === "pending" ? "待整改" : "已完成";
     let list = (inbox || []).filter(t => t.todoStatus === want);
     if(drill === "rectified") list = list.filter(t => String(t.doneAt || "").slice(0, 7) === localYm());
+    // 待整改不按月过滤 → 真值 = pending_count；已整改按月 → 真值 = monthly_done_count。
+    // 都不能用 list.length（那是被 50 条上限截断后的）。
+    trueTotal = drill === "pending" ? inboxCounts.pending : inboxCounts.doneThisMonth;
     // CF-WPS-79：这两个明细是**接收方视角**（这些任务是别人派给我的），
     // 以前却复用了 dispatchCard（派发方视角）⇒ 每条都写「未指定接收人」
     // （todoToRec 根本没有 assigneeName 字段），派发人反而完全不显示（实测确认）。
@@ -2382,19 +2398,28 @@ async function renderStatDetail(drill){
 
   // 本月派发走分段渲染（本机未同步的按是否已完成分别归入两组），见下方分支
   if(drill === "month_dispatch" && sdDispatchData){
+    let lp = 0, ld = 0;
     localUnsyncedRecords(drill).forEach(r => {
       const fin = r.status === "done" || r.status === "reviewed";
-      (fin ? sdDispatchData.done : sdDispatchData.pending).push({ l: r });
+      if(fin){ ld++; sdDispatchData.done.push({ l: r }); }
+      else { lp++; sdDispatchData.pending.push({ l: r }); }
     });
+    // 统计卡的数字 = 服务端全量 + 本机未同步增量（见 applySummary / localUnsynced），
+    // 分段上的数字必须同口径，否则本地那几条一进来又对不上。
+    sdDispatchData.pendingTotal = (sdDispatchData.pendingTotal || 0) + lp;
+    sdDispatchData.doneTotal = (sdDispatchData.doneTotal || 0) + ld;
   }
 
   // 本机未同步的增量（closed 本就是本机口径，不叠；month_dispatch 已在上方归入分段两组）
   if(drill !== "closed" && drill !== "month_dispatch"){
-    localUnsyncedRecords(drill).forEach(r => {
+    const extra = localUnsyncedRecords(drill);
+    extra.forEach(r => {
       const o = { from: "stat-detail" };
       if(drill === "pending") o.goLine = "点击开始整改";
       nodes.push(recordCard(r, o));
     });
+    // 同上：卡片数字含本机未同步增量，标题口径必须一致
+    if(extra.length) trueTotal = (trueTotal || 0) + extra.length;
   }
 
   el.innerHTML = "";
@@ -2405,18 +2430,23 @@ async function renderStatDetail(drill){
     const isDone = sdDispatchTab === "done";
     const seg = document.createElement("div");
     seg.className = "sd-seg";
+    // 分段上的数字也用**真实总数**（否则「卡上 60」点进来分段写 50）
+    const pt = Math.max(sdDispatchData.pendingTotal || 0, P.length);
+    const dt = Math.max(sdDispatchData.doneTotal || 0, D.length);
     seg.innerHTML =
-      '<button type="button" data-tab="pending" class="' + (isDone ? '' : 'on warn') + '">未完成 <span class="n">' + P.length + '</span></button>' +
-      '<button type="button" data-tab="done" class="' + (isDone ? 'on ok' : '') + '">已完成 <span class="n">' + D.length + '</span></button>';
+      '<button type="button" data-tab="pending" class="' + (isDone ? '' : 'on warn') + '">未完成 <span class="n">' + pt + '</span></button>' +
+      '<button type="button" data-tab="done" class="' + (isDone ? 'on ok' : '') + '">已完成 <span class="n">' + dt + '</span></button>';
     seg.querySelectorAll("button").forEach(b => {
       b.onclick = () => { if(sdDispatchTab === b.dataset.tab) return; sdDispatchTab = b.dataset.tab; renderStatDetail(drill); };
     });
     el.appendChild(seg);
 
     const list = isDone ? D : P;
+    const total = Math.max(isDone ? dt : pt, list.length);
     const lab = document.createElement("div");
     lab.className = "section-label";
-    lab.textContent = (isDone ? "已完成" : "未完成") + " · " + list.length + " 条";
+    lab.textContent = (isDone ? "已完成" : "未完成") + " · " + total + " 条" +
+      (total > list.length ? "（仅列最近 " + list.length + " 条）" : "");
     el.appendChild(lab);
 
     if(!list.length){
@@ -2435,7 +2465,12 @@ async function renderStatDetail(drill){
 
   const lab = document.createElement("div");
   lab.className = "section-label";
-  lab.textContent = meta.title + " · " + nodes.length + " 条";
+  // 标题写**真实总数**，被 50 条上限截断时明说「仅列最近 N 条」——
+  // 否则卡片写 60、这里写 50，用户只会以为系统算错了。
+  const shown = nodes.length;
+  const total = (trueTotal && trueTotal > shown) ? trueTotal : shown;
+  lab.textContent = meta.title + " · " + total + " 条" +
+    (total > shown ? "（仅列最近 " + shown + " 条）" : "");
   el.appendChild(lab);
   if(!nodes.length){
     const e = document.createElement("div");
@@ -3575,6 +3610,10 @@ function renderListInto(elId, records, opts){
    CF-WPS-36：指派关系现在写在服务端台账上，被指派人才能真正收到。
    这些记录**不在本机 db 里**（是别人建的），所以必须单独拉并转成卡片形状渲染。 */
 let inboxRecs = null, inboxAt = 0, inboxPending = 0;
+/* CF-WPS-81：/inbox 的**真实总数**（全量口径，不受 todos 列表 50 条上限影响）。
+   下钻明细的标题要用它，否则「卡上 60、明细 50」。与 inboxPending 分开存：
+   后者历史上被 applySummary 与本函数**两处**写过，语义已含混，别再往上叠。 */
+let inboxCounts = { pending: 0, doneThisMonth: 0 };
 // CF-WPS-44：服务端「本月已整改」计数（指派给我 + 完成时间在本自然月），首页「已整改」卡片取它。
 // 由服务端按全量台账统计，不受 todos 列表 50 条上限影响。
 let inboxMonthlyDone = 0;
@@ -3652,10 +3691,12 @@ async function loadInbox(force){
   if(r.status !== 200 || !r.body || !r.body.success){
     inboxRecs = []; inboxAt = Date.now();
     inboxMonthlyDone = 0;   // 拉取失败：不残留上一次的旧值，交由本机口径兜底
+    inboxCounts = { pending: 0, doneThisMonth: 0 };
     return inboxRecs;
   }
   inboxPending = Number(r.body.pending_count) || 0;
   inboxMonthlyDone = Number(r.body.monthly_done_count) || 0;   // CF-WPS-44（老 Worker 无此字段时按 0）
+  inboxCounts = { pending: inboxPending, doneThisMonth: inboxMonthlyDone };
   inboxRecs = (r.body.todos || []).map(todoToRec);
   inboxAt = Date.now();
   return inboxRecs;
