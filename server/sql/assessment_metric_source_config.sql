@@ -8,7 +8,10 @@
 -- 关联：hse_assessment_metric(metric_code)
 -- 生效库：safety_dashboard_dev（严禁在生产库直跑，生产需走计划任务 + 显式授权）
 -- 幂等：建表 IF NOT EXISTS；seed 用 WHERE NOT EXISTS 避免重复
--- 现有语义：seed 的 training / accident 两行 = 代码中原 FILL_SOURCES 的逐字节口径
+-- 现有语义：seed 仅 training 一行 = 代码中原 FILL_SOURCES.training 的逐字节口径。
+--           事故否决（一票否决）已于 2026-10-13 口径清理移出本配置表：自 2026-09-05 起由规则引擎
+--           accidentVetoAdapter（METRIC_CODE=HSE-KPI-NEG-004）独家承担，生产零 NEG-001/002/003 数据，
+--           故本表不再 seed accident 源，从根本上杜绝「config/legacy 与规则引擎并存 → 同事故双扣」陷阱。
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS hse_assessment_metric_source (
@@ -53,27 +56,18 @@ WHERE NOT EXISTS (
 );
 
 -- ----------------------------------------------------------------------------
--- Seed 2：事故否决（原 FILL_SOURCES.accident）
---   来源表 accidents，按 accident_type 映射到否决指标：
---     交通事故   -> HSE-KPI-NEG-002
---     环境污染事故 -> HSE-KPI-NEG-003
---     其它       -> HSE-KPI-NEG-001（default）
---   命中即否决（fixed_score=100，总分归 0）
+-- Seed 2（已移除，2026-10-13 口径清理）：事故否决源不再 seed 到本配置表。
+--   原因：事故否决（一票否决 100 分）自 2026-09-05 起由规则引擎 accidentVetoAdapter
+--         （METRIC_CODE=HSE-KPI-NEG-004）独家承担；生产 18 行事故否决记录全部为 NEG-004，
+--         本表声称的 NEG-001/002/003 在生产零数据。保留 accident 源会埋下
+--         「config/legacy 与规则引擎并存 → 同事故双扣」的陷阱，故彻底移出。
+--   既有库（dev/prod）中已存在的 accident 源：用配套迁移 SQL
+--         server/sql/assessment_metric_source_remove_accident.sql 将其 is_deleted=TRUE。
 -- ----------------------------------------------------------------------------
-INSERT INTO hse_assessment_metric_source
-  (metric_code, source_name, source_type, source_table, filter_expr,
-   agg_type, fixed_score, is_veto, map_column, veto_metric_map, item_template, enabled, sort_order)
-SELECT
-  'HSE-KPI-NEG-001', 'accident', 'sql', 'accidents',
-  'personnel_id = $1 AND accident_date >= $2 AND accident_date <= $3 AND is_deleted = FALSE',
-  'row', 100, TRUE, 'accident_type',
-  '{"交通事故":"HSE-KPI-NEG-002","环境污染事故":"HSE-KPI-NEG-003","default":"HSE-KPI-NEG-001"}'::jsonb,
-  '{accident_type}（否决项）', TRUE, 20
-WHERE NOT EXISTS (
-  SELECT 1 FROM hse_assessment_metric_source WHERE source_name = 'accident'
-);
 
 -- ----------------------------------------------------------------------------
--- 注：原代码 LEGACY_TRAINING_FILL / LEGACY_ACCIDENT_VETO 环境变量开关由引擎在
---     读取配置后做最终覆盖（source_name 匹配），保持「设 false 即停用」的现状能力。
+-- 注：本配置表仅承载「评分需跨模块取数」的数据源（当前仅 training）。
+--     事故否决（NEG-004）由规则引擎 accidentVetoAdapter 独家承担，不属于本表职责。
+--     引擎 getMetricSources 已对 source_name='accident' 做硬排除，即便本表误 seed 也不会双扣。
+--     LEGACY_TRAINING_FILL 环境变量仍控制 training 源（设 false 即停用），LEGACY_ACCIDENT_VETO 已无作用。
 -- ----------------------------------------------------------------------------
