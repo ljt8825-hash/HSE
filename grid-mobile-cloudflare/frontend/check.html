@@ -7,7 +7,7 @@
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-10-13.82">
+<meta name="hse-build" content="2026-10-13.83">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -1049,8 +1049,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
      读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
    - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
    - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
-<script src="./config.js?v=2026-10-13.82"></script>
-<script src="./app.js?v=2026-10-13.82"></script>
+<script src="./config.js?v=2026-10-13.83"></script>
+<script src="./app.js?v=2026-10-13.83"></script>
 <script>
 /* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
 (function(){
@@ -4828,12 +4828,20 @@ function showAddHomeModal(){
 //    脚本执行时 #add-home-do / #add-home-close 还是 null，
 //    直接绑定会静默失败（安卓实测：「我知道了」按了没反应，浮层关不掉）。
 //    委托挂在 document 上，与 DOM 先后顺序无关，以后挪动 HTML 也不会再坏。
+// CF-WPS-83：判断命中**必须用 closest()，不能看 e.target.id**。
+//    #btn-add-home 是张**多子元素卡片**（标题 div / 右侧箭头 svg / 底部提示 div），
+//    手指点上去 e.target 永远是某个子元素、id 是空串 ⇒ 老代码 `if(!t.id) return` 直接吞掉，
+//    于是「点标题文字 / 点箭头 / 点提示行」全都没反应，只有卡片最外圈几像素的 padding 好使。
+//    实测（.82，四点点位）：卡片空白处 → 浮层开；标题 / 箭头 / 提示 → 全不开。
+//    浮层里那两个 <button> 只包文本、e.target 就是自己，所以旧写法在它们身上碰巧是对的。
 document.addEventListener('click', (e) => {
   const t = e.target;
-  if(!t || !t.id) return;
-  if(t.id === 'btn-add-home'){ pressAddHome(t); return; }
-  if(t.id === 'add-home-close'){ document.getElementById('add-home-modal').style.display = 'none'; return; }
-  if(t.id === 'add-home-do'){ doAddHome(t); return; }
+  if(!t || !t.closest) return;                       // 点到的可能是 document/window，closest 不存在
+  const addHomeCard = t.closest('#btn-add-home');
+  if(addHomeCard){ pressAddHome(addHomeCard); return; }
+  if(t.closest('#add-home-close')){ document.getElementById('add-home-modal').style.display = 'none'; return; }
+  const addHomeDo = t.closest('#add-home-do');
+  if(addHomeDo){ doAddHome(addHomeDo); return; }
 });
 
 // 点击「添加到手机桌面」：先给一段**看得见**的加载态（转圈 + 副标题变化），
