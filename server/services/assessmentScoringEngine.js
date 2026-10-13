@@ -656,6 +656,7 @@ function warnLegacyFillOnce(kind, envKey) {
 
 async function getMetricSources() {
   if (!isConnected()) return [];
+  try {
   const r = await pool.query(
     `SELECT * FROM hse_assessment_metric_source
      WHERE enabled = TRUE AND is_deleted = FALSE
@@ -669,6 +670,14 @@ async function getMetricSources() {
     return s;
   }).filter((s) => s.enabled);
   return rows;
+  } catch (e) {
+    // 配置表尚未建立（如生产库未跑 DDL）时返回空数组，上层回退 legacy，
+    // 避免 “relation does not exist” 使评分同步整体崩溃。
+    if (!/does not exist/i.test(e.message)) {
+      console.error('[assessment-scoring] getMetricSources 查询异常:', e.message);
+    }
+    return [];
+  }
 }
 
 async function fetchSourceRows(source, employeeId, start, end) {
