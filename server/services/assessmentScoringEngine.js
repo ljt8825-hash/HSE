@@ -14,6 +14,10 @@
  */
 
 const { pool, isConnected } = require('../config/db');
+// 归类 + 类别上限 + 三违活源聚合（与列表/三违考核同源口径）
+const { resolveRuleForDeductionRows } = require('./assessmentRuleCategoryService');
+const { getCategoryCap, roleFromPosition } = require('./ruleEngine/categoryCap');
+const { getEmployeeSanweiTotal } = require('./violationAssessmentService');
 
 // ============================================================
 // 常量
@@ -319,6 +323,79 @@ async function getEffectiveDeductionTotal(targetId, cycleId, executor = pool) {
 }
 
 /**
+ * 按「类别扣分上限」封顶重算自动评分（P2 修正口径）。
+ * score = max(0, 100 − Σ_各类别 min(该对象该类别有效扣分合计, 类别上限))
+ *   - 归类：resolveRuleForDeductionRows（rule_name→category）
+ *   - 生效分：approved/adjusted 取 confirmed_score，其余取 suggested_score
+ *   - 三违管理类别 = 三违管理考核列表聚合（网格/巡查/填报 + 未按时整改 + 驾驶员三违 + 公司查处），
+ *     复用 violationAssessmentService（与列表同源，避免表内 kind 重复计数）
+ *   - 否决项类别有效扣分 > 0 → 命中否决，总分归 0（上限 100 兜底，命中必满额）
+ * @param {object} p
+ * @param {number} p.cycleId
+ * @param {number} p.targetId
+ * @param {number} p.employeeId
+ * @param {string} p.position    考核对象岗位中文名 → role
+ * @param {object} [p.executor]
+ * @returns {Promise<{scoreAuto:number, cappedDeduction:number, vetoHit:boolean, breakdown:Array}>}
+ */
+async function computeCategoryCappedScore({ cycleId, targetId, employeeId, position, executor = pool }) {
+  const role = roleFromPosition(position);
+  const r = await executor.query(
+    `SELECT id, deduction_item, source_detail, suggested_score, confirmed_score, review_status
+       FROM hse_assessment_deduction
+      WHERE target_id = $1 AND cycle_id = $2 AND is_deleted = FALSE
+        AND review_status <> 'rejected'
+        AND deduction_source IN ('auto','chain_transmission')`,
+    [targetId, cycleId]
+  );
+  const rows = r.rows || [];
+  const resolved = await resolveRuleForDeductionRows(rows);
+
+  // 每类累计（表内非三违类别用归类合计；三违类别单独用活源聚合整现值）
+  const catSum = new Map();
+  for (const { deduction: d, category } of resolved) {
+    if (!category) continue;
+    const eff = d.review_status === 'approved' || d.review_status === 'adjusted'
+      ? (d.confirmed_score != null ? Number(d.confirmed_score) : Number(d.suggested_score))
+      : Number(d.suggested_score);
+    if (!Number.isFinite(eff) || eff <= 0) continue;
+    catSum.set(category, (catSum.get(category) || 0) + eff);
+  }
+
+  // 否决项：有效扣分 > 0 → 命中否决
+  const vetoHit = (catSum.get('否决项') || 0) > 0;
+
+  // 三违管理类别：活源聚合整现值（含未按时整改/驾驶员/公司查处），与三违考核列表同源
+  const sanweiTotal = await getEmployeeSanweiTotal(cycleId, position, employeeId, { year: 0, month: 0 });
+  if (sanweiTotal > 0) catSum.set('三违管理', sanweiTotal);
+
+  // 逐类封顶求和
+  let cappedDeduction = 0;
+  const breakdown = [];
+  for (const [cat, raw] of catSum) {
+    const cap = await getCategoryCap(cat, executor, role);
+    const capped = Number.isFinite(cap) ? Math.min(raw, cap) : raw;
+    cappedDeduction += capped;
+    breakdown.push({
+      category: cat,
+      rawDeduction: Math.round(raw * 100) / 100,
+      cap: Number.isFinite(cap) ? cap : null,
+      capped: Math.round(capped * 100) / 100,
+    });
+  }
+
+  const scoreAuto = vetoHit
+    ? 0
+    : Math.max(0, Math.round((MAX_SCORE - Math.round(cappedDeduction * 100) / 100) * 100) / 100);
+  return {
+    scoreAuto,
+    cappedDeduction: Math.round(cappedDeduction * 100) / 100,
+    vetoHit,
+    breakdown,
+  };
+}
+
+/**
  * 重算单个考核对象分数（以扣分明细为准）
  * 更新：hse_assessment_target.score_auto / score_total / grade / rank
  * P2-B1-E-08-04：新增可选 executor（事务 client），供「撤销即时回滚」在同一业务事务内重算；
@@ -361,8 +438,13 @@ async function recalculateTarget(cycleId, targetId, executor = pool, opts = {}) 
     await executor.query(`SELECT set_config('app.allow_frozen_target_score_recalc', 'on', true)`);
   }
 
-  const totalDeduction = await getEffectiveDeductionTotal(targetId, cycleId, executor);
-  const scoreAuto = Math.max(0, Math.round((MAX_SCORE - totalDeduction) * 100) / 100);
+  const { scoreAuto, cappedDeduction, vetoHit } = await computeCategoryCappedScore({
+    cycleId,
+    targetId,
+    employeeId: target.employee_id,
+    position: target.position,
+    executor,
+  });
 
   // 重算总分
   const updated = await executor.query(
@@ -379,13 +461,14 @@ async function recalculateTarget(cycleId, targetId, executor = pool, opts = {}) 
   const newTarget = updated.rows[0];
 
   // 同步该 target 聚合指标评分记录（保持 hse_assessment_score 可视化一致）
-  await syncTargetScoreSnapshot(cycleId, newTarget, scoreAuto, totalDeduction, executor);
+  await syncTargetScoreSnapshot(cycleId, newTarget, scoreAuto, vetoHit ? 100 : cappedDeduction, executor);
 
   return {
     ok: true,
     target: newTarget,
     scoreAuto,
-    totalDeduction,
+    totalDeduction: vetoHit ? 100 : cappedDeduction,
+    vetoHit,
     scoreTotal: newTarget.score_total,
     grade: newTarget.grade,
   };
@@ -565,11 +648,108 @@ function warnLegacyFillOnce(kind, envKey) {
   }
 }
 
+// ============================================================
+// 指标取数配置驱动（替代硬编码 FILL_SOURCES）
+// 从 hse_assessment_metric_source 读取启用源，按 source_table/filter_expr 动态取数。
+// 新增评分数据源只插配置行，不动本引擎。env 开关(LEGACY_*)做最终覆盖。
+// ============================================================
+
+async function getMetricSources() {
+  if (!isConnected()) return [];
+  const r = await pool.query(
+    `SELECT * FROM hse_assessment_metric_source
+     WHERE enabled = TRUE AND is_deleted = FALSE
+     ORDER BY sort_order ASC, id ASC`
+  );
+  let rows = r.rows || [];
+  // env 最终覆盖（保持 LEGACY_TRAINING_FILL / LEGACY_ACCIDENT_VETO 开关能力）
+  rows = rows.map((s) => {
+    if (s.source_name === 'training' && LEGACY_FILL_ENABLED.training === false) return { ...s, enabled: false };
+    if (s.source_name === 'accident' && LEGACY_FILL_ENABLED.accident === false) return { ...s, enabled: false };
+    return s;
+  }).filter((s) => s.enabled);
+  return rows;
+}
+
+async function fetchSourceRows(source, employeeId, start, end) {
+  if (source.source_type !== 'sql' || !source.source_table) return [];
+  const sql = `SELECT * FROM ${source.source_table} WHERE ${source.filter_expr}`;
+  const r = await pool.query(sql, [employeeId, start, end]);
+  return r.rows || [];
+}
+
+function renderItem(template, row) {
+  if (!template) return '自动扣分';
+  return String(template).replace(/\{(\w+)\}/g, (m, k) => (row[k] != null ? String(row[k]) : m));
+}
+
+function resolveVetoMetric(source, row) {
+  if (!source.is_veto || !source.veto_metric_map) return source.metric_code;
+  const map = source.veto_metric_map;
+  const key = row[source.map_column];
+  if (key != null && map[key] != null) return map[key];
+  return map.default || source.metric_code;
+}
+
+/**
+ * 为该考核对象补齐缺失的自动扣分明细（配置驱动版）
+ * 100% 保留原 training/accident 语义：逐行生成 auto 明细、否决映射、env 开关、幂等。
+ * 配置表无数据（dev 演练前未 seed）时回退 fillMissingDeductionsLegacy，行为零漂移。
+ */
+async function fillMissingDeductionsForTarget(cycle, target) {
+  if (!cycle || !target) return { added: 0 };
+  const start = cycle.start_time;
+  const end = cycle.end_time;
+
+  const sources = await getMetricSources();
+  if (!sources.length) {
+    // 配置表无数据：回退原硬编码，保证未 seed 时行为完全一致
+    return fillMissingDeductionsLegacy(cycle, target);
+  }
+
+  const dedBySource = await pool.query(
+    `SELECT source_table, source_id FROM hse_assessment_deduction
+     WHERE target_id = $1 AND cycle_id = $2 AND is_deleted = FALSE`,
+    [target.id, cycle.id]
+  );
+  const hasKey = new Set(dedBySource.rows.map((r) => `${r.source_table}:${r.source_id}`));
+
+  let added = 0;
+  for (const src of sources) {
+    try {
+      const rows = await fetchSourceRows(src, target.employee_id, start, end);
+      for (const row of rows) {
+        const sourceId = row.id;
+        const metricCode = src.is_veto ? resolveVetoMetric(src, row) : src.metric_code;
+        const key = `${src.source_table}:${sourceId}${src.is_veto ? '__' + metricCode : ''}`;
+        if (hasKey.has(key)) continue;
+        const detail = { sourceType: src.source_name, sourceId, backfill: true };
+        if (row.training_date) detail.trainingDate = row.training_date;
+        if (row.accident_date) detail.accidentDate = row.accident_date;
+        const ins = await addAutoDeduction({
+          targetId: target.id, cycleId: cycle.id, metricCode,
+          deductionItem: renderItem(src.item_template, row),
+          sourceTable: src.source_table, sourceId,
+          suggestedScore: src.fixed_score != null ? Number(src.fixed_score) : 0,
+          sourceDetail: detail,
+        });
+        if (ins) { added++; hasKey.add(key); }
+      }
+    } catch (e) {
+      if (/does not exist/i.test(e.message)) {
+        // 业务表/字段差异，容忍（与原逻辑一致）
+      } else throw e;
+    }
+  }
+  return { added };
+}
+
 /**
  * 为该考核对象补齐缺失的自动扣分明细（三违/培训不合格/事故否决）
  * 幂等：已存在的不重复生成。用于首次上线时覆盖事件驱动之前的历史数据。
+ * 配置表无数据时由 fillMissingDeductionsForTarget 回退调用（原硬编码版）。
  */
-async function fillMissingDeductionsForTarget(cycle, target) {
+async function fillMissingDeductionsLegacy(cycle, target) {
   if (!cycle || !target) return { added: 0 };
   const start = cycle.start_time;
   const end = cycle.end_time;
@@ -592,7 +772,7 @@ async function fillMissingDeductionsForTarget(cycle, target) {
         if (hasKey.has(key)) continue;
         const ins = await addAutoDeduction({
           targetId: target.id, cycleId: cycle.id, metricCode: FILL_SOURCES.training.metricCode,
-          item: FILL_SOURCES.training.makeItem(), sourceTable: FILL_SOURCES.training.sourceTable,
+          deductionItem: FILL_SOURCES.training.makeItem(), sourceTable: FILL_SOURCES.training.sourceTable,
           sourceId: row.source_id, suggestedScore: FILL_SOURCES.training.score,
           sourceDetail: { sourceType: 'training', sourceId: row.source_id, trainingDate: row.ev_date, backfill: true },
         });
@@ -618,7 +798,7 @@ async function fillMissingDeductionsForTarget(cycle, target) {
         if (hasKey.has(key)) continue;
         const ins = await addAutoDeduction({
           targetId: target.id, cycleId: cycle.id, metricCode: vetoMetric,
-          item: `${row.accident_type || '生产安全事故'}（否决项）`,
+          deductionItem: `${row.accident_type || '生产安全事故'}（否决项）`,
           sourceTable: 'accidents', sourceId: row.source_id, suggestedScore: 100,
           sourceDetail: { sourceType: 'accident', sourceId: row.source_id, accidentDate: row.ev_date, backfill: true },
         });
@@ -653,10 +833,12 @@ module.exports = {
   removeAutoDeduction,
   ensureTargetScoreRecord,
   getEffectiveDeductionTotal,
+  computeCategoryCappedScore,
   recalculateTarget,
   recalculateCycle,
   syncTargetScoreSnapshot,
   fillMissingDeductionsForTarget,
+  fillMissingDeductionsLegacy,
   isAssessmentTargetPosition,
   getEmployeeWithManager,
   findCycleForDate,
