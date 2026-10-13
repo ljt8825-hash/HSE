@@ -7,7 +7,7 @@
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-10-13.76">
+<meta name="hse-build" content="2026-10-13.78">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -1049,8 +1049,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
      读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
    - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
    - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
-<script src="./config.js?v=2026-10-13.76"></script>
-<script src="./app.js?v=2026-10-13.76"></script>
+<script src="./config.js?v=2026-10-13.78"></script>
+<script src="./app.js?v=2026-10-13.78"></script>
 <script>
 /* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
 (function(){
@@ -1312,16 +1312,22 @@ async function uploadPhotoToken(dataUrl, kind, clientRequestId){
     return r.body.file_token || null;
   }catch(e){ return null; }
 }
-// 整改后照片补挂（记录已提交，只能 PUT 回同一条）
-async function attachPhotoToRecord(rec, kind){
+// 照片补挂（记录已提交，只能 PUT 回同一条）。
+// kind = 'rectify' 整改后照片 / 'scene' 现场照片；token 可显式传入（换图场景：
+// 新 token 还没落盘到 rec 上，必须先补挂成功再更新本地字段）。
+async function attachPhotoToRecord(rec, kind, token){
   if(!rec || !rec.serverRecordId) return false;
-  const token = kind === "rectify" ? rec.rectifyPhotoToken : rec.photoToken;
-  if(!token) return false;
+  const tk = token || (kind === "rectify" ? rec.rectifyPhotoToken : rec.photoToken);
+  if(!tk) return false;
   const r = await mobileApi("/api/mobile/patrol/attach", {
-    record_id: rec.serverRecordId, kind: kind || "scene", photo_tokens: [token],
+    record_id: rec.serverRecordId, kind: kind || "scene", photo_tokens: [tk],
   });
   return r.status === 200 && r.body && r.body.success;
 }
+/* 照片指纹：判断 scenePhoto 是否还是「当初上传拿 token 的那一张」。
+   dataURL 可能有几百 KB，不能整串存进记录（localStorage 配额 4.75MB 红线）——
+   只存 长度+尾 32 字符，换图后必然对不上，足以触发重传。 */
+function photoFp(u){ return u ? (u.length + "|" + u.slice(-32)) : ""; }
 
 function patrolSubmitHint(res){
   const map = {
@@ -1463,6 +1469,10 @@ function renderView(name){   // 原 showView：只负责切换 DOM（CF-WPS-27 �
   window.scrollTo(0,0);
   syncTabbar(name);
   currentView = name;   // CF-WPS-63：唯一记录「当前在第几屏」的地方，供草稿续传使用
+  // CF-WPS-派发草稿残留（第二处）：done 是流程终屏 —— 在**唯一渲染入口**置位，
+  // 一处覆盖所有到终屏的路径（showDone 的「已发送整改任务」/「检查完成」，
+  // 以及「稍后整改」直接 showView("done") 那条，后者不经过 showDone，容易漏）。
+  if(name === "done") checkFlowDone = true;
 }
 
 /* ================= CF-WPS-27：系统返回键 = 页内返回 =================
@@ -1474,6 +1484,17 @@ function renderView(name){   // 原 showView：只负责切换 DOM（CF-WPS-27 �
    整条页内历史收拢回首页起点，避免返回键重走已完成的检查流程。 */
 let viewStack = [];      // 与历史条目一一对应的页内视图栈
 let navSuppress = false; // popstate 驱动的切换不重复入栈
+/* CF-WPS-派发草稿残留（第二处）：检查流程已走到终屏（done）的标记。
+   用户反馈「公司管理派发任务后，点『上一步』还是『返回首页』，都会回到三违的界面」——
+   这是**两个独立原因**叠在一起：
+     ① 返回首页 → 草稿残留 → 首页「继续上次检查」卡片 / 重载自动续传 → 回 vio（已由 pick() 里 clearDraft 修掉）；
+     ② 「上一步」（系统返回键 / 微信左上角返回）在 done 页按下去，会沿历史栈原路退回
+        transfer → handle → vio —— 而 transfer 那屏的接收人列表**还是渲染好的、仍然可点**，
+        于是同一条三违能被**重复派发**（与 CF-WPS-重复台账 同源）。
+   本文件 1479-1480 行本来就写明「避免返回键重走已完成的检查流程」，但旧实现只覆盖了
+   「返回首页」按钮那条路径（靠 history.go 收拢），没覆盖「停在 done 页直接按返回键」。
+   置位后 popstate 一律回首页，彻底断掉退回已完成流程的路。 */
+let checkFlowDone = false;
 /* CF-WPS-63：本次页面加载的唯一标识，写进每一条 history state。
    为什么要它 —— 低端安卓机调起相机时页面会被系统回收，点「确定」返回时页面已**整页重载**：
    浏览器历史里重载前的条目**一条没少**，但它们的 state 属于「上一次加载」。
@@ -1542,6 +1563,14 @@ window.addEventListener("popstate", (ev) => {
     return;
   }
   staleBackGuard = 0;
+  // CF-WPS-派发草稿残留（第二处）：流程已走到 done → 返回键不再重走已完成的检查流程。
+  // 不做这一步，从 done 退回 transfer 时接收人列表仍可点 ⇒ 重复派发（重复台账）。
+  if(checkFlowDone && isCheckFlowView(v)){
+    navSuppress = true;          // 由我们接管这次切换，不再往历史栈里塞条目
+    viewStack = ["home"];
+    enterHome();                 // showView("home") 见到 navSuppress 会跳过历史操作
+    return;
+  }
   while(viewStack.length && viewStack[viewStack.length - 1] !== v) viewStack.pop();
   if(!viewStack.length) viewStack = [v];
   navSuppress = true;
@@ -2539,6 +2568,7 @@ function startCheck(){
   draft = { scenePhoto: null, behavior: null, person: null, patrolResult: null, afterPhoto: null,
             coTown: null, coTeamDept: null, coTeamMgr: "", coTeamAdmins: [] };  // co*：级联选人的三层状态
   clearDraft();      // CF-WPS-42：开新检查即作废旧草稿，避免两个草稿互相打架
+  checkFlowDone = false;   // 开新检查 = 新流程，返回键守卫复位
   rectifyFlow = null;   // CF-WPS-被指派人确认：开新检查即退出「被指派人整改」上下文，防返回键/选人误分流
   resetScenePhotoUI();
   renderPatrolChoice();   // 清掉上一次的选中高亮，避免「看着选过了、其实没选」
@@ -3323,9 +3353,14 @@ async function syncRecordOnce(rec, assignTo){
       }
     }
 
-    // 照片先上传拿 file_token（只传一次，token 缓存在记录上；失败不静默丢）
-    if(rec.scenePhoto && !rec.photoToken){
-      rec.photoToken = await uploadPhotoToken(rec.scenePhoto, "scene", rec.clientRequestId);
+    // 照片先上传拿 file_token（token 缓存在记录上，同一张图不重复上传）。
+    // CF-WPS-换图：照片被换过（换图入口/重拍）时指纹对不上 → 旧 token 作废重传，
+    // 绝不用「换图前的旧 token」去建单（会出现图上文新的错配）。
+    if(rec.scenePhoto && (!rec.photoToken || rec.photoTokenFp !== photoFp(rec.scenePhoto))){
+      rec.photoToken = "";    // 作废旧 token：宁可重传，也不传旧图
+      const tk = await uploadPhotoToken(rec.scenePhoto, "scene", rec.clientRequestId);
+      rec.photoToken = tk || "";
+      if(rec.photoToken) rec.photoTokenFp = photoFp(rec.scenePhoto);
       saveDB();
       // 现场照片是三违证据，上传失败就整条记录一起留待重试 —— 避免「文字进了台账、证据没进」
       if(!rec.photoToken){
@@ -3402,6 +3437,8 @@ function renderSyncBar(){
   bar.onclick = () => retryPendingSync();
 }
 function showDone(rec, title){
+  // 终屏守卫 checkFlowDone 由 renderView("done") 统一置位（见 renderView 内注释），
+  // 这里不再重复设置，避免「稍后整改」那条不走本函数的路径被漏掉。
   $("#done-title").textContent = title || "整改完成";
   const c = $("#done-card");
   const rows = [];
@@ -3785,6 +3822,95 @@ function renderServerDetail(x, opts){
 // 这里补别名，让「已上报台账 / 服务端卡片」点击能正常打开详情（原 openServerDetail 未定义会抛错）。
 function openServerDetail(x, opts){ return renderServerDetail(x, opts); }
 
+/* CF-WPS-换图：详情页「换一张现场照片」卡片。
+   链路：选图（拍照 / 相册）→ compressImage 压缩降采样 → 本地预览 → 确认更换 →
+        已上报：uploadPhotoToken → attachPhotoToRecord(rec,'scene',新token) 覆盖台账附件列；
+        未上报：仅替换本机 scenePhoto 并作废旧 token（下次补传用新图，见 syncRecordOnce）。
+   复用拍照链同一套 compressImage（内存红线：峰值位图 ~2.5MB，不落全尺寸解码）。 */
+function sceneReplaceBox(rec, from){
+  const mk = html => { const d = document.createElement("div"); d.innerHTML = html; return d.firstElementChild; };
+  const box = mk('<div class="card" style="display:flex;flex-direction:column;gap:8px"></div>');
+  box.appendChild(mk('<div style="display:flex;justify-content:space-between;align-items:center">' +
+    '<span style="font-size:var(--fs-body);font-weight:600">换一张现场照片</span>' +
+    '<span style="font-size:var(--fs-sub);color:var(--t3)">' + (rec.serverRecordId ? "已上报" : "未上报") + "</span></div>"));
+  const acts = mk('<div class="btn-stack"></div>');
+  const btnCam = mk('<button class="btn-ghost btn-row" style="justify-content:center">拍现场照片</button>');
+  const btnAlb = mk('<button class="btn-ghost btn-row" style="justify-content:center">从相册上传</button>');
+  acts.appendChild(btnCam); acts.appendChild(btnAlb);
+  box.appendChild(acts);
+  const preview = mk('<div class="photo-box" style="display:none"></div>');
+  box.appendChild(preview);
+  const confirmRow = mk('<div class="btn-stack" style="display:none"></div>');
+  const btnOk = mk('<button class="btn-primary">确认更换</button>');
+  const btnCancel = mk('<button class="btn-ghost btn-row" style="justify-content:center">取消，保留原照片</button>');
+  confirmRow.appendChild(btnOk); confirmRow.appendChild(btnCancel);
+  box.appendChild(confirmRow);
+  const tip = mk('<div style="font-size:var(--fs-sub);color:var(--t3)">' +
+    (rec.serverRecordId ? "更换后同步更新后台台账照片" : "保存后随本条记录一起上报") + "</div>");
+  box.appendChild(tip);
+
+  const cam = document.createElement("input");
+  cam.type = "file"; cam.accept = "image/*"; cam.setAttribute("capture", "environment"); cam.className = "file-ghost";
+  const alb = document.createElement("input");
+  alb.type = "file"; alb.accept = "image/*"; alb.className = "file-ghost";
+  box.appendChild(cam); box.appendChild(alb);
+
+  let pending = null;   // 待确认的新图 dataURL
+  const backToPick = (msg) => {
+    pending = null;
+    preview.style.display = "none"; confirmRow.style.display = "none"; acts.style.display = "";
+    btnOk.disabled = false; btnOk.textContent = "确认更换";
+    tip.textContent = msg || (rec.serverRecordId ? "更换后同步更新后台台账照片" : "保存后随本条记录一起上报");
+    tip.style.color = "var(--t3)";
+  };
+  const choose = (input) => {
+    input.onchange = () => {
+      const f = input.files && input.files[0];
+      input.value = "";
+      if(!f) return;
+      tip.textContent = "正在处理照片…";
+      compressImage(f, (url) => {
+        if(!url){ tip.textContent = "照片读取失败，请重试或换另一个入口"; tip.style.color = "var(--danger)"; return; }
+        pending = url;
+        preview.innerHTML = '<img alt="新现场照片" src="' + url + '">';
+        preview.style.display = ""; confirmRow.style.display = ""; acts.style.display = "none";
+        tip.textContent = "已选新照片，确认后覆盖原照片"; tip.style.color = "var(--t3)";
+      });
+    };
+    input.click();
+  };
+  btnCam.onclick = () => choose(cam);
+  btnAlb.onclick = () => choose(alb);
+  btnCancel.onclick = () => backToPick("已取消，原照片未改动");
+  btnOk.onclick = async () => {
+    if(!pending) return;
+    btnOk.disabled = true; btnOk.textContent = "提交中…";
+    try{
+      if(rec.serverRecordId){
+        const tk = await uploadPhotoToken(pending, "scene", rec.clientRequestId);
+        if(!tk){ btnOk.disabled = false; btnOk.textContent = "确认更换"; tip.textContent = "照片上传失败，请检查网络后重试"; tip.style.color = "var(--danger)"; return; }
+        const ok = await attachPhotoToRecord(rec, "scene", tk);
+        if(!ok){ btnOk.disabled = false; btnOk.textContent = "确认更换"; tip.textContent = "后台台账更新失败，请稍后重试"; tip.style.color = "var(--danger)"; return; }
+        rec.photoToken = tk; rec.photoTokenFp = photoFp(rec.scenePhoto = pending);
+        flashMsg("现场照片已更换，后台台账已同步");
+      }else{
+        // 未上报：只换本机图；旧 token 作废，防止补传时把换图前的旧图再传一次
+        rec.photoToken = ""; rec.photoTokenFp = "";
+        rec.scenePhoto = pending;
+        flashMsg("现场照片已更换，将随本条记录上报");
+      }
+    }catch(e){
+      btnOk.disabled = false; btnOk.textContent = "确认更换";
+      tip.textContent = "更换失败，请稍后重试"; tip.style.color = "var(--danger)";
+      return;
+    }
+    saveDB();
+    renderDetail(rec, from);
+    if(viewStack[viewStack.length - 1] === "my-checks") renderMyChecks();
+  };
+  return box;
+}
+
 function renderDetail(rec, from){
   setDetailTitle("三违详情");
   const b = $("#detail-body"); b.innerHTML = "";
@@ -3814,6 +3940,13 @@ function renderDetail(rec, from){
     b.appendChild(mk('<div class="section-label">现场照片</div>'));
     const ph = mk('<div class="photo-box"><img alt="现场照片" src="' + rec.scenePhoto + '"></div>');
     b.appendChild(ph);
+    // CF-WPS-换图：现场照片拍错 → 详情页直接重拍替换。
+    //   已上报（有 serverRecordId）：新图上传后 PUT /patrol/attach(kind=scene) 覆盖台账「违章照片」列；
+    //   未上报：只换本机图并作废旧 token，下次补传随记录一起上新图。
+    // 入口只给「本人创建的记录」—— 服务端 patrolIsMine 同样按「备注·巡查人ID」校验，换不掉别人的。
+    if(rec.checkerId === session.id && (rec.serverRecordId || rec.syncState !== "synced")){
+      b.appendChild(sceneReplaceBox(rec, from));
+    }
   }
   // CF-WPS-派发图：服务端记录（无本机 scenePhoto）凭 token 显示派发原图
   else if(rec.scenePhotoTokens && rec.scenePhotoTokens.length){
@@ -3903,6 +4036,9 @@ let rectifying = null, rectifyFrom = null;
 //   { rec, person, classifying }；classifying=true 表示正处在「选人」这一步。
 let rectifyFlow = null;
 function openRectify(rec, from){
+  // 整改流程会复用 classify / pick-person 这些「检查流程视图」，
+  // 必须先复位终屏守卫，否则上一条检查刚完成时的 checkFlowDone 会把返回键误判成「重走已完成流程」。
+  checkFlowDone = false;
   rectifying = rec; rectifyFrom = from || "view-home";
   // 顶部「未完成 · 行为 · 人名」信息卡已删（CF-WPS 整改页统一），无需再设 rf-chip / rf-summary
   $("#after-photo-box").innerHTML = "";

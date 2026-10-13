@@ -115,6 +115,45 @@ console.log('═══ 5. 草稿工具本身没被改坏 ═══');
     'RESUME_VIEWS 仍包含 vio（= 残留草稿能落到三违屏）');
 }
 
+console.log('═══ 6. 终屏守卫：完成后系统返回键不得退回已完成流程 ═══');
+{
+  // 用户原话里的「上一步」是**第二处独立原因**：done 页按返回键会沿历史栈原路退回
+  // transfer → handle → vio，而 transfer 那屏的接收人列表仍是渲染好的、仍可点
+  // ⇒ 同一条三违能被重复派发（与 CF-WPS-重复台账 同源）。
+  // 文件顶部注释本来就写着「避免返回键重走已完成的检查流程」，旧实现只覆盖了
+  // 「返回首页」按钮那条路径，没覆盖「停在 done 页直接按返回键」。
+  ck(/let checkFlowDone = false;/.test(html), '声明了终屏标记 checkFlowDone');
+
+  // 置位点必须在 renderView（唯一渲染入口）而不是 showDone —— 「稍后整改」那条出口
+  // 是直接 showView("done")，不经过 showDone，只写在 showDone 里会漏。
+  const rv = fnBody('function renderView(name)');
+  ck(!!rv, '找到 renderView()');
+  ck(/if\(name === "done"\) checkFlowDone = true;/.test(rv || ''),
+    'renderView() 里对 name==="done" 置位 checkFlowDone（覆盖所有终屏路径）');
+  const sd = fnBody('function showDone(rec, title)');
+  ck(!!sd, '找到 showDone()');
+  ck(!/checkFlowDone = true;/.test(sd || ''), 'showDone() 不再重复置位（单一置位点）');
+  ck(/#btn-later[\s\S]{0,900}showView\("done"\)/.test(html),
+    '「稍后整改」确实直接 showView("done")（所以必须靠 renderView 兜住）');
+
+  const sc = fnBody('function startCheck()');
+  ck(/checkFlowDone = false;/.test(sc || ''), 'startCheck() 复位 checkFlowDone（新流程）');
+
+  const or = fnBody('function openRectify(rec, from)');
+  ck(/checkFlowDone = false;/.test(or || ''),
+    'openRectify() 复位 checkFlowDone（整改流程复用 classify/pick-person，不能误伤）');
+
+  // popstate 里必须有「已完成 + 目标是检查流程视图 → 回首页」的拦截
+  const ps = html.slice(html.indexOf('window.addEventListener("popstate"'));
+  const guard = ps.slice(0, ps.indexOf('/* ================= 启动'));
+  ck(/checkFlowDone && isCheckFlowView\(v\)/.test(guard),
+    'popstate 里对「已完成 + 退回检查流程视图」做了拦截');
+  ck(/navSuppress = true;[\s\S]{0,120}viewStack = \["home"\];[\s\S]{0,120}enterHome\(\);/.test(guard),
+    '拦截动作 = navSuppress + viewStack 收拢 + enterHome()');
+  ck(guard.indexOf('checkFlowDone && isCheckFlowView(v)') < guard.indexOf('while(viewStack.length'),
+    '拦截放在「按历史栈回退」之前（否则已经渲染出来了）');
+}
+
 console.log('══════════════════════════════');
 console.log(bad ? `❌ ${bad} 项未通过` : '✅ 全部通过');
 process.exit(bad ? 1 : 0);

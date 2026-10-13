@@ -21,7 +21,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(HERE, '..', '_pages_deploy');
+// PAGES_ROOT 可覆盖静态根目录：默认仍是发布根 _pages_deploy（不改行为），
+// 但本地验证「还没 cp 进 _pages_deploy 的 frontend/ 改动」时可以直接指向 frontend/，
+// 避免为了跑一次 E2E 就把半成品改动推进发布根。
+const ROOT = path.resolve(process.env.PAGES_ROOT || path.resolve(HERE, '..', '_pages_deploy'));
 const WORKER_ORIGIN = process.env.WORKER_ORIGIN || 'https://grid-mobile-cloudflare-worker.ljt8825.workers.dev';
 const PORT = Number(process.env.PORT || 5899);
 
