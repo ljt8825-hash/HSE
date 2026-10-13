@@ -7,10 +7,11 @@
  *     pool.query mock 让补扣路径成功落库，并以「INSERT INTO hse_assessment_deduction」
  *     出现次数 + fetch SQL 是否出现 作为断言（等价于"是否产生补扣/否决"）。
  *
- * 关键断言：
- *   - 默认（env 未设）：两路 fetch 均执行，并各产生一次补扣/否决（= 现状，零行为变化）
- *   - LEGACY_TRAINING_FILL=false：training fetch 不被调用、不产生培训补扣
- *   - LEGACY_ACCIDENT_VETO=false：accident fetch 不被调用、不产生否决
+ * 关键断言（2026-10-13 A 方案口径清理后）：
+ *   - 事故否决已移出 config/legacy 路径（由规则引擎 accidentVetoAdapter / NEG-004 独家承担），故任何场景 accident fetch 均不被调用、不生成 NEG-001/002/003
+ *   - 默认（env 未设）：仅 training fetch 执行并产生培训补扣
+ *   - LEGACY_TRAINING_FILL=false：training fetch 不被调用、不产生培训补扣（accident 同样不生成）
+ *   - LEGACY_ACCIDENT_VETO：已无作用（accident 不在路径），保留 env 读取仅为向后兼容
  */
 
 jest.mock('../../config/db', () => ({
@@ -73,13 +74,13 @@ describe('旧路开关（默认=现状，env 未设）', () => {
     });
   });
 
-  test('training 与 accident fetch 均执行，且各产生一次补扣/否决', async () => {
+  test('仅 training fetch 执行并产生培训补扣；accident 不再走 config/legacy 路径', async () => {
     const r = await engineDefault.fillMissingDeductionsForTarget(CYCLE, TARGET);
     const sqls = issuedSqls();
     expect(sqls.some((s) => s.includes('training_records'))).toBe(true);
-    expect(sqls.some((s) => s.includes('accidents'))).toBe(true);
-    expect(insertCount()).toBe(2); // 培训补扣 + 事故否决
-    expect(r.added).toBe(2);
+    expect(sqls.some((s) => s.includes('accidents'))).toBe(false); // 事故否决已移出，不走本路径
+    expect(insertCount()).toBe(1); // 仅培训补扣
+    expect(r.added).toBe(1);
   });
 });
 
@@ -90,13 +91,13 @@ describe('LEGACY_TRAINING_FILL=false（停用培训补扣路）', () => {
     setupMock({ accidentRows: [{ source_id: 5, accident_type: '环境污染事故', ev_date: '2026-09-02' }] });
   });
 
-  test('training fetch 不被调用、不产生培训补扣；accident 路仍运行', async () => {
+  test('training fetch 不被调用、不产生培训补扣；accident 亦不在路径（零补扣）', async () => {
     const r = await engine.fillMissingDeductionsForTarget(CYCLE, TARGET);
     const sqls = issuedSqls();
     expect(sqls.some((s) => s.includes('training_records'))).toBe(false);
-    expect(sqls.some((s) => s.includes('accidents'))).toBe(true);
-    expect(insertCount()).toBe(1); // 仅事故否决
-    expect(r.added).toBe(1);
+    expect(sqls.some((s) => s.includes('accidents'))).toBe(false); // 事故否决已移出
+    expect(insertCount()).toBe(0);
+    expect(r.added).toBe(0);
   });
 });
 

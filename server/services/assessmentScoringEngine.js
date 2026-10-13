@@ -633,11 +633,14 @@ const FILL_SOURCES = {
 };
 
 // 旧评分路刹车开关（提示词-11）：默认启用 = 与现状完全一致（两路当前为死路，不产生任何新扣分）。
-// 业务拍板停用后，设环境变量 LEGACY_TRAINING_FILL=false / LEGACY_ACCIDENT_VETO=false 并重启即可，无需改码。
-// 这两路未来在事故/培训录入落键后会静默激活，且无测试覆盖、业务口径未拍板，故先提供刹车开关。
+// 业务拍板停用后，设环境变量 LEGACY_TRAINING_FILL=false 并重启即可，无需改码。
+//
+// 2026-10-13 口径清理（A 方案）：事故否决（一票否决 100 分）自 2026-09-05 起已由规则引擎
+// accidentVetoAdapter（METRIC_CODE=HSE-KPI-NEG-004，engine.js 注册、assessmentEventService 触发）独家承担，
+// 生产 18 行事故否决记录全部为 NEG-004，config 表 / legacy 路径声称的 NEG-001/002/003 在生产零数据。
+// 故本开关仅保留 training；accident 否决项彻底移出 config/legacy 路径，杜绝「config/legacy 与规则引擎并存 → 同事故双扣」陷阱。
 const LEGACY_FILL_ENABLED = {
   training: process.env.LEGACY_TRAINING_FILL !== 'false',
-  accident: process.env.LEGACY_ACCIDENT_VETO !== 'false',
 };
 
 const _legacyFillWarned = { training: false, accident: false };
@@ -663,12 +666,16 @@ async function getMetricSources() {
      ORDER BY sort_order ASC, id ASC`
   );
   let rows = r.rows || [];
-  // env 最终覆盖（保持 LEGACY_TRAINING_FILL / LEGACY_ACCIDENT_VETO 开关能力）
-  rows = rows.map((s) => {
-    if (s.source_name === 'training' && LEGACY_FILL_ENABLED.training === false) return { ...s, enabled: false };
-    if (s.source_name === 'accident' && LEGACY_FILL_ENABLED.accident === false) return { ...s, enabled: false };
-    return s;
-  }).filter((s) => s.enabled);
+  // 事故否决由规则引擎 accidentVetoAdapter（NEG-004）独家承担，config 表不再承载；
+  // 此处硬排除 accident 源，即便 DB 行被重新 is_deleted=FALSE 或误翻 env，也绝不会走 config 路径生成 NEG-001/002/003，
+  // 避免与规则引擎并存导致同事故双扣。
+  rows = rows
+    .filter((s) => s.source_name !== 'accident')
+    .map((s) => {
+      if (s.source_name === 'training' && LEGACY_FILL_ENABLED.training === false) return { ...s, enabled: false };
+      return s;
+    })
+    .filter((s) => s.enabled);
   return rows;
   } catch (e) {
     // 配置表尚未建立（如生产库未跑 DDL）时返回空数组，上层回退 legacy，
@@ -794,33 +801,10 @@ async function fillMissingDeductionsLegacy(cycle, target) {
     warnLegacyFillOnce('training', 'LEGACY_TRAINING_FILL');
   }
 
-  // 事故否决（旧路，受 LEGACY_ACCIDENT_VETO 开关控制；默认启用=现状）
-  if (LEGACY_FILL_ENABLED.accident) {
-    try {
-      const a = await pool.query(FILL_SOURCES.accident.fetchVeto, [target.employee_id, start, end]);
-      for (const row of a.rows) {
-        // 按事故类型映射否决指标
-        const vetoMetric = row.accident_type === '交通事故' ? 'HSE-KPI-NEG-002'
-          : row.accident_type === '环境污染事故' ? 'HSE-KPI-NEG-003'
-            : 'HSE-KPI-NEG-001';
-        const key = `accidents:${row.source_id}__${vetoMetric}`;
-        if (hasKey.has(key)) continue;
-        const ins = await addAutoDeduction({
-          targetId: target.id, cycleId: cycle.id, metricCode: vetoMetric,
-          deductionItem: `${row.accident_type || '生产安全事故'}（否决项）`,
-          sourceTable: 'accidents', sourceId: row.source_id, suggestedScore: 100,
-          sourceDetail: { sourceType: 'accident', sourceId: row.source_id, accidentDate: row.ev_date, backfill: true },
-        });
-        if (ins) { added++; hasKey.add(key); }
-      }
-    } catch (e) {
-      if (/does not exist/i.test(e.message)) {
-        // accidents 表字段可能差异，容忍
-      } else throw e;
-    }
-  } else {
-    warnLegacyFillOnce('accident', 'LEGACY_ACCIDENT_VETO');
-  }
+  // 事故否决（一票否决 100 分）自 2026-09-05 起由规则引擎 accidentVetoAdapter（METRIC_CODE=HSE-KPI-NEG-004）独家承担。
+  // 2026-10-13 口径清理（A 方案）：config 表 accident 源已 is_deleted，本 legacy 回退路径也不再生成 NEG-001/002/003，
+  // 彻底杜绝「config/legacy 与规则引擎并存 → 同事故双扣」。故此处不再处理事故否决。
+  // 若 config 表查询异常导致 getMetricSources 返回空而进入本回退路径，事故否决仍由规则引擎独立产出，不会出现漏扣。
 
   return { added };
 }
