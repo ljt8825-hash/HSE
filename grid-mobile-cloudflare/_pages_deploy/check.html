@@ -7,7 +7,7 @@
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-10-13.79">
+<meta name="hse-build" content="2026-10-13.80">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -1049,8 +1049,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
      读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
    - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
    - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
-<script src="./config.js?v=2026-10-13.79"></script>
-<script src="./app.js?v=2026-10-13.79"></script>
+<script src="./config.js?v=2026-10-13.80"></script>
+<script src="./app.js?v=2026-10-13.80"></script>
 <script>
 /* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
 (function(){
@@ -2365,9 +2365,14 @@ async function renderStatDetail(drill){
     const want = drill === "pending" ? "待整改" : "已完成";
     let list = (inbox || []).filter(t => t.todoStatus === want);
     if(drill === "rectified") list = list.filter(t => String(t.doneAt || "").slice(0, 7) === localYm());
-    nodes = list.map(t => drill === "rectified"
-      ? dispatchCard(t, { done: true, from: "stat-detail" })
-      : dispatchCard(t, back));
+    // CF-WPS-79：这两个明细是**接收方视角**（这些任务是别人派给我的），
+    // 以前却复用了 dispatchCard（派发方视角）⇒ 每条都写「未指定接收人」
+    // （todoToRec 根本没有 assigneeName 字段），派发人反而完全不显示（实测确认）。
+    // 改用 recordCard —— 它会挂「来自 XXX · 单位」来源标签、点击走 openRecord → openRectify
+    // 直接开始整改，与「我的整改」tab 完全一致。
+    nodes = list.map(t => recordCard(t, drill === "rectified"
+      ? { from: "stat-detail", tailLine: t.doneAt ? "完成于 " + String(t.doneAt).slice(0, 16) : "" }
+      : { from: "stat-detail", goLine: "点击开始整改" }));
   }
 
   if(err){
@@ -3479,6 +3484,10 @@ function statusChip(rec){
 function fmtTime(t){ const d = new Date(t); return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0") + " " + String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0"); }
 // 上报状态徽标（服务端落库状态；synced 是常态，不在卡片上占视觉）
 function syncChip(rec){
+  // CF-WPS-79：上级指派来的服务端待办（fromServer）根本没有「本机上报」这回事 ——
+  // 它本来就在飞书台账里（是别人建的单）。todoToRec 不带 syncState，以前会落到最后一行
+  // 显示「上报中」⇒「我的整改」里每条指派任务都挂着一个假徽标（实测确认）。
+  if(rec.fromServer) return "";
   if(rec.syncState === "synced") return '<span class="chip green" title="已上报飞书台账"><span class="dot"></span>已上报</span>';
   if(rec.syncState === "failed") return '<span class="chip red" title="' + esc(rec.syncError || "上报失败") + '"><span class="dot"></span>待补传</span>';
   return '<span class="chip yellow"><span class="dot"></span>上报中</span>';
@@ -3506,6 +3515,13 @@ function recordCard(rec, opts){
     img.className = "photo-thumb"; img.src = rec.scenePhoto; img.alt = "现场照片";
     card.appendChild(img);
   }
+  // CF-WPS-79：可选尾行（如「已整改」明细要显示完成时间）。用 textContent 写入，不拼 HTML。
+  if(opts.tailLine){
+    const tl = document.createElement("div");
+    tl.className = "r-sub"; tl.style.color = "var(--success)";
+    tl.textContent = opts.tailLine;
+    card.appendChild(tl);
+  }
   if(goLine){
     const go = document.createElement("div");
     go.className = "r-go";
@@ -3517,6 +3533,12 @@ function recordCard(rec, opts){
 }
 function openRecord(rec, opts){
   opts = opts || {};
+  // CF-WPS-79：服务端待办若**已整改完成**，本机没有它的形状（todoToRec 只是卡片壳，
+  // 没有整改人/整改时间），走本机详情页会显示「等待整改」——必须落到服务端权威详情。
+  if(rec.fromServer && rec.todoStatus === "已完成"){
+    openServerDetail(rec._srv || rec, { title: "整改详情", from: opts.from || "my-rectify" });
+    return;
+  }
   // 未完成 & 本人检查 & 三违 → 直接进入继续整改
   // CF-WPS-36：服务端指派来的待办（fromServer，status=transferred）也要能直接整改
   const canRectify = rec.type === "三违" && (
