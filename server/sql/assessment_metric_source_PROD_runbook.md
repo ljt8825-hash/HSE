@@ -121,11 +121,11 @@ DROP TABLE IF EXISTS hse_assessment_metric_source CASCADE;
 
 ## 5. 生产 env 开关说明（关键）
 
-生产 `.env` 当前：`LEGACY_ACCIDENT_VETO=false`（事故否决旧路已按拍板停用，改走规则引擎 `accident_veto`）。
+> ⚠️ 2026-10-13 A 方案口径清理后：事故否决已**彻底移出**配置表 / legacy 路径，由规则引擎 `accidentVetoAdapter`（METRIC_CODE=HSE-KPI-NEG-004）独家承担。本配置表**不再 seed accident 源**，引擎 `getMetricSources` 并对 `source_name='accident'` 硬排除。故"配置表 accident 行与规则引擎并存 → 同事故双扣"的陷阱已被根除。
 
-- 建表后，`accident` 行虽 `enabled=TRUE`，但引擎读取配置后会用 `LEGACY_ACCIDENT_VETO=false` **最终覆盖禁用**该 source（走规则引擎，不重复扣分）。
+- 既有生产库（建表早、已存在 accident 源的行）需另跑 `assessment_metric_source_remove_accident.sql` 将其 `is_deleted=TRUE`（幂等、纯 UPDATE，已随本改造入库）。未跑前，引擎硬排除仍保证不双扣。
 - `training` 行：受 `LEGACY_TRAINING_FILL` 控制（生产该值应维持启用，配置路径即为新口径）。
-- 即：**建表不会导致事故重复扣分**，与现状能力持平。
+- `LEGACY_ACCIDENT_VETO` 已无作用（accident 不在路径），保留 env 读取仅为向后兼容。
 
 如需临时关闭某 source 验证：直接 `UPDATE hse_assessment_metric_source SET enabled=FALSE WHERE source_name='training';` 即可，无需改代码、无需回滚整表。
 
