@@ -1,15 +1,15 @@
 // ============================================================================
 // 指标取数配置化改造 · 受控注入零漂移验证（DEV ONLY，幂等可重跑）
 // 护栏：只跑 safety_dashboard_dev，require config/db 前硬设 DB_NAME，连接后断言。
-// 因 dev 克隆库对考核对象无任何“不合格培训/事故”记录，注入受控测试数据
-// （1 条不合格培训 + 3 种事故类型）真实驱动回填，验证配置驱动版与原硬编码版的
-// 生成结果完全一致（尤其事故类型→否决指标映射）。结尾硬删测试业务行 + 扣分明细，
-// dev 还原；运行前也会清理上次可能遗留的【验证注入】标记数据，保证可重跑。
+// 因 dev 克隆库对考核对象无任何“不合格培训”记录，注入 1 条受控不合格培训真实驱动回填，
+// 验证配置驱动版与原硬编码版（legacy 回退）的生成结果完全一致。
+// 注（2026-10-13 A 方案口径清理后）：事故否决已彻底移出 config/legacy 路径（归规则引擎 NEG-004），
+//   本脚本不再注入事故、也不再校验事故映射——那部分由规则引擎单测/集成测试覆盖。
+// 结尾硬删测试业务行 + 扣分明细，dev 还原；运行前也会清理上次遗留的【验证注入】标记数据。
 // ============================================================================
 
 process.env.DB_NAME = 'safety_dashboard_dev';
 process.env.SCHEDULER_ENABLED = 'false';
-process.env.LEGACY_ACCIDENT_VETO = 'true';
 process.env.LEGACY_TRAINING_FILL = 'true';
 
 const db = require('../config/db');
@@ -17,8 +17,6 @@ const engine = require('../services/assessmentScoringEngine');
 
 const CYCLE_ID = 43;
 const TEST_TRAIN_DATE = '2026-09-15T09:30:00Z';
-const TEST_ACCIDENT_DATE = '2026-09-20';
-const ACC_TYPES = ['交通事故', '环境污染事故', '其它生产事故'];
 
 const cleanupTestData = async () => {
   const tr = await db.pool.query("SELECT id FROM training_records WHERE name LIKE '【验证注入】%'");
@@ -49,7 +47,7 @@ const cleanupTestData = async () => {
   const testTarget = targets[0];
   console.log('[SETUP] 测试考核对象:', testTarget.id, 'employee_id:', testTarget.employee_id, '| 总对象数:', targets.length);
 
-  // —— 受控注入 ——
+  // —— 受控注入（仅培训；事故否决已移出本路径，不注入）——
   const tr = await db.pool.query(
     `INSERT INTO training_records (name, employee_id, result, training_date, is_deleted)
      VALUES ($1, $2, '不合格', $3, FALSE) RETURNING id`,
@@ -57,16 +55,8 @@ const cleanupTestData = async () => {
   );
   const trId = tr.rows[0].id;
   const accIds = [];
-  for (const type of ACC_TYPES) {
-    const r = await db.pool.query(
-      `INSERT INTO accidents (accident_date, description, personnel_id, accident_type, is_deleted)
-       VALUES ($1, $2, $3, $4, FALSE) RETURNING id`,
-      [TEST_ACCIDENT_DATE, '【验证注入】事故', testTarget.employee_id, type]
-    );
-    accIds.push(r.rows[0].id);
-  }
-  console.log('[SETUP] 注入 培训行', trId, '| 事故行', JSON.stringify(accIds));
-  const expected = 1 + ACC_TYPES.length;
+  console.log('[SETUP] 注入 培训行', trId, '（事故否决已归规则引擎，本路径不注入/不校验）');
+  const expected = 1;
 
   const captureNew = async (since) => (await db.pool.query(
     `SELECT id, target_id, metric_code, source_table, source_id, suggested_score, deduction_item, source_detail

@@ -15,14 +15,13 @@
 //   3) 比对零漂移后清理测试行，再以“生产等价态”(事故否决旧路 OFF) 重跑配置驱动
 //      + recalculateCycle 收尾，使 dev 处于可演示状态。
 //
-// 注：为充分验证事故映射逻辑，本测试临时把 LEGACY_ACCIDENT_VETO 置 true；
-//     收尾阶段会把 accidents 类 backfill 行删除，以匹配生产(.env 中该值为 false)。
+// 注（2026-10-13 A 方案口径清理后）：事故否决已彻底移出 config/legacy 路径（归规则引擎 NEG-004），
+//     本脚本不再注入/校验事故；仅以 training 验证配置驱动 vs 原硬编码零漂移。
 // ============================================================================
 
 // —— 护栏：必须在 require config/db 之前硬设 ——
 process.env.DB_NAME = 'safety_dashboard_dev';
 process.env.SCHEDULER_ENABLED = 'false';
-process.env.LEGACY_ACCIDENT_VETO = 'true';   // 测试用：临时开启以验证事故映射
 process.env.LEGACY_TRAINING_FILL = 'true';
 
 const fs = require('fs');
@@ -58,9 +57,9 @@ const path = require('path');
   );
   console.log('[STEP1] 配置表现状:', JSON.stringify(cfgNow.rows));
 
-  // 确保 seed 行启用（测试需要）
+  // 确保 seed 行启用（测试需要；accident 源已不 seed，仅 training）
   await db.pool.query(
-    "UPDATE hse_assessment_metric_source SET enabled = TRUE WHERE source_name IN ('training','accident')"
+    "UPDATE hse_assessment_metric_source SET enabled = TRUE WHERE source_name = 'training'"
   );
 
   // ---------------------------------------------------------------
@@ -171,15 +170,15 @@ const path = require('path');
 
   // ---------------------------------------------------------------
   // 收尾：以“生产等价态”重跑配置驱动 + recalculateCycle
-  // 注：本模块 LEGACY_ACCIDENT_VETO 被置 true（测试），故会生成 accidents 行；
-  //     为匹配生产(.env=false)先生成再删除 accidents 类 backfill，仅留 training。
+  // 注（A 方案后）：事故否决已归规则引擎 NEG-004，config/legacy 路径不再生成 accidents 行，
+  //     故收尾仅会留下 training 类 backfill，accIds 恒为空（保留兜底逻辑无害）。
   // ---------------------------------------------------------------
   const t2 = new Date();
   for (const t of targets) {
     await engine.fillMissingDeductionsForTarget(cycle, t);
   }
   const afterCfg = await captureNew(t2);
-  // 删除 accidents 类，匹配生产事故否决旧路 OFF
+  // 兜底：剔除任何 accidents 类 backfill（A 方案后不应再有）
   const accIds = afterCfg.filter((r) => r.source_table === 'accidents').map((r) => r.id);
   if (accIds.length) {
     await db.pool.query('UPDATE hse_assessment_deduction SET is_deleted = TRUE WHERE id = ANY($1)', [accIds]);
