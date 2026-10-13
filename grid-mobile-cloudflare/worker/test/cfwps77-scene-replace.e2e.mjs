@@ -22,6 +22,9 @@
  *   T6  上传失败：提示失败、本机图与 token 都不变（不能出现「本机新图 + 台账旧图」错配）
  *   T7  补挂失败：同上，且按钮复位可重试
  *   T8  别人的记录：**不显示**换图入口（防换掉别人的照片）
+ *   T9  服务端记录详情页（台账 / 派发详情）也能换图 —— 派发出去后本机记录在 UI 里
+ *       没有入口，靠 serverRecordId 找回本机照片；换图后服务端视图 token 同步更新
+ *   T10 服务端详情的边界：本机无对应记录 / 本机记录不是我的 → 都不给换图入口
  *
  * 跑法：node worker/test/cfwps77-scene-replace.e2e.mjs
  * 依赖：本机 Chrome（headless）+ worker/node_modules 的 ws + test/_assets/big-camera.jpg。
@@ -321,6 +324,74 @@ await sleep(400);
 const t8txt = await detailText();
 ok('T8 别人的记录不显示换图入口', !t8txt.includes('换一张现场照片'), t8txt.includes('现场照片') ? '有现场照片但无换图卡' : '');
 ok('T8b 别人的记录连 file input 都没有', (await evalJs(`document.querySelectorAll('#detail-body input[type=file]').length`)) === 0);
+
+/* ---------- T9：服务端记录详情页（台账 / 派发）也能换图 ----------
+   背景（用户实测缺口）：公司管理派发出去的记录，在本机 db.records 里是
+   status="transferred" + syncState="synced"，而首页各明细只列**未同步**的本机记录
+   ⇒ 那条本机记录在 UI 里没有任何入口；台账 / 派发详情走的是 renderServerDetail
+   （服务端视图，没有本机照片），于是「换一张现场照片」这张卡根本够不着。
+   修法：renderServerDetail 里按 serverRecordId 找回本机记录，把换图卡补上。 */
+console.log('\n── T9 服务端详情页（派发后）换图入口 ──');
+await seedRecord({ id: 't77g', no: 'T77-G', type: '三违', behavior: '闯红灯', personName: '张三',
+  status: 'transferred', syncState: 'synced', serverRecordId: 'recT77g', clientRequestId: 'reqT77g',
+  scenePhoto: OLD_PHOTO, photoToken: OLD_TOKEN, photoTokenFp: 'OLD_FP' });
+const t9open = await evalJs(`(() => {
+  window.__api.length = 0;
+  window.__srvG = { record_id: 'recT77g', is_violation: '是', violation_desc: '闯红灯', violation_people: '张三',
+    inspection_time: '2026-10-13 12:00', checker_name: '换图测试员', todo_status: '待整改',
+    assigner_name: '换图测试员', assignee_name: '李四', assigned_at: '2026-10-13 12:05',
+    scene_photo_tokens: ['OLDTOKEN_SRV'], photo_count: 1 };
+  openServerDetail(window.__srvG, { title: '派发详情', from: 'dispatch' });
+  return true;
+})()`);
+ok('T9a 打开服务端记录详情成功', !!t9open);
+const t9entry = await pollNode(() => detailText().then(t => t.includes('换一张现场照片')));
+ok('T9b 派发后的服务端详情页出现换图入口（修复前够不着）', !!t9entry);
+ok('T9c 仍显示服务端权威字段（记录号）', (await detailText()).includes('recT77g'));
+ok('T9d 卡片标明「已上报」', (await detailText()).includes('已上报'));
+ok('T9e 选图成功', await pickPhoto());
+await clickBtn('确认更换');
+const t9calls = await pollNode(async () => {
+  const a = await apiCalls('/patrol/attach'), u = await apiCalls('/upload');
+  return (a.length && u.length) ? a[a.length - 1] : null;
+}, 10000);
+ok('T9f attach.record_id = 本机记录的 serverRecordId', !!t9calls && t9calls.record_id === 'recT77g', t9calls ? String(t9calls.record_id) : '');
+ok('T9g attach.kind = scene 且 photo_tokens 只含新 token',
+  !!t9calls && t9calls.kind === 'scene' && t9calls.photo_tokens.length === 1 && t9calls.photo_tokens[0] !== OLD_TOKEN,
+  t9calls ? JSON.stringify(t9calls.photo_tokens) : '');
+const t9state = await pollNode(() => evalJs(`(() => {
+  const r = db.records.find(x => x.id === 't77g');
+  return { token: r.photoToken, srvTok: window.__srvG.scene_photo_tokens,
+           view: (document.querySelector('#view-detail') || {}).className || '' };
+})()`), 6000);
+ok('T9h 本机记录 token 已更新', !!t9state && /^FTNEWT77/.test(String(t9state.token)), t9state ? String(t9state.token) : '');
+ok('T9i **重绘后服务端视图的 token 也换了**（否则换完还显示原图）',
+  !!t9state && Array.isArray(t9state.srvTok) && t9state.srvTok.length === 1 && t9state.srvTok[0] === t9state.token,
+  t9state ? JSON.stringify(t9state.srvTok) : '');
+ok('T9j 换图后仍停在详情页（不跳回列表）', !!t9state && !/hidden/.test(t9state.view), t9state ? t9state.view : '');
+
+/* ---------- T10：服务端记录无本机对应 / 不是我的 → 不给换图入口 ---------- */
+console.log('\n── T10 服务端详情的越权 / 无本机图边界 ──');
+await evalJs(`(() => {
+  window.__srvH = { record_id: 'recNoLocalT77', is_violation: '是', violation_desc: '闯红灯',
+    inspection_time: '2026-10-13 12:00', checker_name: '别人', todo_status: '待整改' };
+  openServerDetail(window.__srvH, { title: '台账详情', from: 'my-checks' });
+  return true;
+})()`);
+await sleep(500);
+ok('T10a 服务端记录在本机没有对应记录 → 不显示换图入口', !(await detailText()).includes('换一张现场照片'));
+
+await seedRecord({ id: 't77h', no: 'T77-H', type: '三违', behavior: '闯红灯', personName: '李四',
+  checkerId: '13800000999', status: 'transferred', syncState: 'synced', serverRecordId: 'recT77h', clientRequestId: 'reqT77h',
+  scenePhoto: OLD_PHOTO, photoToken: OLD_TOKEN, photoTokenFp: 'OLD_FP' });
+await evalJs(`(() => {
+  window.__srvI = { record_id: 'recT77h', is_violation: '是', violation_desc: '闯红灯',
+    inspection_time: '2026-10-13 12:00', checker_name: '别人', todo_status: '待整改' };
+  openServerDetail(window.__srvI, { title: '台账详情', from: 'my-checks' });
+  return true;
+})()`);
+await sleep(500);
+ok('T10b 本机记录不是我的 → 不显示换图入口', !(await detailText()).includes('换一张现场照片'));
 
 /* ---------- 收尾 ---------- */
 ws.close(); chrome.kill('SIGKILL'); server.close();

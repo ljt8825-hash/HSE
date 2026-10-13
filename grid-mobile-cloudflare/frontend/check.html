@@ -7,7 +7,7 @@
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-10-13.78">
+<meta name="hse-build" content="2026-10-13.79">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -1049,8 +1049,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
      读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
    - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
    - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
-<script src="./config.js?v=2026-10-13.78"></script>
-<script src="./app.js?v=2026-10-13.78"></script>
+<script src="./config.js?v=2026-10-13.79"></script>
+<script src="./app.js?v=2026-10-13.79"></script>
 <script>
 /* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
 (function(){
@@ -3738,6 +3738,16 @@ function setDetailTitle(t){
    字段名与含义一致（record_id / inspection_time / violation_desc / todo_status …）。
    ⚠️ 服务端记录**看不到照片**：飞书附件不下发可访问 URL，只下发数量。
       本机刚拍的照片（renderDetail）仍正常显示 —— 这是数据源限制，不是渲染缺陷。 */
+/* CF-WPS-换图入口可达性：服务端记录 ↔ 本机记录 靠 serverRecordId 维系。
+   为什么需要它：公司管理派发出去的记录，在本机 db.records 里是
+   status="transferred" + syncState="synced"，而首页各明细只列**未同步**的本机记录
+   ⇒ 那条本机记录在 UI 里没有任何入口；台账 / 派发详情走的是 renderServerDetail
+   （服务端视图，没有本机照片），于是「换一张现场照片」这张卡根本够不着
+   （用户实测：派发完就再也点不开换图）。 */
+function localRecByServerId(rid){
+  if(!rid) return null;
+  return (db.records || []).find(r => r.serverRecordId && r.serverRecordId === rid) || null;
+}
 function renderServerDetail(x, opts){
   opts = opts || {};
   x = x || {};
@@ -3815,6 +3825,20 @@ function renderServerDetail(x, opts){
   }
   b.appendChild(pbox);
 
+  // CF-WPS-换图入口可达性：这条服务端记录若对应我本机那条（我拍的、照片还在本机），
+  // 就把「换一张现场照片」补上 —— 否则派发出去后本机记录在 UI 里没有入口，换图卡形同虚设。
+  // 归属口径与 renderDetail 完全一致（只给本人创建的记录），后端 patrolIsMine 会再校验一次。
+  // 换图成功后：① 服务端视图里的 token 要跟着换，否则重绘出来还是旧图
+  //            （旧 token 在飞书仍可下载，不换就是「换完还显示原图」）；
+  //            ② 就地重绘本页（showView 对同名视图不压历史，返回键行为不变）。
+  const mine = localRecByServerId(rid);
+  if(mine && mine.checkerId === session.id && mine.scenePhoto){
+    b.appendChild(sceneReplaceBox(mine, opts.from, () => {
+      if(mine.photoToken) x.scene_photo_tokens = [mine.photoToken];
+      renderServerDetail(x, opts);
+    }));
+  }
+
   $("#dt-back").onclick = () => { opts.from ? showView(opts.from) : showView("home"); };
   showView("detail");
 }
@@ -3826,8 +3850,11 @@ function openServerDetail(x, opts){ return renderServerDetail(x, opts); }
    链路：选图（拍照 / 相册）→ compressImage 压缩降采样 → 本地预览 → 确认更换 →
         已上报：uploadPhotoToken → attachPhotoToRecord(rec,'scene',新token) 覆盖台账附件列；
         未上报：仅替换本机 scenePhoto 并作废旧 token（下次补传用新图，见 syncRecordOnce）。
-   复用拍照链同一套 compressImage（内存红线：峰值位图 ~2.5MB，不落全尺寸解码）。 */
-function sceneReplaceBox(rec, from){
+   复用拍照链同一套 compressImage（内存红线：峰值位图 ~2.5MB，不落全尺寸解码）。
+   after：换图成功后的重绘回调。宿主详情页有两种（本机记录详情 renderDetail /
+        服务端记录详情 renderServerDetail），各自重绘口径不同，由调用方传入；
+        不传则维持原行为（回本机记录详情页）。 */
+function sceneReplaceBox(rec, from, after){
   const mk = html => { const d = document.createElement("div"); d.innerHTML = html; return d.firstElementChild; };
   const box = mk('<div class="card" style="display:flex;flex-direction:column;gap:8px"></div>');
   box.appendChild(mk('<div style="display:flex;justify-content:space-between;align-items:center">' +
@@ -3905,7 +3932,8 @@ function sceneReplaceBox(rec, from){
       return;
     }
     saveDB();
-    renderDetail(rec, from);
+    // CF-WPS-换图入口可达性：宿主可能是服务端记录详情，别一律跳回本机详情页。
+    if(typeof after === "function") after(); else renderDetail(rec, from);
     if(viewStack[viewStack.length - 1] === "my-checks") renderMyChecks();
   };
   return box;
