@@ -7,7 +7,7 @@
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-10-14.84">
+<meta name="hse-build" content="2026-10-14.85">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -1049,8 +1049,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
      读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
    - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
    - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
-<script src="./config.js?v=2026-10-14.84"></script>
-<script src="./app.js?v=2026-10-14.84"></script>
+<script src="./config.js?v=2026-10-14.85"></script>
+<script src="./app.js?v=2026-10-14.85"></script>
 <script>
 /* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
 (function(){
@@ -3714,7 +3714,10 @@ function todoToRec(t){
     type: t.is_violation === "是" ? "三违" : "巡查",
     behavior: t.violation_desc || t.description || "—",
     personName: t.violation_people || "",
-    personJob: "",
+    // CF-WPS-85：违章人员档案随待办下发（性别/年龄/岗位）—— 整改页「涉及人员」要显示
+    personSex: t.violation_sex || "",
+    personAge: t.violation_age || "",
+    personJob: t.violation_job || "",
     time: time,
     status: t.todo_status === "已完成" ? "done" : "transferred",
     fromServer: true,
@@ -4225,18 +4228,29 @@ function startRectifyConfirm(){
   goPersonSelect();
 }
 /* 选完违章人员 → 回「整改」页切到「拍整改后照片」，并把人员回填派发卡。 */
+/* CF-WPS-85：违章人员档案一行文（性别 · N岁 · 岗位）—— 整改确认页与派发上下文卡共用 */
+function personMetaText(rec){
+  return [rec.personSex, rec.personAge ? (rec.personAge + "岁") : "", rec.personJob].filter(Boolean).join(" · ");
+}
 function finishRectifyConfirm(){
   const f = rectifyFlow; if(!f) return;
   const rec = f.rec;
   if(f.person){
     rec.personName = f.person.name || rec.personName;
     rec.personTel = f.person.tel || rec.personTel;
+    // CF-WPS-85：性别/年龄/岗位一并落到记录上 —— 整改完成回写与台账展示都要用。
+    //   以前只留姓名，回写服务端时三项全丢（花名册里本来就有，实测完整度 100%）。
+    rec.personSex = f.person.sex || rec.personSex || "";
+    rec.personAge = f.person.age || rec.personAge || "";
+    rec.personJob = f.person.job || rec.personJob || "";
   }
   rec._rectifyPersonName = rec.personName || "";
   rec._rectifyConfirmed = true;
   const pr = $("#rf-person");
+  // CF-WPS-85：选人后把档案显示出来 —— 以前只显示姓名，用户选完人看不到性别/年龄/岗位
+  const meta = personMetaText(rec);
   if(pr) pr.innerHTML = rec.personName
-    ? ("涉及人员：" + esc(rec.personName))
+    ? ("涉及人员：" + esc(rec.personName) + (meta ? "（" + esc(meta) + "）" : ""))
     : '<span style="color:var(--t4)">涉及人员：待确认</span>';
   $("#rf-next").style.display = "none";
   $("#rf-pre").style.display = "";
@@ -4266,7 +4280,10 @@ function renderRectifyContext(rec){
     '<div class="card" style="display:flex;flex-direction:column;gap:8px">' +
       '<div id="rf-behavior" style="font-size:var(--fs-h2);font-weight:700">' + esc(isVio ? (rec.behavior || "三违") : "普通巡查") + "</div>" +
       '<div id="rf-person" style="font-size:var(--fs-body);color:var(--t3)">' +
-        (rec.personName ? "涉及人员：" + esc(rec.personName) : '<span style="color:var(--t4)">涉及人员：待确认</span>') + "</div>" +
+        (rec.personName
+          ? ("涉及人员：" + esc(rec.personName) +
+             (personMetaText(rec) ? "（" + esc(personMetaText(rec)) + "）" : ""))
+          : '<span style="color:var(--t4)">涉及人员：待确认</span>') + "</div>" +
       (desc ? '<div style="font-size:var(--fs-body);color:var(--t2);line-height:1.9">' + esc(desc) + "</div>" : "") +
       (src.length ? '<div style="font-size:var(--fs-sub);color:var(--t3);line-height:1.9">' + src.join("<br>") + "</div>" : "") +
     "</div>" +
@@ -4357,6 +4374,11 @@ function submitRectify(){
         photo_tokens: tokens,
         // CF-WPS-被指派人确认：把被指派人选定的违章人员写回台账（三违行为沿用派发值，不再选）
         violation_people: done._rectifyPersonName || done.personName || "",
+        // CF-WPS-85：选中人员的档案（性别/年龄/岗位）一并回写。花名册里本来就有，
+        //   以前只发姓名 ⇒ 台账三列永远留空。仅本次整改确实选过人时才发，不覆盖存量值。
+        violation_sex: done._rectifyConfirmed ? (done.personSex || "") : "",
+        violation_age: done._rectifyConfirmed ? (done.personAge || "") : "",
+        violation_job: done._rectifyConfirmed ? (done.personJob || "") : "",
       });
       done.completedToServer = r.status === 200 && r.body && r.body.success;
       done.completeError = done.completedToServer ? "" : ((r.body && (r.body.message || r.body.code)) || ("HTTP " + r.status));

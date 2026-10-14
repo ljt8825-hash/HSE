@@ -2704,6 +2704,11 @@ function patrolRecordView(rec, full) {
     //    「违章停车 · 张三」，只放进详情会让列表退化成光秃秃的「三违」。
     violation_desc: isVio ? behavior : '',
     violation_people: fieldText(f['违章人员姓名']),
+    // CF-WPS-85：违章人员档案随视图下发 —— 被指派人整改页要显示「性别/年龄/岗位」，
+    //   建单时选人的记录三列有值；派发时未选人的记录为空串（前端据此不显示）。
+    violation_sex: fieldText(f['性别']),
+    violation_age: fieldText(f['年龄']),
+    violation_job: fieldText(f['车辆类型|保洁员']),
     // CF-WPS-36 整改待办：列表与详情都带指派信息 ——
     // 公司管理要在台账里看到「派给了谁 / 现在什么状态」，被指派人要知道「谁派给我的」。
     // 不放进视图的话前端拿不到，台账卡片就无法区分「自建」与「上级指派」（测试报告 D2）。
@@ -3370,7 +3375,8 @@ async function handleSummary(request, env) {
 }
 
 // ---- POST /api/mobile/assign/complete ----
-// body: { record_id, note, photo_tokens?, violation_desc?, violation_people? }
+// body: { record_id, note, photo_tokens?, violation_desc?, violation_people?,
+//          violation_sex?, violation_age?, violation_job? }   ← 后三项 CF-WPS-85 追加
 // 权限：**仅接收人**（整改接收人ID == 我）可完成 —— 别人不能替他结案。
 async function handleAssignComplete(request, env) {
   const origin = corsOrigin(request, env);
@@ -3422,6 +3428,17 @@ async function handleAssignComplete(request, env) {
   }
   const vPeople = patrolText(body && body.violation_people, PATROL_PEOPLE_MAX);
   if (vPeople) fields['违章人员姓名'] = vPeople;
+  // CF-WPS-85：选中人员的档案三列（性别/年龄/岗位）一起回写。
+  //   背景：建单时选人会写全三列（见 patrol/submit），但「派发 → 被指派人整改时才选人」
+  //   这条路径以前只回写姓名 ⇒ 台账「性别/年龄/车辆类型|保洁员」永远留空，
+  //   而花名册里这些数据本来就存在（实测测试台账完整度 100% 也被丢）。
+  //   仅当本次提供了才写（向前兼容：旧前端不传就不动台账原值）。
+  const vSex = patrolText(body && body.violation_sex, PATROL_ATTR_MAX);
+  const vAge = patrolText(body && body.violation_age, PATROL_ATTR_MAX);
+  const vJob = patrolText(body && body.violation_job, PATROL_ATTR_MAX);
+  if (vSex) fields['性别'] = vSex;
+  if (vAge) fields['年龄'] = vAge;
+  if (vJob) fields['车辆类型|保洁员'] = vJob;
   const tokens = Array.isArray(body.photo_tokens) ? body.photo_tokens.filter((t) => typeof t === 'string' && t) : [];
   if (tokens.length) fields['整改后照片'] = [...new Set(tokens)].slice(0, 3).map((t) => ({ file_token: t }));
 
