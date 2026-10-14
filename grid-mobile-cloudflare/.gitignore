@@ -2,5 +2,9 @@
 # 本地飞书凭据（勿提交）
 .env.local
 
+# 本地 wrangler dev 的 secret（含 FS_APP_SECRET / 会话密钥，勿提交）
+.dev.vars
+**/.dev.vars
+
 # 台账去重工具的本地备份（含真实姓名/手机号，勿提交）
 .dup_out/

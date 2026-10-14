@@ -7,7 +7,7 @@
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-10-13.83">
+<meta name="hse-build" content="2026-10-14.84">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -1049,8 +1049,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
      读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
    - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
    - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
-<script src="./config.js?v=2026-10-13.83"></script>
-<script src="./app.js?v=2026-10-13.83"></script>
+<script src="./config.js?v=2026-10-14.84"></script>
+<script src="./app.js?v=2026-10-14.84"></script>
 <script>
 /* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
 (function(){
@@ -3545,6 +3545,15 @@ function showDone(rec, title){
     } else if(rec.assignError){
       rows.push('<div class="info-line" style="color:var(--danger)">⚠ 指派未送达：' + esc(rec.assignError) + "</div>");
     }
+  }
+  // CF-WPS-84：整条记录没同步成功时，把**真实原因**（syncError）摆到终屏上。
+  // 以前终屏只显示「指派未送达 + 请到台账补传」，可遇到「网格未解析/现场照片上传失败」
+  // 这类重试一万次也不会好的硬失败，用户被误导去反复点补传（本地实测：测试账号没配
+  // 花名册 → 网格恒为空 → 每条提交都注定失败，终屏却让用户「补传后重新指派」）。
+  // 台账页顶部的「待上报」条本来就是给 rec.syncError 的口径，这里对齐。
+  if(rec.syncState && rec.syncState !== "synced"){
+    rows.push('<div class="info-line" style="color:var(--danger)">⚠ 记录未上报：' +
+      esc(rec.syncError || "未知原因，请到「巡查台账」重试") + "</div>");
   }
   c.innerHTML = rows.join("");
   $("#btn-done-home").onclick = () => { enterHome(); };
