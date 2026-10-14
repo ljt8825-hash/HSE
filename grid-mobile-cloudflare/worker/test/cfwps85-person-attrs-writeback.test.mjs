@@ -189,7 +189,7 @@ assert(/rec\.personSex = f\.person\.sex/.test(html) && /rec\.personAge = f\.pers
 assert(/personMetaText\(rec\)/.test(html), '⑥-5 整改确认页/派发上下文卡显示档案一行文');
 assert(/personSex: t\.violation_sex/.test(html) && /personAge: t\.violation_age/.test(html) && /personJob: t\.violation_job/.test(html),
   '⑥-6 todoToRec 把服务端档案映射进待办记录');
-assert(/const vSex = patrolText\(body && body\.violation_sex/.test(wjs) && /if \(vSex\) fields\['性别'\] = vSex/.test(wjs)
+assert(/(?:const|let) vSex = patrolText\(body && body\.violation_sex/.test(wjs) && /if \(vSex\) fields\['性别'\] = vSex/.test(wjs)
   && /if \(vAge\) fields\['年龄'\] = vAge/.test(wjs) && /if \(vJob\) fields\['车辆类型\|保洁员'\] = vJob/.test(wjs),
   '⑥-7 Worker assign/complete 接收并写回三列');
 assert(/violation_sex: fieldText\(f\['性别'\]\)/.test(wjs) && /violation_age: fieldText\(f\['年龄'\]\)/.test(wjs)

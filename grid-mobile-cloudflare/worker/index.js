@@ -1676,6 +1676,20 @@ async function loadRosterRows(env, cfg) {
   return (await loadRosterRaw(env, cfg)).map(mapRosterRecord);
 }
 
+/* ---- CF-WPS-86：按姓名查花名册档案（唯一命中才用） ----
+   用于 assign/complete 的「档案兜底回填」：客户端只发姓名时，服务端按花名册
+   把性别/年龄/岗位补齐。重名（>1 个在职同名人）一律放弃 —— 宁可留空也不写错人。
+   花名册已配置但读取失败同样放弃（绝不让兜底逻辑把一次已完成的整改变成 502）。 */
+async function rosterPersonBio(env, cfg, name) {
+  const n = String(name || '').trim();
+  if (!n) return null;
+  let rows;
+  try { rows = await loadRosterRows(env, cfg); } catch { return null; }
+  const hits = rows.filter((r) => r.name === n && !ROSTER_INACTIVE_RE.test(r.status));
+  if (hits.length !== 1) return null;
+  return { sex: hits[0].sex, age: hits[0].age, job: hits[0].job };
+}
+
 // 班组/网格匹配规则（2026-09-17 真机校准）：
 //   dept（所属部门，组织口径，取自台账同一套命名）→ 正反双向包含：
 //     正向 c.includes(area) ：「柴胡店镇一班」命中 area=「柴胡店镇」
@@ -3433,9 +3447,26 @@ async function handleAssignComplete(request, env) {
   //   这条路径以前只回写姓名 ⇒ 台账「性别/年龄/车辆类型|保洁员」永远留空，
   //   而花名册里这些数据本来就存在（实测测试台账完整度 100% 也被丢）。
   //   仅当本次提供了才写（向前兼容：旧前端不传就不动台账原值）。
-  const vSex = patrolText(body && body.violation_sex, PATROL_ATTR_MAX);
-  const vAge = patrolText(body && body.violation_age, PATROL_ATTR_MAX);
-  const vJob = patrolText(body && body.violation_job, PATROL_ATTR_MAX);
+  let vSex = patrolText(body && body.violation_sex, PATROL_ATTR_MAX);
+  let vAge = patrolText(body && body.violation_age, PATROL_ATTR_MAX);
+  let vJob = patrolText(body && body.violation_job, PATROL_ATTR_MAX);
+  // CF-WPS-86：档案兜底回填。旧版本前端（.85 之前 / 手机还跑着旧页面）只发姓名不发档案，
+  //   于是「派发 → 整改时选人」这条路上三列仍旧留空 —— 用户反复看到的「档案不显示」。
+  //   花名册里本来就有这些值，且姓名唯一命中时才补（重名一律不猜，绝不写错人的档案）。
+  if (vPeople && (!vSex || !vAge || !vJob)) {
+    const cur = hit.fields || {};
+    const missSex = !vSex && !fieldText(cur['性别']).trim();
+    const missAge = !vAge && !fieldText(cur['年龄']).trim();
+    const missJob = !vJob && !fieldText(cur['车辆类型|保洁员']).trim();
+    if (missSex || missAge || missJob) {
+      const bio = await rosterPersonBio(env, cfg, vPeople);
+      if (bio) {
+        if (missSex && bio.sex) vSex = bio.sex;
+        if (missAge && bio.age) vAge = bio.age;
+        if (missJob && bio.job) vJob = bio.job;
+      }
+    }
+  }
   if (vSex) fields['性别'] = vSex;
   if (vAge) fields['年龄'] = vAge;
   if (vJob) fields['车辆类型|保洁员'] = vJob;
