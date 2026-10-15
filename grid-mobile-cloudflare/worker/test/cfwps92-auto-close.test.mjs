@@ -301,9 +301,9 @@ console.log('\n═══ B5. renderMyChecks 分组真跑 ═══');
       'document', 'session', 'db', 'isMySubordinateRec', 'setBadge', 'resetThumbObserver',
       'loadServerRecs', 'recordCard', 'serverRecCard', 'esc', 'serverRecsErr',
       'dispatchDoneRecs', 'serverRecs', 'saveDB',
-      // CF-WPS-93：renderMyChecks 又新增了 reconcileSelfRectifiedClosures()（自建自改自动闭环），
-      // 用 new Function 真跑必须注入 —— 空实现即可（本用例不涉及自建自改记录）。
-      'reconcileSelfRectifiedClosures',
+      // CF-WPS-93：renderMyChecks 又新增了 reconcileDoneClosures()（历史遗留 done 自动闭环），
+      // 用 new Function 真跑必须注入 —— 空实现即可（本用例不涉及历史遗留 done 记录）。
+      'reconcileDoneClosures',
       FN_DONESET + '\n' + FN_RECON + '\n' + FN_CLOSED + '\n' + FN_UNSYNCED + '\n' + FN_OPEN + '\n' + FN_REVIEW + '\n' + FN_BADGE + '\n' + FN_RENDERCHECKS +
       '\nreturn renderMyChecks;');
     const render = f(doc, { id: 'me', role }, { records }, () => false, () => { },

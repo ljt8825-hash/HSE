@@ -285,8 +285,8 @@ console.log('\n═══ B4. renderMyChecks 分组真跑 ═══');
       // CF-WPS-92：renderMyChecks 新增了这两个调用（派发记录自动闭环 + 「已闭环」分组），
       // 用 new Function 真跑时必须注入，否则 ReferenceError。本用例只关心「待复查」分组，
       // 注入空实现即可（无 server 记录 ⇒ 已闭环组恒为空，不影响本用例断言）。
-      // CF-WPS-93：又多了 reconcileSelfRectifiedClosures()（自建自改自动闭环），同样补空实现。
-      'reconcileDispatchedClosures', 'myClosedDispatchedRecords', 'reconcileSelfRectifiedClosures',
+      // CF-WPS-93：又多了 reconcileDoneClosures()（历史遗留 done 自动闭环），同样补空实现。
+      'reconcileDispatchedClosures', 'myClosedDispatchedRecords', 'reconcileDoneClosures',
       FN_UNSYNCED + '\n' + FN_OPEN + '\n' + FN_REVIEW + '\n' + FN_BADGE + '\n' + FN_RENDERCHECKS +
       '\nreturn renderMyChecks;');
     const render = f(doc, { id: 'me', role: '管理员' }, { records }, () => false, () => { },

@@ -132,7 +132,8 @@ console.log('═══ A1. submitRectify 的三条分支（真跑抽出来的函
     await tick();
     ck(rec.rectifyPhotoPending === true, '③ 置 rectifyPhotoPending=true（照片暂存本机）');
     ck(!calls.some((c) => c.url === 'UPLOAD' || c.url === 'ATTACH'), '③ 没有 serverRecordId 时不去瞎传（不报错也不丢图）');
-    ck(rec.status === 'done' && rec.rectifyTime > 0, '③ 整改进度照常标记完成（不因照片断掉）');
+    ck(rec.status === 'reviewed' && rec.rectifyTime > 0,
+      '③ 整改进度照常标记完成（不因照片断掉；CF-WPS-93 起提交即闭环 → reviewed）');
   }
 }
 
