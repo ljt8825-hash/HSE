@@ -7,7 +7,7 @@
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-10-14.86">
+<meta name="hse-build" content="2026-10-14.87">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -1049,8 +1049,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
      读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
    - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
    - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
-<script src="./config.js?v=2026-10-14.86"></script>
-<script src="./app.js?v=2026-10-14.86"></script>
+<script src="./config.js?v=2026-10-14.87"></script>
+<script src="./app.js?v=2026-10-14.87"></script>
 <script>
 /* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
 (function(){
@@ -3906,6 +3906,10 @@ function localRecByServerId(rid){
   if(!rid) return null;
   return (db.records || []).find(r => r.serverRecordId && r.serverRecordId === rid) || null;
 }
+/* CF-WPS-88：当前详情页正在展示的记录号。
+   补拉「单条 full 详情」是异步的，回来时必须确认用户**还停在这一条**上 ——
+   否则他返回列表、又点开另一条，旧请求回来会把上一条的照片/字段糊到新记录上。 */
+let srvDetailRid = "";
 function renderServerDetail(x, opts){
   opts = opts || {};
   x = x || {};
@@ -3915,6 +3919,7 @@ function renderServerDetail(x, opts){
 
   const isVio = x.is_violation === "是" || !!x.violation_desc;
   const rid = String(x.record_id || "");
+  srvDetailRid = rid;
   const insp = String(x.inspection_time || x.created_at || "");
   const checker = x.checker_name || x.name || x.assigner_name || "";
   const st = x.todo_status === "已完成"
@@ -3951,10 +3956,14 @@ function renderServerDetail(x, opts){
 
   // 照片：服务端现在能下发飞书原图 file_token（CF-WPS-派发图），优先显示原图；
   // 没有 token 时退回数量提示（兼容老 Worker / 未配图记录）。
+  // CF-WPS-88：opts._photoPending —— 从列表点开、full 详情还没拉回来时，照片区先说
+  //   「读取中…」，别武断地写「未记录/无」（那正是用户看到的假象）。
   const sTok = Array.isArray(x.scene_photo_tokens) ? x.scene_photo_tokens : [];
   const rTok = Array.isArray(x.rectify_photo_tokens) ? x.rectify_photo_tokens : [];
   const pn = Number(x.photo_count) || 0;
   const rn = Number(x.rectify_photo_count) || 0;
+  const sPending = !!opts._photoPending && !sTok.length && !pn;
+  const rPending = !!opts._photoPending && !rTok.length && !rn;
   b.appendChild(mk('<div class="section-label">照片</div>'));
   const pbox = mk('<div class="card" style="display:flex;flex-direction:column;gap:10px"></div>');
   if(sTok.length){
@@ -3967,7 +3976,7 @@ function renderServerDetail(x, opts){
   }else if(pn){
     pbox.appendChild(mk('<div style="font-size:var(--fs-body);color:var(--t2)">现场照片 ' + pn + " 张（无可用原图）</div>"));
   }else{
-    pbox.appendChild(mk('<div style="font-size:var(--fs-body);color:var(--t2)">现场照片：未记录</div>'));
+    pbox.appendChild(mk('<div style="font-size:var(--fs-body);color:var(--t2)">现场照片：' + (sPending ? "读取中…" : "未记录") + "</div>"));
   }
   if(rTok.length){
     const lab = document.createElement("div");
@@ -3979,7 +3988,7 @@ function renderServerDetail(x, opts){
   }else if(rn){
     pbox.appendChild(mk('<div style="font-size:var(--fs-body);color:var(--t2)">整改后照片 ' + rn + " 张（无可用原图）</div>"));
   }else{
-    pbox.appendChild(mk('<div style="font-size:var(--fs-body);color:var(--t2)">整改后照片：无</div>'));
+    pbox.appendChild(mk('<div style="font-size:var(--fs-body);color:var(--t2)">整改后照片：' + (rPending ? "读取中…" : "无") + "</div>"));
   }
   b.appendChild(pbox);
 
@@ -4002,7 +4011,36 @@ function renderServerDetail(x, opts){
 }
 // CF-WPS-58/派发图：serverRecCard 等调用 openServerDetail，但真正实现名为 renderServerDetail，
 // 这里补别名，让「已上报台账 / 服务端卡片」点击能正常打开详情（原 openServerDetail 未定义会抛错）。
-function openServerDetail(x, opts){ return renderServerDetail(x, opts); }
+/* CF-WPS-88：打开详情前补拉「单条 full 详情」。
+   根因：`patrolRecordView(rec, full)` 只在 full=true 时下发照片字段（photo_count /
+   scene_photo_tokens / rectify_photo_tokens），而**列表**接口（/patrol/records 不带 ?id=）
+   走的是 full=false ⇒ 台账卡片直接把列表对象丢进详情，详情就永远显示
+   「现场照片：未记录 / 整改后照片：无」，**即使飞书台账里明明有照片**（用户实测截图：
+   记录 reczz28NUINR3q3y 台账里现场+整改各 1 张，详情却写「未记录/无」）。
+   ?id= 从仓库首次入库就在 Worker 里（老线上 Worker 也支持），且可见范围与列表同源
+   （都用 patrolInScope）—— 列表里点得开的记录，?id= 一定拉得到，所以这是纯前端修复。
+   做法：先用手上的对象**即时渲染**（点开就有反应），再补拉 full 详情重绘（照片随即出现）；
+   拉取失败/无权/用户已切走 → 保持列表视图不动（可接受降级，不报错、不串记录）。 */
+async function openServerDetail(x, opts){
+  x = x || {};
+  const rid = String(x.record_id || "");
+  // 已在 full 视图（待办 / 派发记录自带 token）就不必再拉一次
+  const hasPhotoFields = ("photo_count" in x) || ("scene_photo_tokens" in x) || ("rectify_photo_tokens" in x);
+  if(!rid || hasPhotoFields) return renderServerDetail(x, opts);
+  // ① 即时渲染：照片区显示「读取中…」，不武断写「未记录/无」
+  renderServerDetail(x, Object.assign({}, opts, { _photoPending: true }));
+  try{
+    const r = await mobileApi("/api/mobile/patrol/records?id=" + encodeURIComponent(rid), null, "GET");
+    if(r.status === 200 && r.body && r.body.success && r.body.record){
+      // 就地合并（不改引用）—— 详情页内「换一张现场照片」的重绘闭包持有同一个 x，
+      // 新建对象会让那个闭包拿不到补拉到的字段。
+      Object.assign(x, r.body.record);
+    }
+  }catch(e){ /* 静默：退回确定态（未记录/无） */ }
+  // ② 重绘：成功 → 真实照片；失败 → 确定的「未记录/无」。仅当用户**还停在这一条**详情上，
+  //    否则丢弃（避免他返回列表又点开另一条时，旧请求把上一条的照片糊到新记录上）。
+  if(srvDetailRid === rid && viewStack[viewStack.length - 1] === "detail") renderServerDetail(x, opts);
+}
 
 /* CF-WPS-换图：详情页「换一张现场照片」卡片。
    链路：选图（拍照 / 相册）→ compressImage 压缩降采样 → 本地预览 → 确认更换 →
