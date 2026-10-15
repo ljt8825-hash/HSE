@@ -7,7 +7,7 @@
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-10-15.90">
+<meta name="hse-build" content="2026-10-15.91">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -1076,8 +1076,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
      读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
    - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
    - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
-<script src="./config.js?v=2026-10-15.90"></script>
-<script src="./app.js?v=2026-10-15.90"></script>
+<script src="./config.js?v=2026-10-15.91"></script>
+<script src="./app.js?v=2026-10-15.91"></script>
 <script>
 /* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
 (function(){
@@ -2186,6 +2186,59 @@ function myToReviewRecords(){
     r.status === "done" &&
     (session.role === "经理" ? isMySubordinateRec(r) : r.checkerId === session.id));
 }
+/* CF-WPS-92：派发出去的本机记录，整改人提交后**自动闭环**（用户明确要求：
+   「不要派发方点确认，整改人整改后自动闭环」）。
+   为什么需要它 —— 转派路径 makeRecord({rectifyMode:"transfer", status:"transferred"}) 之后，
+   整改发生在**接收人的手机**上、写的是服务端台账；而全文件对 status 的写入只有两处
+   （submitRectify 置 done、复查按钮置 reviewed）⇒ 本机那条永远停在「已转整改」，
+   首页「已闭环」卡（口径 = 我建的三违里 done/reviewed）永远不数它。
+   现在只要服务端「整改状态 = 已完成」，就把它推进到 reviewed（闭环终态）。
+   ⚠️ 判据只认服务端状态，**不需要任何人点一下** —— 这就是「自动」的含义。
+   ⚠️ 与「待复查」严格互斥：myToReviewRecords 要求 status==="done"，本函数要求
+      status==="reviewed"，同一条记录不可能两边都出现。 */
+function myClosedDispatchedRecords(){
+  if(!session || !db || !db.records) return [];
+  return (db.records || []).filter(r =>
+    r.status === "reviewed" && r.serverRecordId &&
+    (r.closedAuto === true || r.rectifyMode === "transfer"));
+}
+/* 服务端「已完成」的记录 id 集合 —— 合并两个**已到手**的来源，不额外发请求：
+   · dispatchDoneRecs：/api/mobile/dispatched 的 done_records（我派出去且已完成的）
+   · serverRecs：/api/mobile/patrol/records 的台账列表（视图里本就带 todo_status）
+   ⚠️ 两者都受 PATROL_LIST_LIMIT(50) 上限约束（done_records 只回最近 50 条）
+   ⇒ 极老的记录可能对不上账。行为是**漏关不会错关**（宁可不关，绝不误关）。
+   量级上够用：一个乡镇作业中心的月派发量是个位数。 */
+function serverDoneIdSet(){
+  const ids = new Set();
+  (dispatchDoneRecs || []).forEach(r => {
+    const rid = r && r._srv && r._srv.record_id;
+    if(rid) ids.add(String(rid));
+  });
+  (serverRecs || []).forEach(x => {
+    if(x && x.record_id && x.todo_status === "已完成") ids.add(String(x.record_id));
+  });
+  return ids;
+}
+/* 对账：本机 transferred + 有 serverRecordId 的记录，服务端已完成 → 置 reviewed。
+   幂等：第二次跑时这些记录已不是 transferred，直接返回 0（不会反复写盘）。
+   返回本次推进的条数 —— 调用方据此决定要不要重算首页数字 / 重绘台账。 */
+function reconcileDispatchedClosures(){
+  if(!session || !db || !db.records) return 0;
+  const pend = (db.records || []).filter(r => r.status === "transferred" && r.serverRecordId);
+  if(!pend.length) return 0;
+  const done = serverDoneIdSet();
+  if(!done.size) return 0;
+  let n = 0;
+  pend.forEach(r => {
+    if(!done.has(String(r.serverRecordId))) return;
+    r.status = "reviewed";       // 闭环终态（与手动「复查通过·闭环」同一状态，文案在 statusChip 里区分）
+    r.closedAt = Date.now();
+    r.closedAuto = true;         // 来源标记：自动闭环，不是谁点了复查
+    n++;
+  });
+  if(n) saveDB();
+  return n;
+}
 /* 「巡查台账」页签角标的**唯一**写入口。
    口径 = 台账页两个「还需要我动作」的本机分组之和：未闭环（已上报、还没整改完）
         + 待复查（已整改、还没复查闭环）。
@@ -2230,6 +2283,10 @@ function updateRectifiedStat(){
   if(el) el.textContent = inboxMonthlyDone + localRectifiedThisMonth();
 }
 function refreshHomeStats(force){
+  // CF-WPS-92：先对账一次（用**已缓存**的服务端数据兜底）。refreshDispatchBadge 是异步的，
+  //   首次进首页时数字会在它回来之前就算完 —— 这里先跑一次覆盖「缓存里已有数据」的常态；
+  //   新拉到数据的那一次由 refreshDispatchBadge 末尾补算（有推进才递归，n=0 即停）。
+  reconcileDispatchedClosures();
   const mine = myChecks();
   const monthCount = db.records.filter(r => r.checkerId === session.id && isSameMonth(r.time, Date.now())).length;
   const pending = db.records.filter(r => r.status !== "done" && r.status !== "reviewed" && (r.rectifierId === session.id || r.transferAdminName === session.name));
@@ -2297,8 +2354,13 @@ function renderTodoList(){
    数字优先取 summary（首页只发一次统计请求）；summary 未到手时才单拉一次 dispatched。 */
 async function refreshDispatchBadge(){
   if(!session || DISPATCH_TAB_ROLES.indexOf(session.role) < 0){ setBadge("badge-dispatch", 0); return; }
-  if(statSummary){ setBadge("badge-dispatch", inboxDispatchPending); return; }
-  try{ await loadDispatched(false); setBadge("badge-dispatch", inboxDispatchPending); }catch(e){ /* 拉取失败：不亮角标，不打断首页 */ }
+  if(statSummary){ setBadge("badge-dispatch", inboxDispatchPending); }
+  else {
+    try{ await loadDispatched(false); setBadge("badge-dispatch", inboxDispatchPending); }catch(e){ /* 拉取失败：不亮角标，不打断首页 */ }
+  }
+  // CF-WPS-92：刚到手的 done_records 里可能就有「接收人已整改完」的派发记录 →
+  //   就地推进本机记录到闭环终态。有推进才重算首页（第二次进来 n=0，不会递归）。
+  if(reconcileDispatchedClosures()) refreshHomeStats();
 }
 // 首页统计：数字统一由 /api/mobile/summary 出（与下钻明细同源）；inbox 只用来生成待办文案
 /* CF-WPS-82：`force` 必须一路透传到 loadSummary。
@@ -2454,6 +2516,7 @@ async function renderDispatch(){
   el.innerHTML = '<div class="empty-tip">加载中…</div>';
   const recs = await loadDispatched(true);
   setBadge("badge-dispatch", inboxDispatchPending);
+  reconcileDispatchedClosures();   // CF-WPS-92：派发记录页的「已完成」一到手就推进本机闭环
   if(recs === null){
     el.innerHTML = '<div class="empty-tip">派发记录暂时拉不到<br><span style="font-size:var(--fs-sub)">' + esc(dispatchErr || "请稍后重试") + "</span></div>";
     return;
@@ -3774,7 +3837,12 @@ function lineKV(k, v){
 function statusChip(rec){
   if(rec.status === "unfinished") return '<span class="chip red"><span class="dot"></span>未完成</span>';
   if(rec.status === "transferred") return '<span class="chip yellow"><span class="dot"></span>已转整改</span>';
-  if(rec.status === "reviewed") return '<span class="chip blue">已复查</span>';
+  // CF-WPS-92：reviewed 是「闭环终态」，但两种来路文案不同 ——
+  //   派发出去、由接收人整改完自动闭环的 → 「已闭环」（我没复查过，写「已复查」是假的）；
+  //   我自己整改完再点「复查通过·闭环」的 → 「已复查」。
+  if(rec.status === "reviewed") return rec.rectifyMode === "transfer"
+    ? '<span class="chip blue">已闭环</span>'
+    : '<span class="chip blue">已复查</span>';
   return '<span class="chip green"><span class="dot"></span>已完成</span>';
 }
 function fmtTime(t){ const d = new Date(t); return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0") + " " + String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0"); }
@@ -4120,6 +4188,14 @@ async function renderMyChecks(){
   const review = myToReviewRecords().filter(r => r.syncState === "synced");
   el.innerHTML = '<div class="empty-tip">正在读取台账…</div>';
   const list = await loadServerRecs(true);
+  // CF-WPS-92：服务端台账一到手就立刻对账（派发出去、接收人已整改完 → 本机自动闭环），
+  //   再算「已闭环」分组 —— 保证这一次渲染就是最新状态，不需要用户手动刷新一次。
+  reconcileDispatchedClosures();
+  const closed = myClosedDispatchedRecords();
+  // 同一条记录既在本机（已闭环）又在服务端列表里 —— 只留本机组，服务端列表把它排除，
+  //   否则「已闭环（1）」与「已上报台账（1）」指着同一条，看起来像两条。
+  const closedIds = new Set(closed.map(r => String(r.serverRecordId)));
+  const srvList = (list || []).filter(x => !closedIds.has(String(x.record_id)));
   el.innerHTML = "";
   if(pend.length){
     const lab = document.createElement("div");
@@ -4149,13 +4225,24 @@ async function renderMyChecks(){
     el.appendChild(lab);
     review.forEach(r => el.appendChild(recordCard(r, { from: "view-my-checks" })));
   }
-  if(list && list.length){
+  /* CF-WPS-92：派发出去、接收人整改完成后**自动闭环**的本机记录。
+     与 CF-WPS-91 同一类「数字要有家」问题：首页「已闭环」卡会数它们，
+     而台账页原本没有任何分组显示它们（「待上报」要未同步、「未闭环」要 unfinished、
+     「待复查」要 done）⇒ 卡上数字涨了、页面上却找不到是哪几条。
+     卡片点开走 recordCard → openRecord → renderDetail（本机详情，能看到本机留的照片）。 */
+  if(closed.length){
     const lab = document.createElement("div");
-    lab.className = "section-label"; lab.textContent = "已上报台账（" + list.length + "）";
+    lab.className = "section-label"; lab.textContent = "已闭环（" + closed.length + "）";
     el.appendChild(lab);
-    list.forEach(x => el.appendChild(serverRecCard(x)));
+    closed.forEach(r => el.appendChild(recordCard(r, { from: "view-my-checks" })));
   }
-  if(!pend.length && !open.length && !review.length && (!list || !list.length)){
+  if(srvList.length){
+    const lab = document.createElement("div");
+    lab.className = "section-label"; lab.textContent = "已上报台账（" + srvList.length + "）";
+    el.appendChild(lab);
+    srvList.forEach(x => el.appendChild(serverRecCard(x)));
+  }
+  if(!pend.length && !open.length && !review.length && !closed.length && !srvList.length){
     el.innerHTML = '<div class="empty-tip">' + (serverRecsErr ? "台账读取失败：" + esc(serverRecsErr) : "暂无记录") + "</div>";
   }
 }

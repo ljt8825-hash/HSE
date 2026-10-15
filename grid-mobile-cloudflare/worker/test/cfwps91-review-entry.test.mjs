@@ -282,11 +282,15 @@ console.log('\n═══ B4. renderMyChecks 分组真跑 ═══');
     const f = new Function(
       'document', 'session', 'db', 'isMySubordinateRec', 'setBadge', 'resetThumbObserver',
       'loadServerRecs', 'recordCard', 'serverRecCard', 'esc', 'serverRecsErr',
+      // CF-WPS-92：renderMyChecks 新增了这两个调用（派发记录自动闭环 + 「已闭环」分组），
+      // 用 new Function 真跑时必须注入，否则 ReferenceError。本用例只关心「待复查」分组，
+      // 注入空实现即可（无 server 记录 ⇒ 已闭环组恒为空，不影响本用例断言）。
+      'reconcileDispatchedClosures', 'myClosedDispatchedRecords',
       FN_UNSYNCED + '\n' + FN_OPEN + '\n' + FN_REVIEW + '\n' + FN_BADGE + '\n' + FN_RENDERCHECKS +
       '\nreturn renderMyChecks;');
     const render = f(doc, { id: 'me', role: '管理员' }, { records }, () => false, () => { },
       () => { }, async () => [], (r) => { const e = mkEl('div'); e.textContent = 'CARD:' + r.id; return e; },
-      () => mkEl('div'), (s) => String(s), '');
+      () => mkEl('div'), (s) => String(s), '', () => 0, () => []);
     await render();
     return listEl.children.filter((c) => c.className === 'section-label').map((c) => c.textContent);
   };
