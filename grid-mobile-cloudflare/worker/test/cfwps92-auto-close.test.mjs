@@ -90,8 +90,8 @@ console.log('═══ A3. 「已闭环」分组口径 ═══');
   const f = extractFn('myClosedDispatchedRecords') || '';
   ck(!!f, 'A3 myClosedDispatchedRecords 已定义');
   ck(/r\.status === "reviewed"/.test(f), 'A3 判据 = reviewed');
-  ck(/closedAuto === true \|\| r\.rectifyMode === "transfer"/.test(f),
-    'A3 只认「自动闭环的」或「转派的」——自建记录手动复查不算派发闭环');
+  ck(/r\.rectifyMode === "transfer"/.test(f) && !/closedAuto/.test(f),
+    'A3 判据收紧到 rectifyMode === "transfer"（CF-WPS-93 后自建自改也带 closedAuto，不能再拿它当判据）');
   // 与「待复查」严格互斥
   const rev = extractFn('myToReviewRecords') || '';
   ck(/r\.status === "done"/.test(rev) && /r\.status === "reviewed"/.test(f),
@@ -267,9 +267,12 @@ console.log('\n═══ B3. myClosedDispatchedRecords 真跑 ═══');
     { id: 'c', status: 'reviewed', serverRecordId: 'r3' },                                            // ❌ 自建手动复查
     { id: 'd', status: 'transferred', rectifyMode: 'transfer', serverRecordId: 'r4' },                // ❌ 还没闭环
     { id: 'e', status: 'reviewed', rectifyMode: 'transfer', serverRecordId: '' },                     // ❌ 没 serverRecordId
+    { id: 'f', status: 'reviewed', rectifyMode: 'now', serverRecordId: 'r6', closedAuto: true },      // ❌ CF-WPS-93 自建自改
   ];
   ck(JSON.stringify(run(RECS)) === JSON.stringify(['a', 'b']),
-    'B3 只收「转派 + reviewed」，自建手动复查(c)与未闭环(d)都不算', JSON.stringify(run(RECS)));
+    'B3 只收「转派 + reviewed」，自建(c/f)与未闭环(d)都不算', JSON.stringify(run(RECS)));
+  ck(!run(RECS).includes('f'),
+    'B3 CF-WPS-93 自建自改的自动闭环记录**不**进本组（否则台账分组会搬家）');
   ck(run([]).length === 0, 'B3 空记录不抛错');
   ck(f(null, { records: [] })().length === 0, 'B3 session 为空 → 空数组（不抛）');
 }
@@ -298,12 +301,15 @@ console.log('\n═══ B5. renderMyChecks 分组真跑 ═══');
       'document', 'session', 'db', 'isMySubordinateRec', 'setBadge', 'resetThumbObserver',
       'loadServerRecs', 'recordCard', 'serverRecCard', 'esc', 'serverRecsErr',
       'dispatchDoneRecs', 'serverRecs', 'saveDB',
+      // CF-WPS-93：renderMyChecks 又新增了 reconcileSelfRectifiedClosures()（自建自改自动闭环），
+      // 用 new Function 真跑必须注入 —— 空实现即可（本用例不涉及自建自改记录）。
+      'reconcileSelfRectifiedClosures',
       FN_DONESET + '\n' + FN_RECON + '\n' + FN_CLOSED + '\n' + FN_UNSYNCED + '\n' + FN_OPEN + '\n' + FN_REVIEW + '\n' + FN_BADGE + '\n' + FN_RENDERCHECKS +
       '\nreturn renderMyChecks;');
     const render = f(doc, { id: 'me', role }, { records }, () => false, () => { },
       () => { }, async () => srvList, (r) => { const e = mkEl('div'); e.textContent = 'CARD:' + r.id; return e; },
       (x) => { const e = mkEl('div'); e.textContent = 'SRV:' + x.record_id; return e; }, (s) => String(s), '',
-      [], srvList, () => { });
+      [], srvList, () => { }, () => 0);
     await render();
     return {
       labels: listEl.children.filter((c) => c.className === 'section-label').map((c) => c.textContent),

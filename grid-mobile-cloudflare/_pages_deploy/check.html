@@ -7,7 +7,7 @@
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-10-15.91">
+<meta name="hse-build" content="2026-10-15.92">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -1076,8 +1076,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
      读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
    - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
    - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
-<script src="./config.js?v=2026-10-15.91"></script>
-<script src="./app.js?v=2026-10-15.91"></script>
+<script src="./config.js?v=2026-10-15.92"></script>
+<script src="./app.js?v=2026-10-15.92"></script>
 <script>
 /* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
 (function(){
@@ -2196,11 +2196,14 @@ function myToReviewRecords(){
    ⚠️ 判据只认服务端状态，**不需要任何人点一下** —— 这就是「自动」的含义。
    ⚠️ 与「待复查」严格互斥：myToReviewRecords 要求 status==="done"，本函数要求
       status==="reviewed"，同一条记录不可能两边都出现。 */
+/* CF-WPS-93：「已闭环（N）」分组口径 —— **只认派发闭环**。
+   判据收紧到 rectifyMode === "transfer"（不再看 closedAuto）：因为 CF-WPS-93 之后
+   自建自改的记录也带 closedAuto，而它们不该被挪进这个组（用户要的是"别让我点复查"，
+   不是台账分组搬家）—— 它们已同步的那些照旧留在「已上报台账」里。 */
 function myClosedDispatchedRecords(){
   if(!session || !db || !db.records) return [];
   return (db.records || []).filter(r =>
-    r.status === "reviewed" && r.serverRecordId &&
-    (r.closedAuto === true || r.rectifyMode === "transfer"));
+    r.status === "reviewed" && r.serverRecordId && r.rectifyMode === "transfer");
 }
 /* 服务端「已完成」的记录 id 集合 —— 合并两个**已到手**的来源，不额外发请求：
    · dispatchDoneRecs：/api/mobile/dispatched 的 done_records（我派出去且已完成的）
@@ -2238,6 +2241,26 @@ function reconcileDispatchedClosures(){
   });
   if(n) saveDB();
   return n;
+}
+/* CF-WPS-93：把**历史遗留**的「自建自改 done」记录也自动闭环。
+   为什么需要它：submitRectify 改了只对**新提交**生效；用户手上那条（截图里的
+   「有 1 条整改已提交，待复查」）是改动前产生的 done，不改就永远挂在那儿 ——
+   而它跟新提交的是同一类记录（自己巡查开单、自己整改），没理由区别对待。
+   判据 status === "done" && checkerId === session.id：我既是检查人又是整改人。
+   ⚠️ checkerId ≠ 我的 done 记录**不动** —— 那是「别人建的单、我整改的」，
+      该由检查人复查（复查唯一还有意义的场景）。
+   幂等：推进后不再是 done，第二次跑返回 0。有推进才写盘。 */
+function reconcileSelfRectifiedClosures(){
+  if(!session || !db || !db.records) return 0;
+  const pend = (db.records || []).filter(r => r.status === "done" && r.checkerId === session.id);
+  if(!pend.length) return 0;
+  pend.forEach(r => {
+    r.status = "reviewed";
+    r.closedAuto = true;
+    r.closedAt = Date.now();
+  });
+  saveDB();
+  return pend.length;
 }
 /* 「巡查台账」页签角标的**唯一**写入口。
    口径 = 台账页两个「还需要我动作」的本机分组之和：未闭环（已上报、还没整改完）
@@ -2287,6 +2310,9 @@ function refreshHomeStats(force){
   //   首次进首页时数字会在它回来之前就算完 —— 这里先跑一次覆盖「缓存里已有数据」的常态；
   //   新拉到数据的那一次由 refreshDispatchBadge 末尾补算（有推进才递归，n=0 即停）。
   reconcileDispatchedClosures();
+  // CF-WPS-93：自建自改的 done 记录也自动闭环（历史遗留 + 兜底）。
+  //   与上面那条同一思路：业务上已经结束，本机状态自动跟上，不让人再点一下。
+  reconcileSelfRectifiedClosures();
   const mine = myChecks();
   const monthCount = db.records.filter(r => r.checkerId === session.id && isSameMonth(r.time, Date.now())).length;
   const pending = db.records.filter(r => r.status !== "done" && r.status !== "reviewed" && (r.rectifierId === session.id || r.transferAdminName === session.name));
@@ -3837,10 +3863,11 @@ function lineKV(k, v){
 function statusChip(rec){
   if(rec.status === "unfinished") return '<span class="chip red"><span class="dot"></span>未完成</span>';
   if(rec.status === "transferred") return '<span class="chip yellow"><span class="dot"></span>已转整改</span>';
-  // CF-WPS-92：reviewed 是「闭环终态」，但两种来路文案不同 ——
-  //   派发出去、由接收人整改完自动闭环的 → 「已闭环」（我没复查过，写「已复查」是假的）；
-  //   我自己整改完再点「复查通过·闭环」的 → 「已复查」。
-  if(rec.status === "reviewed") return rec.rectifyMode === "transfer"
+  // CF-WPS-92/93：reviewed 是「闭环终态」，但两种来路文案不同 ——
+  //   派发出去由接收人整改完（CF-WPS-92）、或自己巡查开单自己整改完（CF-WPS-93）
+  //   都属于**没人点过复查**的自动闭环 → 「已闭环」；
+  //   只有真有人点过「复查通过 · 闭环」的才写「已复查」。
+  if(rec.status === "reviewed") return (rec.closedAuto === true || rec.rectifyMode === "transfer")
     ? '<span class="chip blue">已闭环</span>'
     : '<span class="chip blue">已复查</span>';
   return '<span class="chip green"><span class="dot"></span>已完成</span>';
@@ -4181,6 +4208,9 @@ async function renderMyChecks(){
   const el = document.getElementById("my-checks-list");
   if(!el) return;
   resetThumbObserver();                    // CF-WPS-89：整块重绘前先丢弃旧的缩略图观察目标
+  // CF-WPS-93：先对账（自建自改的 done → 闭环）再分组 —— 必须在算 review 之前，
+  //   否则这一次渲染还会把刚闭环的记录列进「待复查」（要等下次刷新才消失）。
+  reconcileSelfRectifiedClosures();
   const pend = myUnsyncedRecords();        // CF-WPS-82：与页顶同步条同口径（原来走 myChecks() 会漏掉普通巡查）
   const open = myOpenLoopedRecords();      // CF-WPS-82：与「巡查台账」页签角标同口径
   // CF-WPS-91：已整改待复查的本机记录（与首页「待复查」文案同源）。
@@ -4851,7 +4881,21 @@ function setAfterPhoto(dataUrl){
   $("#rf-post").style.display = "flex";
 }
 function submitRectify(){
-  rectifying.status = "done";
+  /* CF-WPS-93：自己巡查开单、自己整改的记录，**提交即闭环** —— 不再要求自己复查自己。
+     用户原话：「自己整改，自己提交的，为什么要待复查」。
+     为什么这是主路径而不是特例：建单确认页的「现在整改 / 稍后整改」两个按钮
+     （btn-now / btn-later）都把 rectifierId 设成**建单人自己** ⇒ 自建自改是默认流程，
+     转派才是例外。让默认流程多一步「自己确认自己」是纯多余。
+     判据 checkerId === session.id：我既是检查人又是整改人。
+     · 别人建的单转派给我（checkerId ≠ 我）**不**自动闭环 —— 该由检查人复查，
+       它仍会落到 done → 「待复查」，这是复查唯一还有意义的场景（本机库按账号隔离，
+       实际很少出现，但口径上必须保留）。
+     ⚠️ closedAuto 只作**来源标记**：台账「已闭环（N）」分组只认 rectifyMode === "transfer"
+        （见 myClosedDispatchedRecords），所以自建自改的记录不会被挪进那个组，
+        仍留在「已上报台账」里 —— 用户要的只是「别让我再点复查」，不是台账分组搬家。 */
+  const selfRectified = rectifying.checkerId === session.id;
+  rectifying.status = selfRectified ? "reviewed" : "done";
+  if(selfRectified){ rectifying.closedAuto = true; rectifying.closedAt = Date.now(); }
   rectifying.rectifyTime = Date.now();
   rectifying.rectifierId = session.id;
   rectifying.rectifierName = session.name;
