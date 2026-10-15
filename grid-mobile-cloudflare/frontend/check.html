@@ -7,7 +7,7 @@
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-10-15.88">
+<meta name="hse-build" content="2026-10-15.89">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -1058,8 +1058,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
      读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
    - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
    - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
-<script src="./config.js?v=2026-10-15.88"></script>
-<script src="./app.js?v=2026-10-15.88"></script>
+<script src="./config.js?v=2026-10-15.89"></script>
+<script src="./app.js?v=2026-10-15.89"></script>
 <script>
 /* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
 (function(){
@@ -1342,6 +1342,100 @@ async function attachPhotoToRecord(rec, kind, token, errOut){
    dataURL 可能有几百 KB，不能整串存进记录（localStorage 配额 4.75MB 红线）——
    只存 长度+尾 32 字符，换图后必然对不上，足以触发重传。 */
 function photoFp(u){ return u ? (u.length + "|" + u.slice(-32)) : ""; }
+
+/* ================= CF-WPS-90：整改人本机照片暂存 =================
+   业务模型（用户确认）：整改人自己拍的照片**本该留在他手机上**；只有上级
+   （乡镇作业中心经理 / 公司管理）才需要从飞书多维表格取图。
+   但「上级派发」的记录**不在 db.records 里**（todoToRec 只造一张卡片壳），
+   整改后照片以前只挂在内存对象 rectifying 上：
+     · 页面被系统回收 / 刷新 → 没了；
+     · 上传失败 → 彻底丢，而且没有任何重试（tokens=[] 照样把状态回写成「已完成」）。
+   所以单独落一份本机副本（键 = serverRecordId）：
+     · 台账详情优先显示它，并标注「已同步到台账 / 待上传」；
+     · uploaded=false 的条目由 retryRectifyLocal() 自动补挂（幂等，可重复调用）。
+   ⚠️ 为什么不塞进 db.records：myChecks / 首页统计 / 台账「待上报」等口径全都按
+   db.records 全量算，混进一条派发记录，那些数字立刻就不对了。
+   ⚠️ 配额：照片是 dataURL，攒多了会撞 localStorage 4.75MB 红线 ⇒ 条数封顶 +
+   写不下时先丢「已上传」的（服务端有副本，丢了不影响上级查看）。 */
+const RECTIFY_LOCAL_KEY = "hse_rectify_local_v1";
+const RECTIFY_LOCAL_MAX = 8;
+let rectifyLocal = null;
+function loadRectifyLocal(){
+  if(rectifyLocal) return rectifyLocal;
+  try{
+    const o = JSON.parse(localStorage.getItem(RECTIFY_LOCAL_KEY) || "null");
+    rectifyLocal = (o && typeof o === "object" && !Array.isArray(o)) ? o : {};
+  }catch(e){ rectifyLocal = {}; }
+  return rectifyLocal;
+}
+function saveRectifyLocal(){
+  const m = loadRectifyLocal();
+  const keys = Object.keys(m);
+  if(keys.length > RECTIFY_LOCAL_MAX){
+    // 淘汰顺序：先「已上传」的最老的（表里有副本，丢了不影响上级查看），再最老的未上传。
+    // ⚠️ 必须拼成一个完整队列再切 —— 只丢 uploaded 那批的话，uploaded 不够多就仍然超量。
+    const byOld = keys.slice().sort((a, b) => (m[a].at || 0) - (m[b].at || 0));
+    const order = byOld.filter(k => m[k].uploaded).concat(byOld.filter(k => !m[k].uploaded));
+    order.slice(0, keys.length - RECTIFY_LOCAL_MAX).forEach(k => delete m[k]);
+  }
+  try{ localStorage.setItem(RECTIFY_LOCAL_KEY, JSON.stringify(m)); return true; }
+  catch(e){}
+  try{
+    // 配额满：整批丢掉「已上传」的再试一次；仍失败就放弃本次落盘（绝不抛错中断整改流程）
+    Object.keys(m).forEach(k => { if(m[k] && m[k].uploaded) delete m[k]; });
+    localStorage.setItem(RECTIFY_LOCAL_KEY, JSON.stringify(m)); return true;
+  }catch(e){ return false; }
+}
+/* 落一份本机副本。同一张图重复写入时**保留** uploaded/token（否则补传成功后再渲染一次
+   就会被退回「待上传」）；换了新图则重置为未上传（旧 token 已作废）。 */
+function putRectifyLocal(rid, photo, reqId){
+  rid = String(rid || "");
+  if(!rid || !photo) return null;
+  const m = loadRectifyLocal();
+  const prev = m[rid] || {};
+  const same = prev.photo === photo;
+  m[rid] = {
+    photo: photo,
+    at: Date.now(),
+    reqId: reqId || prev.reqId || ("srv_" + rid),
+    uploaded: same ? !!prev.uploaded : false,
+    token: same ? (prev.token || "") : "",
+  };
+  saveRectifyLocal();
+  return m[rid];
+}
+function markRectifyLocalUploaded(rid, token){
+  const m = loadRectifyLocal();
+  const e = m[String(rid || "")];
+  if(!e) return;
+  e.uploaded = true;
+  if(token) e.token = token;
+  saveRectifyLocal();
+}
+function rectifyLocalEntry(rid){ return loadRectifyLocal()[String(rid || "")] || null; }
+
+/* 把「拍了但没传上去」的整改后照片补挂回台账（幂等；失败静默留给下次）。
+   走 /patrol/attach kind=rectify —— CF-WPS-90 起该接口允许**待办接收人**写入，
+   正是整改人本人。与 retryPendingSync 同源：进台账 / 联网 / 40s 轮询都会触发。 */
+let rectifyUploadBusy = false;
+async function retryRectifyLocal(){
+  if(rectifyUploadBusy) return;
+  const m = loadRectifyLocal();
+  const pend = Object.keys(m).filter(k => m[k] && m[k].photo && !m[k].uploaded);
+  if(!pend.length) return;
+  rectifyUploadBusy = true;
+  try{
+    for(const rid of pend){
+      const e = m[rid];
+      try{
+        const tk = await uploadPhotoToken(e.photo, "after", e.reqId || ("srv_" + rid));
+        if(!tk) continue;
+        const ok = await attachPhotoToRecord({ serverRecordId: rid }, "rectify", tk);
+        if(ok) markRectifyLocalUploaded(rid, tk);
+      }catch(err){ /* 静默：下次轮询再试 */ }
+    }
+  }finally{ rectifyUploadBusy = false; }
+}
 
 function patrolSubmitHint(res){
   const map = {
@@ -3517,6 +3611,9 @@ function retryPendingSync(){
   return p;
 }
 async function retryPendingSyncOnce(){
+  // CF-WPS-90：整改人本机暂存的整改后照片（派发记录不在 db.records，单靠下面的循环覆盖不到）
+  //   先跑一遍补挂；没有待传的会立刻返回，不产生网络请求。
+  await retryRectifyLocal();
   const pend = db.records.filter(r => r.syncState !== "synced");
   // CF-WPS-87：不能只看「整条未上报」就提前 return —— 还有一类记录是「已上报、但整改照片没挂上」
   //   （syncState 已是 synced，仅剩 afterPhoto 没拿到 token）。若因 pend 为空就 return，
@@ -4090,7 +4187,21 @@ function renderServerDetail(x, opts){
   }else{
     pbox.appendChild(mk('<div style="font-size:var(--fs-body);color:var(--t2)">现场照片：' + (sPending ? "读取中…" : "未记录") + "</div>"));
   }
-  if(rTok.length){
+  /* CF-WPS-90：整改后照片 —— 整改人本机那份**优先**。
+     业务模型：这张图是整改人自己拍的，没必要绕一圈去飞书表里抓；只有上级
+     （乡镇作业中心经理 / 公司管理）才必须从表里取 —— 他们手上没有整改人的手机。
+     本机没有副本才回落到服务端 token（换手机 / 清缓存 / 上级查看都走这条）。
+     状态标注让用户一眼看出这张图进没进台账：「已同步到台账」/「待上传（联网后自动补传）」。 */
+  const rLocal = rectifyLocalEntry(rid);
+  if(rLocal && rLocal.photo){
+    const lab = document.createElement("div");
+    lab.style.fontSize = "var(--fs-sub)"; lab.style.color = "var(--t3)"; lab.textContent = "整改后照片（本机）";
+    pbox.appendChild(lab);
+    pbox.appendChild(mk('<div class="photo-box"><img alt="整改后照片" src="' + rLocal.photo + '"></div>'));
+    pbox.appendChild(mk('<div style="font-size:var(--fs-sub);color:' +
+      (rLocal.uploaded ? "var(--t3)" : "var(--warn)") + '">' +
+      (rLocal.uploaded ? "已同步到台账" : "待上传（联网后自动补传）") + "</div>"));
+  }else if(rTok.length){
     const lab = document.createElement("div");
     lab.style.fontSize = "var(--fs-sub)"; lab.style.color = "var(--t3)"; lab.textContent = "整改后照片";
     pbox.appendChild(lab);
@@ -4557,6 +4668,11 @@ function renderDelegateBlock(rec){
 function setAfterPhoto(dataUrl){
   if(!dataUrl){ flashMsg("整改照片读取失败，请重拍一次，或改用「从相册上传」"); return; }   // CF-WPS-59
   draft.afterPhoto = dataUrl; rectifying.afterPhoto = dataUrl;
+  // CF-WPS-90：派发任务的整改人**本机留一份** —— 派发记录不在 db.records（只是卡片壳），
+  //   不落这份副本，页面一被系统回收/刷新照片就没了；上传失败更是彻底丢。
+  if(rectifying && rectifying.serverRecordId){
+    putRectifyLocal(rectifying.serverRecordId, dataUrl, rectifying.clientRequestId);
+  }
   $("#after-photo-box").innerHTML = '<img alt="整改后照片" src="' + dataUrl + '">';
   // CF-WPS-被指派人确认：拍完「只显示整改后照片」—— 收起派发原图/上下文卡，避免两张照片混淆
   const ctx = $("#rf-context"); if(ctx) ctx.style.display = "none";
@@ -4600,6 +4716,9 @@ function submitRectify(){
       });
       done.completedToServer = r.status === 200 && r.body && r.body.success;
       done.completeError = done.completedToServer ? "" : ((r.body && (r.body.message || r.body.code)) || ("HTTP " + r.status));
+      // CF-WPS-90：整改后照片**确实进了台账**（本次带了 token 且回写成功）才把本机副本标成已上传；
+      //   照片没传上去（上传失败 / 回写失败）就一直留着 pending，交给 retryRectifyLocal 自动补挂。
+      if(done.completedToServer && tokens.length) markRectifyLocalUploaded(done.serverRecordId, tokens[0]);
       saveDB();
       // CF-WPS-44：整改完成即时回显（首页「待整改」-1、「已整改」+1），不必等 25s 轮询。
       // CF-WPS-82：必须 refreshHomeStats(true) 把 force 透到 loadSummary —— 只 force inbox
@@ -4613,7 +4732,8 @@ function submitRectify(){
     (async () => {
       done.rectifyPhotoToken = await uploadPhotoToken(done.afterPhoto, "after", done.clientRequestId);
       if(done.rectifyPhotoToken){
-        await attachPhotoToRecord(done, "rectify");
+        const attached = await attachPhotoToRecord(done, "rectify");
+        if(attached) markRectifyLocalUploaded(done.serverRecordId, done.rectifyPhotoToken);   // CF-WPS-90
         saveDB();
       }
     })();

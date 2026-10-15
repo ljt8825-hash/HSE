@@ -2670,22 +2670,31 @@ async function handlePatrolAttach(request, env) {
 
     // 归属校验：CF-WPS-89 —— 「现场照片」放宽到**可见范围内**的人都能补传
     //   （公司管理 ALL / 经理 DEPT 本人+下级 / 管理员 SELF，与台账可见范围同源）；
-    //   「整改后照片」仍是**本人专属**（那是整改人自己的凭证，不给别人改）。
     //   以前两种都只允许记录创建者 ⇒「不是我建的记录」根本补不了照片。
     //   额外防误伤：非本人只能「补空」—— 目标列已有照片时拒绝，避免覆盖别人的既有证据。
+    // CF-WPS-90：「整改后照片」放宽到**待办接收人（整改人）**。
+    //   那张图本来就是整改人拍的，可派发链路上他不是记录创建者（记录是公司管理/经理建的），
+    //   于是只能靠 /assign/complete 一次成功 —— 上传失败就没有任何补救路径，照片只能烂在本机。
+    //   现在他自己就能补挂（也顺便支持「整改照片拍错了重拍」）。
     if (!hit) return errRes('NOT_FOUND', '记录不存在或无权修改', 404, corsHeaders(origin));
     const col = kind === 'rectify' ? '整改后照片' : '违章照片';
     if (!patrolIsMine(hit.fields, payload.sub)) {
-      if (kind !== 'scene') return errRes('NOT_FOUND', '记录不存在或无权修改', 404, corsHeaders(origin));
-      let allowed = false;
-      try {
-        const view = await resolveViewScope(adapter, env, cfg, payload);
-        allowed = patrolInScope(hit.fields, view);
-      } catch { allowed = false; }   // fail-closed：取不到可见范围就不放行
-      if (!allowed) return errRes('NOT_FOUND', '记录不存在或无权修改', 404, corsHeaders(origin));
-      const existing = hit.fields && hit.fields[col];
-      if (Array.isArray(existing) && existing.length) {
-        return errRes('PATROL_FIELD_INVALID', '该记录已有现场照片，只有本人可更换', 409, corsHeaders(origin));
+      const assigneeOfRectify = kind === 'rectify' && todoIsMine(hit.fields, payload.sub);
+      if (assigneeOfRectify) {
+        // 放行：整改人给自己的待办挂整改后照片（下方直接写 col）
+      } else if (kind !== 'scene') {
+        return errRes('NOT_FOUND', '记录不存在或无权修改', 404, corsHeaders(origin));
+      } else {
+        let allowed = false;
+        try {
+          const view = await resolveViewScope(adapter, env, cfg, payload);
+          allowed = patrolInScope(hit.fields, view);
+        } catch { allowed = false; }   // fail-closed：取不到可见范围就不放行
+        if (!allowed) return errRes('NOT_FOUND', '记录不存在或无权修改', 404, corsHeaders(origin));
+        const existing = hit.fields && hit.fields[col];
+        if (Array.isArray(existing) && existing.length) {
+          return errRes('PATROL_FIELD_INVALID', '该记录已有现场照片，只有本人可更换', 409, corsHeaders(origin));
+        }
       }
     }
 

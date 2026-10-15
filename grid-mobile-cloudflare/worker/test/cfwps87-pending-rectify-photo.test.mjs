@@ -66,7 +66,7 @@ console.log('═══ A1. submitRectify 的三条分支（真跑抽出来的函
   function make(stubs) {
     const f = new Function(
       'session', 'saveDB', 'uploadPhotoToken', 'mobileApi', 'loadInbox', 'refreshHomeStats',
-      'attachPhotoToRecord', 'showDone',
+      'attachPhotoToRecord', 'showDone', 'markRectifyLocalUploaded',
       'let rectifying = null;\n' + src +
       '\nreturn { run: (r)=>{ rectifying = r; submitRectify(); return rectifying; }, peek: ()=>rectifying };'
     );
@@ -78,7 +78,10 @@ console.log('═══ A1. submitRectify 的三条分支（真跑抽出来的函
       stubs.loadInbox || (async () => {}),
       stubs.refreshHomeStats || (async () => {}),
       stubs.attachPhotoToRecord || (async () => true),
-      stubs.showDone || (() => {})
+      stubs.showDone || (() => {}),
+      // CF-WPS-90：submitRectify 新增的接线（把本机副本标成「已上传」）。
+      //   本用例只关心 CF-WPS-87 的暂存分支，这里给空实现 —— 缺参数会让整个函数抛 ReferenceError。
+      stubs.markRectifyLocalUploaded || (() => {})
     );
   }
 
@@ -205,6 +208,7 @@ console.log('\n═══ A3. retryPendingSyncOnce：兜底那遍也收敛 pendin
     const f = new Function(
       'db', 'syncRecord', 'uploadPhotoToken', 'attachPhotoToRecord', 'saveDB',
       'renderSyncBar', 'viewStack', 'renderMyChecks', 'renderListInto', 'myChecks',
+      'retryRectifyLocal',
       src + '\nreturn retryPendingSyncOnce;'
     );
     return f(
@@ -213,7 +217,9 @@ console.log('\n═══ A3. retryPendingSyncOnce：兜底那遍也收敛 pendin
       stubs.attachPhotoToRecord || (async () => true),
       stubs.saveDB || (() => {}), stubs.renderSyncBar || (() => {}),
       stubs.viewStack || [], stubs.renderMyChecks || (() => {}),
-      stubs.renderListInto || (() => {}), stubs.myChecks || (() => [])
+      stubs.renderListInto || (() => {}), stubs.myChecks || (() => []),
+      // CF-WPS-90：入口新增的整改人本机照片补挂 —— 本用例不涉及，给空实现即可。
+      stubs.retryRectifyLocal || (async () => {})
     );
   }
 
