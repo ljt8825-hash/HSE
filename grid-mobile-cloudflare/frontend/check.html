@@ -7,7 +7,7 @@
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-10-14.85">
+<meta name="hse-build" content="2026-10-14.86">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -1049,8 +1049,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
      读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
    - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
    - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
-<script src="./config.js?v=2026-10-14.85"></script>
-<script src="./app.js?v=2026-10-14.85"></script>
+<script src="./config.js?v=2026-10-14.86"></script>
+<script src="./app.js?v=2026-10-14.86"></script>
 <script>
 /* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
 (function(){
@@ -3460,6 +3460,17 @@ async function syncRecordOnce(rec, assignTo){
       rec.serverRecordId = res.recordId;
       rec.deduplicated = !!res.deduplicated;
       if(assignTo && assignTo.assignee_id) rec.assignedToServer = res.assigned;   // CF-WPS-43 建单即指派
+      // CF-WPS-87：原记录补传成功 ⇒ 若整改后照片此前因「记录未上报」暂存本机（rectifyPhotoPending），
+      //   立即补挂回这条记录。让「原记录补传 → 照片补挂」在同一次重试里完成，不必等
+      //   retryPendingSync 的第二遍（那遍仍保留作兜底）。失败静默，绝不拖垮建单本身。
+      if(rec.rectifyPhotoPending && rec.afterPhoto && !rec.rectifyPhotoToken){
+        try{
+          rec.rectifyPhotoToken = await uploadPhotoToken(rec.afterPhoto, "after", rec.clientRequestId);
+          if(rec.rectifyPhotoToken && await attachPhotoToRecord(rec, "rectify")){
+            rec.rectifyPhotoPending = false;
+          }
+        }catch(e){ /* 静默：retryPendingSync 第二遍仍会兜底 */ }
+      }
     } else {
       rec.syncState = "failed";
       rec.syncError = patrolSubmitHint(res);
@@ -3492,14 +3503,26 @@ function retryPendingSync(){
 }
 async function retryPendingSyncOnce(){
   const pend = db.records.filter(r => r.syncState !== "synced");
-  if(!pend.length) return;
+  // CF-WPS-87：不能只看「整条未上报」就提前 return —— 还有一类记录是「已上报、但整改照片没挂上」
+  //   （syncState 已是 synced，仅剩 afterPhoto 没拿到 token）。若因 pend 为空就 return，
+  //   这类记录的照片会**永远补不上**（实测：补挂失败一次后页面重载 → 再也没人管它）。
+  const photoPending = db.records.some(r =>
+    r.syncState === "synced" && r.serverRecordId && r.afterPhoto && !r.rectifyPhotoToken);
+  if(!pend.length && !photoPending) return;
   for(const r of pend) await syncRecord(r);
-  // 补挂重试：上次「整改后照片」上传/补挂失败的记录（有照片但没拿到 token）
+  // 补挂重试：整改后照片还没挂上记录 —— 两类来源共用这一段：
+  //   ① 上次「整改后照片」上传/补挂失败（有照片但没拿到 token）；
+  //   ② CF-WPS-87：整改时原记录尚未上报（rectifyPhotoPending），照片暂存本机，
+  //      现原记录已由上面第一遍 syncRecord 补传成功（serverRecordId 已就位）⇒ 补挂。
   for(const r of db.records){
     if(r.syncState !== "synced" || !r.serverRecordId) continue;
     if(r.afterPhoto && !r.rectifyPhotoToken){
       r.rectifyPhotoToken = await uploadPhotoToken(r.afterPhoto, "after", r.clientRequestId);
-      if(r.rectifyPhotoToken){ await attachPhotoToRecord(r, "rectify"); saveDB(); }
+      if(r.rectifyPhotoToken){
+        const attached = await attachPhotoToRecord(r, "rectify");
+        if(attached) r.rectifyPhotoPending = false;   // 补挂成功 → 摘掉 pending 标记
+        saveDB();
+      }
     }
   }
   renderSyncBar();
@@ -3554,6 +3577,11 @@ function showDone(rec, title){
   if(rec.syncState && rec.syncState !== "synced"){
     rows.push('<div class="info-line" style="color:var(--danger)">⚠ 记录未上报：' +
       esc(rec.syncError || "未知原因，请到「巡查台账」重试") + "</div>");
+  }
+  // CF-WPS-87：原记录没上报、但整改后照片已拍 ⇒ 明确告诉用户照片**没丢**，
+  //   免得以为白干一场。照片已随记录暂存本机，原记录补传成功后会一并补挂。
+  if(rec.afterPhoto && (rec.rectifyPhotoPending || (rec.syncState && rec.syncState !== "synced"))){
+    rows.push('<div class="info-line" style="color:var(--t3)">整改照片已暂存本机，原记录补传成功后会一并上传</div>');
   }
   c.innerHTML = rows.join("");
   $("#btn-done-home").onclick = () => { enterHome(); };
@@ -4399,6 +4427,14 @@ function submitRectify(){
         saveDB();
       }
     })();
+  } else if(done.afterPhoto && !done.serverRecordId){
+    // CF-WPS-87：原记录还没上报成功（patrol/submit 未完成或失败）⇒ 没有 serverRecordId，
+    //   整改后照片无处可挂。以前两个分支都要求 serverRecordId，这里会「什么都不做」，
+    //   照片只能烂在 localStorage 里（实测：原记录没进飞书 → 整改照片也一起丢）。
+    //   现在标记 pending 暂存本机：等原记录补传成功、拿到 serverRecordId 后，
+    //   由 syncRecordOnce / retryPendingSync 自动补挂 —— 整改进度不因照片而断，照片也不丢。
+    done.rectifyPhotoPending = true;
+    saveDB();
   }
   showDone(rectifying, "整改完成");
   rectifying = null;
