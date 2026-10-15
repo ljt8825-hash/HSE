@@ -7,7 +7,7 @@
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-10-15.89">
+<meta name="hse-build" content="2026-10-15.90">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -371,6 +371,13 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
 .entry-card{flex:1;height:var(--h-entry);border-radius:var(--r-card);background:var(--card);border:1px solid var(--line);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;font-size:var(--fs-body);font-weight:600;cursor:pointer;position:relative}
 .entry-card:active{transform:scale(.97)}
 .entry-card .badge{position:absolute;top:8px;right:10px;min-width:var(--icon-badge);height:var(--icon-badge);border-radius:var(--r-pill);background:var(--danger);color:#fff;font-size:var(--fs-cap);font-weight:600;display:flex;align-items:center;justify-content:center;padding:0 6px}
+/* CF-WPS-91：首页待办提醒里**可点**的那几行。
+   原来整个待办区只有纯文本，像「有 1 条整改已提交，待复查」这种数字在页面上找不到
+   任何对应记录，也没有任何入口能进去看是哪一条（数字无家可归）。 */
+.todo-line{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.todo-line.go{cursor:pointer;color:var(--primary)}
+.todo-line.go:active{transform:scale(.99)}
+.todo-line .todo-arrow{font-size:var(--fs-sub);color:var(--primary);flex:0 0 auto}
 .blue-idcard{border-radius:var(--r-card);padding:var(--pad-card);display:flex;flex-direction:column;gap:6px;background:linear-gradient(180deg,#3B82F6 0%,#1D4ED8 100%);color:#fff}
 .blue-idcard .role-tag{font-size:var(--fs-sub);color:var(--primary-light)}
 .blue-idcard .name{font-size:var(--fs-hero);font-weight:700}
@@ -985,6 +992,17 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
       <div class="name" id="me-name"></div>
       <div class="meta" id="me-meta"></div>
     </div>
+    <!-- CF-WPS-91：「待我复查」入口。
+         这个页面（#view-my-review）和它的渲染逻辑一直都存在，但**没有任何元素指向它** ——
+         首页「有 N 条整改已提交，待复查」的数字因此既点不动、也没法确认是哪几条。
+         没有待复查记录时整个卡片隐藏，不占位。 -->
+    <div class="card" style="cursor:pointer;display:none" id="btn-me-review">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div style="font-size:var(--fs-title);font-weight:600">待我复查</div>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 5l7 7-7 7" stroke="#9CA3AF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div style="font-size:var(--fs-sub);color:var(--t3);margin-top:2px" id="me-review-hint">已整改提交、等你确认闭环</div>
+    </div>
     <div class="card" style="cursor:pointer;display:none" id="btn-me-sub">
       <div style="display:flex;align-items:center;justify-content:space-between">
         <div style="font-size:var(--fs-title);font-weight:600">下属检查</div>
@@ -1058,8 +1076,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
      读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
    - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
    - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
-<script src="./config.js?v=2026-10-15.89"></script>
-<script src="./app.js?v=2026-10-15.89"></script>
+<script src="./config.js?v=2026-10-15.90"></script>
+<script src="./app.js?v=2026-10-15.90"></script>
 <script>
 /* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
 (function(){
@@ -2153,11 +2171,31 @@ function myOpenLoopedRecords(){
     r.checkerId === session.id && r.type === "三违" &&
     r.status === "unfinished" && r.syncState === "synced");
 }
-/* 「巡查台账」页签角标的**唯一**写入口（数字只在 myOpenLoopedRecords() 一处算）。
-   refreshHomeStats 与 renderSyncBar 都调它 —— 后者在补传成功 / 进台账时跑，
-   保证「补传成功 ⇒ 记录从待上报挪进未闭环 ⇒ 角标当场跟着变」，不必等 25s 轮询。 */
+/* CF-WPS-91：「已整改、待复查」的本机记录 —— **唯一**口径函数。
+   为什么必须收敛成一处：这条记录以前是「数字无家可归」的典型 ——
+     · 首页待办提醒数它（旧实现就地写 filter），但只是纯文本，点不动；
+     · 「我的复查」页（#view-my-review）有渲染逻辑，却**没有任何元素指向它**，等于没有；
+     · 巡查台账只分「待上报」（syncState !== synced）与「未闭环」（status === unfinished）
+       两组，而它 status === "done" 且已同步 ⇒ **两组都进不去**，在台账页彻底消失。
+   现在首页文案、我的复查页、台账「待复查」分组三处共用本函数，数字必然一致。
+   口径：status === "done"（已整改、还没点「复查通过·闭环」）；
+   范围与 CF-WPS-40 一致 —— 经理看下属报的，其余角色看自己巡查的。 */
+function myToReviewRecords(){
+  if(!session || !db || !db.records) return [];
+  return (db.records || []).filter(r =>
+    r.status === "done" &&
+    (session.role === "经理" ? isMySubordinateRec(r) : r.checkerId === session.id));
+}
+/* 「巡查台账」页签角标的**唯一**写入口。
+   口径 = 台账页两个「还需要我动作」的本机分组之和：未闭环（已上报、还没整改完）
+        + 待复查（已整改、还没复查闭环）。
+   为什么把待复查也算进来：它同样需要本人去点一下才闭环，漏掉就会出现
+   「首页提醒有待复查，页签却干干净净」——本次用户反馈的正是这个。
+   ⚠️ 数字必须能在页面上核对：台账页两个分组标签各自带数字（未闭环 N / 待复查 M），
+      角标 = N + M。refreshHomeStats 与 renderSyncBar 都调它 —— 后者在补传成功 / 进台账时跑，
+      保证「补传成功 ⇒ 记录从待上报挪进未闭环 ⇒ 角标当场跟着变」，不必等 25s 轮询。 */
 function refreshLedgerBadge(){
-  setBadge("badge-checks", myOpenLoopedRecords().length);
+  setBadge("badge-checks", myOpenLoopedRecords().length + myToReviewRecords().length);
 }
 // 本月上报：本自然月内本人提交的全部记录（三违上报 + 普通巡查），按自然月统计
 function isSameMonth(t, ref){
@@ -2214,20 +2252,45 @@ function refreshHomeStats(force){
   setBadge("badge-rectify", pending.length);
   // CF-WPS-40：原 setBadge("badge-review") 指向的 DOM 不存在，角标从未显示；
   // 改为落进首页待办文案，让「已整改、待复查」的记录真正可见。
-  const toReview = db.records.filter(r => (r.status === "done") && (session.role === "经理" ? isMySubordinateRec(r) : r.checkerId === session.id));
-  const todo = $("#todo-list");
+  const toReview = myToReviewRecords();   // CF-WPS-91：口径收敛进函数（首页 / 我的复查 / 台账三处共用）
   const lines = [];
-  unfinished.slice(0,2).forEach(r => lines.push("· " + (r.personName || "未指定") + " " + (r.behavior || "") + "，尚未完成整改"));
-  if(toReview.length) lines.push("· 有 " + toReview.length + " 条整改已提交，待复查");
+  // 每行是 {t: 文案, go: 点击去哪} —— go 为空即纯文本行。
+  // ⚠️ 原来这里只 push 字符串，于是「有 N 条整改已提交，待复查」既点不动、
+  //    台账页也没有对应分组，用户拿着数字找不到记录（CF-WPS-91 的起因）。
+  unfinished.slice(0,2).forEach(r => lines.push({ t: "· " + (r.personName || "未指定") + " " + (r.behavior || "") + "，尚未完成整改", go: "my-checks" }));
+  if(toReview.length) lines.push({ t: "· 有 " + toReview.length + " 条整改已提交，待复查", go: "my-review" });
   // 后端上报失败/未完成 → 必须让用户可见（记录还在本机，但尚未进飞书台账）
   const unsynced = db.records.filter(r => r.syncState && r.syncState !== "synced");
-  if(unsynced.length) lines.push("· 有 " + unsynced.length + " 条记录待上报，进「巡查台账」可重试");
-  todo.innerHTML = lines.length ? lines.map(l => "<div>" + esc(l) + "</div>").join("") : "<div>· 暂无待办，一切正常</div>";
+  if(unsynced.length) lines.push({ t: "· 有 " + unsynced.length + " 条记录待上报，进「巡查台账」可重试", go: "my-checks" });
+  todoBaseLines = lines;
+  todoLines = lines.slice();
+  renderTodoList();
 
   // CF-WPS-36b：上级指派给我的待办存在**服务端**，不在本机 db。
   // 不补这一步的话，被指派人登录后首页「待整改」是 0、红点也不亮，
   // 只有主动点进「我的整改」才发现有人派了活给他 —— 等于没有提醒。
-  refreshInboxStats(pending.length, lines.slice(), force);
+  refreshInboxStats(pending.length, force);
+}
+
+/* CF-WPS-91：首页「待办提醒」的**唯一**渲染入口（refreshHomeStats / refreshInboxStats 共用）。
+   行结构：{ t: 文案, go: 点进去的 openEntry 目标（可选）}。 */
+let todoBaseLines = [];
+let todoLines = [];
+function renderTodoList(){
+  const todo = document.getElementById("todo-list");
+  if(!todo) return;
+  todo.innerHTML = todoLines.length
+    ? todoLines.map((l, i) =>
+      '<div class="todo-line' + (l.go ? " go" : "") + '"' + (l.go ? ' data-todo="' + i + '"' : "") + ">" +
+      "<span>" + esc(l.t) + "</span>" +
+      (l.go ? '<span class="todo-arrow">查看 ›</span>' : "") + "</div>").join("")
+    : "<div>· 暂无待办，一切正常</div>";
+  Array.prototype.forEach.call(todo.querySelectorAll(".todo-line.go"), (el) => {
+    el.onclick = () => {
+      const l = todoLines[Number(el.dataset.todo)];
+      if(l && l.go) openEntry(l.go);
+    };
+  });
 }
 
 /* 页签角标（异步，失败静默）：派发方在首页就能看到还有几条挂着没整改完。
@@ -2246,18 +2309,22 @@ async function refreshDispatchBadge(){
    ⇒ 被指派人整改完，红点最长 20 秒不灭，用户以为没提交成功。
    只有显式用户动作（整改完成）才 force；25s 后台轮询不 force —— /summary 是整表扫描，
    轮询周期(25s)本就大于 TTL(20s)，每次都会自然回源，不需要再强制。 */
-async function refreshInboxStats(localPending, baseLines, force){
+async function refreshInboxStats(localPending, force){
   try{
     const s = await loadSummary(!!force);
     if(s) applySummary(s);
     const inbox = await loadInbox(false);          // 60s 缓存，不会每次进首页都回源
     const localIds = new Set((db.records || []).map(r => r.serverRecordId).filter(Boolean));
     const extra = (inbox || []).filter(r => r.todoStatus === "待整改" && r.status !== "done" && !localIds.has(r.serverRecordId));
-    const todo = document.getElementById("todo-list");
-    if(!todo) return;
-    const lines = baseLines.slice();
-    extra.slice(0, 2).forEach(r => lines.unshift("· 收到指派：" + (r.behavior || "整改") + "（来自 " + (r.assignerName || "上级") + (r.assignerDept ? " · " + r.assignerDept : "") + "）"));
-    todo.innerHTML = lines.length ? lines.map(l => "<div>" + esc(l) + "</div>").join("") : "<div>· 暂无待办，一切正常</div>";
+    // CF-WPS-91：从 refreshHomeStats 落下的基准行重建（每次都重建，避免反复 unshift 累积）。
+    // 「收到指派」行同样可点 —— 直接进「整改任务」看是哪几条。
+    const lines = todoBaseLines.slice();
+    extra.slice(0, 2).forEach(r => lines.unshift({
+      t: "· 收到指派：" + (r.behavior || "整改") + "（来自 " + (r.assignerName || "上级") + (r.assignerDept ? " · " + r.assignerDept : "") + "）",
+      go: "my-rectify",
+    }));
+    todoLines = lines;
+    renderTodoList();
   }catch(e){ /* 拉取失败：保留本机渲染的数字，不打断首页 */ }
 }
 function setBadge(id, n){ const el = document.getElementById(id); if(!el) return; el.classList.toggle("hidden", !n); el.textContent = n; }
@@ -4048,6 +4115,9 @@ async function renderMyChecks(){
   resetThumbObserver();                    // CF-WPS-89：整块重绘前先丢弃旧的缩略图观察目标
   const pend = myUnsyncedRecords();        // CF-WPS-82：与页顶同步条同口径（原来走 myChecks() 会漏掉普通巡查）
   const open = myOpenLoopedRecords();      // CF-WPS-82：与「巡查台账」页签角标同口径
+  // CF-WPS-91：已整改待复查的本机记录（与首页「待复查」文案同源）。
+  //   这里只取**已同步**的：未同步的那些归「待上报」组，两组严格二分不重复列。
+  const review = myToReviewRecords().filter(r => r.syncState === "synced");
   el.innerHTML = '<div class="empty-tip">正在读取台账…</div>';
   const list = await loadServerRecs(true);
   el.innerHTML = "";
@@ -4066,13 +4136,26 @@ async function renderMyChecks(){
     el.appendChild(lab);
     open.forEach(r => el.appendChild(recordCard(r, { from: "view-my-checks" })));
   }
+  /* CF-WPS-91：已整改、等我点「复查通过·闭环」的本机记录。
+     同一类「数字无家可归」问题：首页待办提醒会数它们（「有 N 条整改已提交，待复查」），
+     但它们 status === "done" —— 「待上报」要求 syncState !== synced、「未闭环」要求
+     status === "unfinished"，两组都进不去 ⇒ 在台账页彻底消失，用户拿着数字找不到记录。
+     这里补上第三组，且与「待上报」按 syncState **严格二分**（未同步的那些已在「待上报」组里，
+     同一张卡带「待上报」角标，不重复列）。
+     卡片点开走 recordCard → openRecord → renderDetail，「复查通过·闭环」按钮就在那里。 */
+  if(review.length){
+    const lab = document.createElement("div");
+    lab.className = "section-label"; lab.textContent = "待复查（" + review.length + "）";
+    el.appendChild(lab);
+    review.forEach(r => el.appendChild(recordCard(r, { from: "view-my-checks" })));
+  }
   if(list && list.length){
     const lab = document.createElement("div");
     lab.className = "section-label"; lab.textContent = "已上报台账（" + list.length + "）";
     el.appendChild(lab);
     list.forEach(x => el.appendChild(serverRecCard(x)));
   }
-  if(!pend.length && !open.length && (!list || !list.length)){
+  if(!pend.length && !open.length && !review.length && (!list || !list.length)){
     el.innerHTML = '<div class="empty-tip">' + (serverRecsErr ? "台账读取失败：" + esc(serverRecsErr) : "暂无记录") + "</div>";
   }
 }
@@ -4795,6 +4878,9 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#sd-back").onclick = () => showView("home");
   $$("#tabbar .tab-item").forEach(t => t.onclick = () => openTab(t.dataset.tab));
   $("#btn-me-sub").onclick = () => openEntry("sub-checks");
+  // CF-WPS-91：「待我复查」入口（此前该视图无任何入口，见 view-my-review 注释）
+  const bmr = $("#btn-me-review");
+  if(bmr) bmr.onclick = () => openEntry("my-review");
   function openTab(tab){
     // 底部导航 = 顶层入口：重复点击回到该主屏（微信式），高亮由 showView → syncTabbar 统一维护
     if(tab === "home"){ enterHome(); return; }
@@ -5085,7 +5171,13 @@ function openEntry(go){
     renderMyRectify();   // 本机自建 + 服务端指派的待办（异步合并，见该函数）
   }
   if(go === "my-review"){
-    const toReview = db.records.filter(r => r.status === "done" && (r.checkerId === session.id || isMySubordinateRec(r)));
+    // CF-WPS-91：口径与首页「有 N 条整改已提交，待复查」同源（myToReviewRecords）。
+    // 这个视图以前**没有任何入口**（有渲染逻辑、没人能导航过来），首页那行数字因此无家可归。
+    const toReview = myToReviewRecords();
+    // 返回键回到**进来时那一屏**（首页待办点进来回首页、「我的」点进来回「我的」），
+    // 别一律写死 home —— 从「我的」进来再退到首页会丢掉用户的位置。
+    const backBtn = document.querySelector("#view-my-review [data-back]");
+    if(backBtn) backBtn.dataset.back = viewStack[viewStack.length - 1] || "home";
     renderListInto("my-review-list", toReview, { from: "view-my-review", goLine: "点击查看并复查" });
     showView("my-review");
   }
@@ -5122,6 +5214,14 @@ function openEntry(go){
     $("#me-name").textContent = session.name;
     $("#me-meta").innerHTML = "网格长等级　" + esc(session.grid) + "<br>所属部门　" + esc(session.dept) + "<br>所属班组　" + esc(session.team);
     $("#me-info").innerHTML = "职位：" + esc(session.roleTag) + "<br>直接上级：" + esc(session.superior || "—") + "<br>手机：" + esc(session.phone ? maskTel(session.phone) : "—");
+    // CF-WPS-91：待复查入口的可见性与条数（与首页待办那行同源，数字必然一致）
+    const rv = myToReviewRecords();
+    const rvCard = document.getElementById("btn-me-review");
+    if(rvCard){
+      rvCard.style.display = rv.length ? "" : "none";
+      const rvHint = document.getElementById("me-review-hint");
+      if(rvHint) rvHint.textContent = "已整改提交、等你确认闭环 · " + rv.length + " 条";
+    }
     showView("me");
   }
 }
