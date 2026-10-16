@@ -7,7 +7,7 @@
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-10-16.96">
+<meta name="hse-build" content="2026-10-16.97">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -1108,6 +1108,7 @@ textarea.hz-input{height:auto;padding:10px var(--pad-card);line-height:1.6;resiz
     <div class="btn-stack" style="margin-top:10px">
       <button class="btn-ghost btn-row" id="btn-hz-camera">拍照</button>
       <button class="btn-ghost btn-row" id="btn-hz-album">从相册上传</button>
+      <button class="btn-ghost btn-row" id="btn-hz-clear">清空表单</button>
     </div>
     <button class="btn-primary btn-row" id="btn-hz-submit" style="margin-top:18px">提交隐患</button>
     <input type="file" accept="image/*" capture="environment" class="file-ghost" id="hz-file-camera">
@@ -1167,8 +1168,8 @@ textarea.hz-input{height:auto;padding:10px var(--pad-card);line-height:1.6;resiz
      读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
    - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
    - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
-<script src="./config.js?v=2026-10-16.96"></script>
-<script src="./app.js?v=2026-10-16.96"></script>
+<script src="./config.js?v=2026-10-16.97"></script>
+<script src="./app.js?v=2026-10-16.97"></script>
 <script>
 /* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
 (function(){
@@ -5385,7 +5386,8 @@ document.addEventListener("DOMContentLoaded", () => {
   function logout(){ clearSession(); clearLoginCreds(); redirectToLogin(); }
 
   // CF-WPS-95：隐患排查模块（DOM 绑定集中在此；函数体在上方 CF-WPS-95 段）
-  $("#btn-hazard-new").onclick = () => { resetHazardForm(); showView("hazard-form"); };
+  // CF-WPS-96：开表单走 openHazardForm（有草稿先续传，见 HZ_DRAFT_KEY）
+  $("#btn-hazard-new").onclick = () => openHazardForm();
   $("#btn-hz-camera").onclick = () => $("#hz-file-camera").click();
   $("#btn-hz-album").onclick = () => $("#hz-file-album").click();
   $("#hz-file-camera").onchange = e => pickHazardPhoto(e.target);
@@ -5394,29 +5396,39 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#hz-desc").addEventListener("input", () => {
     hazardForm.description = $("#hz-desc").value;
     updateHzDescCount();
+    saveHazardDraft();   // CF-WPS-96：每敲一个字都落盘，页面被回收也不丢
   });
   $("#hz-location").addEventListener("input", () => {
     hazardForm.location = $("#hz-location").value;
+    saveHazardDraft();
   });
   // 「定位」：把后台 GPS 解析出的地址写进位置框，经纬度随提交一起落库
   $("#btn-hz-geo").onclick = () => {
     if(gps && gps.addr && gps.addr.indexOf("暂不可用") < 0){
       $("#hz-location").value = gps.addr;
       hazardForm.location = gps.addr;
+      saveHazardDraft();
       flashMsg("已带入当前位置");
     } else {
       flashMsg("定位暂不可用，请手动输入位置");
     }
   };
+  // CF-WPS-96：手动清空表单 + 丢弃草稿（长表单误触后的一键重来）
+  $("#btn-hz-clear").onclick = () => { resetHazardForm(); flashMsg("表单已清空"); };
 });
 
-/* ================= CF-WPS-95：隐患排查（仅 公司管理 × 安环管理部） =================
+/* ================= CF-WPS-95/96：隐患排查（仅 公司管理 × 安环管理部） =================
    业务口径（用户确认 2026-10-16）：
      · 入口只给「公司管理」里「安环管理部」的人（身份表分级压过花名册职位）；
      · 数据落独立飞书表「H5隐患排查台账表」，与巡查主台账完全分离；
      · 本期范围：隐患登记 + 我的隐患列表/详情（整改闭环后续迭代）；
      · 照片走 /api/mobile/upload → file_token，详情经 /api/mobile/photo 取图；
-   权限双保险：入口显隐（isHazardUser）+ showView 拦截 + 服务端角色门。 */
+   权限双保险：入口显隐（isHazardUser）+ showView 拦截 + 服务端角色门。
+   CF-WPS-96（自查整改）：
+     · 表单草稿落 localStorage（文字字段；照片一律重拍，不存 token）——
+       低端安卓调起相机时页面被系统回收 / 误刷新，长描述不再全丢；
+     · 提交响应识别服务端 deduplicated（弱网重试 / 连点两下），
+       明确告知「未重复提交」而不是含糊的成功。 */
 const HAZARD_VIEWS = ["hazard-list", "hazard-form", "hazard-detail"];
 // 类别/级别**必须与服务端 index.js 同名单**（后端校验拒绝不在名单内的值）
 const HAZARD_CATEGORIES = ["设备设施","消防安全","用电安全","危化品","作业安全","高处作业","交通运输","公共设施","环境卫生","违规操作","其他"];
@@ -5439,7 +5451,59 @@ function renderHazardEntry(){
 
 /* ---- 隐患类别/级别宫格（opt-card.selectable 体系） ---- */
 let hazardForm = { category: "", level: "", location: "", description: "", photos: [] };
+// CF-WPS-96：草稿断点续传（文字字段；照片不落盘 —— 现场照片必须重拍，
+// 存 file_token 会在 token 失效后变成「详情里裂图」，宁可让人重拍）。
+// 场景与巡查同源：低端安卓调起系统相机时页面被系统回收 / 用户误刷新，
+// 长描述 + 已选类别全丢。TTL 24h（隐患排查是坐班场景，比巡查的 2h 宽）。
+const HZ_DRAFT_KEY = "hse_hazard_draft_v1";
+const HZ_DRAFT_TTL_MS = 24 * 3600 * 1000;
+function hazardDraftDirty(){
+  return !!(hazardForm.category || hazardForm.level || hazardForm.location || hazardForm.description);
+}
+function saveHazardDraft(){
+  if(!hazardDraftDirty()) return;
+  try{
+    localStorage.setItem(HZ_DRAFT_KEY, JSON.stringify({
+      at: Date.now(),
+      category: hazardForm.category, level: hazardForm.level,
+      location: hazardForm.location, description: hazardForm.description,
+    }));
+  }catch(e){ /* 配额/隐私模式：草稿丢失不阻断填报 */ }
+}
+function clearHazardDraft(){ try{ localStorage.removeItem(HZ_DRAFT_KEY); }catch(e){} }
+function loadHazardDraft(){
+  try{
+    const o = JSON.parse(localStorage.getItem(HZ_DRAFT_KEY) || "null");
+    if(!o || !o.at || Date.now() - o.at > HZ_DRAFT_TTL_MS) return null;
+    if(!(o.category || o.level || o.location || o.description)) return null;
+    return o;
+  }catch(e){ return null; }
+}
+// 带着草稿回到表单（照片一律重拍）
+function applyHazardDraft(d){
+  hazardForm = { category: d.category || "", level: d.level || "",
+                 location: d.location || "", description: d.description || "", photos: [] };
+  $("#hz-location").value = hazardForm.location;
+  $("#hz-desc").value = hazardForm.description;
+  updateHzDescCount();
+  renderHzCatGrid();
+  renderHzLevelGrid();
+  renderHzPhotos();
+}
+// 打开登记表单：有草稿就续上（页面被回收 / 误刷新后回来），没有就清空重来
+function openHazardForm(){
+  const d = loadHazardDraft();
+  if(d){
+    applyHazardDraft(d);
+    showView("hazard-form");
+    flashMsg("已恢复上次未提交的隐患草稿（现场照片请重拍）");
+  } else {
+    resetHazardForm();
+    showView("hazard-form");
+  }
+}
 function resetHazardForm(){
+  clearHazardDraft();
   hazardForm = { category: "", level: "", location: "", description: "", photos: [] };
   $("#hz-location").value = "";
   $("#hz-desc").value = "";
@@ -5461,7 +5525,7 @@ function renderHzCatGrid(){
   HAZARD_CATEGORIES.forEach(name => {
     const d = document.createElement("div");
     d.innerHTML = hzOptCard(name, hazardForm.category === name);
-    d.firstElementChild.onclick = () => { hazardForm.category = name; renderHzCatGrid(); };
+    d.firstElementChild.onclick = () => { hazardForm.category = name; renderHzCatGrid(); saveHazardDraft(); };
     g.appendChild(d.firstElementChild);
   });
 }
@@ -5472,7 +5536,7 @@ function renderHzLevelGrid(){
     const sub = name === "重大隐患" ? "可能造成人身伤害或较大财产损失" : "风险较低、可常规整改";
     const d = document.createElement("div");
     d.innerHTML = hzOptCard(name, hazardForm.level === name, sub);
-    d.firstElementChild.onclick = () => { hazardForm.level = name; renderHzLevelGrid(); };
+    d.firstElementChild.onclick = () => { hazardForm.level = name; renderHzLevelGrid(); saveHazardDraft(); };
     g.appendChild(d.firstElementChild);
   });
 }
@@ -5555,7 +5619,14 @@ async function submitHazard(){
     if(tokens.length) body.photo_tokens = tokens;
     const r = await mobileApi("/api/mobile/hazard/submit", body);
     if(r.status === 200 && r.body && r.body.success){
-      flashMsg("隐患已登记（编号 " + (r.body.hazardNo || "—") + "）");
+      clearHazardDraft();
+      // 幂等命中（弱网重试 / 连点两下）：服务端已去过重，明确告知「没有重复登记」，
+      // 否则用户看到成功却担心自己建了两条
+      if(r.body.deduplicated){
+        flashMsg("该隐患此前已登记成功，未重复提交");
+      } else {
+        flashMsg("隐患已登记（编号 " + (r.body.hazardNo || "—") + "）");
+      }
       resetHazardForm();
       showView("hazard-list");
       renderHazardList();

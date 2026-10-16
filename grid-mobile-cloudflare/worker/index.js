@@ -2846,6 +2846,11 @@ async function resolveViewScope(adapter, env, cfg, payload) {
 //     （身份表「分级」压过花名册职位，与 ledgerChildren 同一套口径）。
 // 幂等：client_request_id 压进「备注」req:<id>，复用主台账同一套
 //   findExistingByClientRequestId（备注 contains 检索）。
+//   三道防线（CF-WPS-96 补第二道）：
+//     ① isolate 缓存 cid→recordId（落库后写入，覆盖重试窗口的 search 索引延迟）；
+//     ② **在途表** cid→Promise（create 之前占位）——覆盖「两条并发请求同时穿过
+//        预查、各写一条」的双写竞态（自查实测复现过，41 例矩阵已转绿）；
+//     ③ 飞书 search 预查（覆盖 isolate 重启 / 换设备重提，best-effort）。
 // 照片：走 /api/mobile/upload 的 file_token → 附件列「现场照片」（≤3）。
 // 取图：/api/mobile/photo?ft=<file_token>（复用派发图代理）。
 // 三条接口（submit/list/detail）都做同一道角色门 —— 显示层隐藏只是体验，
@@ -2864,17 +2869,44 @@ const HAZARD_LIST_LIMIT = 100;         // 我的隐患返回条数上限
 // （主台账同款现象，见 CF-WPS-43）。hazard 提交频率低、但重复台账更难清理，
 // 故加一层 isolate 内 cid → recordId 缓存（TTL 5min）兜底；search 预查仍保留
 // （覆盖 isolate 重启 / 换设备重提的场景，best-effort）。
+// ⚠️ 缓存键是 **sub + '|' + cid**，不是裸 cid：cid 由客户端随机生成、跨账号不复用，
+// 但加了账号维度后，即使出现极端撞 cid 也只会命中自己的记录，不会把 A 的
+// recordId 返给 B（detail 有归属校验兜底，这里双保险）。
 const HAZARD_CID_TTL_MS = 5 * 60 * 1000;
-let hazardCidCache = new Map(); // cid -> { recordId, at }
-function hazardCidGet(cid) {
-  const hit = hazardCidCache.get(cid);
+let hazardCidCache = new Map(); // sub|cid -> { recordId, at }
+// 同一 cid 的**并发**提交合并（与上面的缓存互补，覆盖「预查都没查到 → 各写一条」）：
+// 缓存只在记录落库后才写入，两条并发请求会在写入前双双穿过预查。
+// 在途表在 create 之前就占位，后到的那条直接共享前一条的落库结果。
+const HAZARD_INFLIGHT_TTL_MS = 30 * 1000;   // 在途任务超时（异常挂起不留残影）
+let hazardCidInflight = new Map(); // sub|cid -> { task, at }
+const hazardCidKey = (sub, cid) => String(sub || '') + '|' + String(cid || '');
+function hazardInflightGet(sub, cid) {
+  const hit = hazardCidInflight.get(hazardCidKey(sub, cid));
   if (!hit) return null;
-  if (Date.now() - hit.at > HAZARD_CID_TTL_MS) { hazardCidCache.delete(cid); return null; }
+  if (Date.now() - hit.at > HAZARD_INFLIGHT_TTL_MS) { hazardCidInflight.delete(hazardCidKey(sub, cid)); return null; }
+  return hit.task;
+}
+function hazardInflightPut(sub, cid, task) {
+  if (!cid || !task) return;
+  hazardCidInflight.set(hazardCidKey(sub, cid), { task, at: Date.now() });
+  if (hazardCidInflight.size > 100) {   // 体积控制：先清过期，仍满则清半（宁可多重，不锁死）
+    [...hazardCidInflight.entries()].forEach(([k, v]) => {
+      if (Date.now() - v.at > HAZARD_INFLIGHT_TTL_MS) hazardCidInflight.delete(k);
+    });
+    if (hazardCidInflight.size > 100) {
+      [...hazardCidInflight.keys()].slice(0, 50).forEach((k) => hazardCidInflight.delete(k));
+    }
+  }
+}
+function hazardCidGet(sub, cid) {
+  const hit = hazardCidCache.get(hazardCidKey(sub, cid));
+  if (!hit) return null;
+  if (Date.now() - hit.at > HAZARD_CID_TTL_MS) { hazardCidCache.delete(hazardCidKey(sub, cid)); return null; }
   return hit.recordId;
 }
-function hazardCidPut(cid, recordId) {
+function hazardCidPut(sub, cid, recordId) {
   if (!cid || !recordId) return;
-  hazardCidCache.set(cid, { recordId, at: Date.now() });
+  hazardCidCache.set(hazardCidKey(sub, cid), { recordId, at: Date.now() });
   if (hazardCidCache.size > 200) {   // 简单体积控制（安环部账号量级远小于此）
     const old = [...hazardCidCache.entries()].sort((a, b) => a[1].at - b[1].at).slice(0, 100);
     old.forEach(([k]) => hazardCidCache.delete(k));
@@ -2887,12 +2919,35 @@ const HAZARD_CATEGORIES = ['设备设施', '消防安全', '用电安全', '危�
 const HAZARD_LEVELS = ['一般隐患', '重大隐患'];
 const HAZARD_STATUS_PENDING = '待整改';
 
-// 排查时间格式 "YYYY-MM-DD HH:MM"（本地时区；服务端兜底回填）
-function hazardTimeValid(v) {
-  if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(v)) return false;
-  const d = new Date(v.replace(' ', 'T') + ':00');
-  return !Number.isNaN(d.getTime()) && d.getFullYear() >= 2020;
+// 排查时间格式 "YYYY-MM-DD HH:MM"。
+// ⚠️ 两个坑（CF-WPS-96 都实测踩过）：
+//  ① 不能直接 new Date('YYYY-MM-DDTHH:MM') 解析 —— ES2020 起无时区 ISO 串按
+//     **本地时区**解释，而 Worker 时钟是 UTC，两边一对不上就会把正常填报判非法；
+//  ② 未来时间容差必须覆盖时区偏移：前端传的是手机本地 wall-clock，UTC+8 用户
+//     填「现在」按 UTC 解析后天然超前 8 小时，全球最大时区 +14h，再留余量给钟漂。
+// 返回 { ok, msg }：「格式/假日期」与「未来时间」分开报错，用户才知道该调什么。
+const HAZARD_TIME_FUTURE_SKEW_MS = 24 * 3600 * 1000;
+function hazardTimeCheck(v) {
+  if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(v)) {
+    return { ok: false, msg: '排查时间格式应为 YYYY-MM-DD HH:MM' };
+  }
+  const [ymd, hm] = String(v).split(' ');
+  const [Y, M, D] = ymd.split('-').map(Number);
+  const [h, mi] = hm.split(':').map(Number);
+  if (M < 1 || M > 12 || D < 1 || D > 31 || h > 23 || mi > 59) {
+    return { ok: false, msg: '排查时间格式应为 YYYY-MM-DD HH:MM' };
+  }
+  const t = Date.UTC(Y, M - 1, D, h, mi);
+  if (new Date(t).getUTCDate() !== D) {   // 2 月 30 日 / 4 月 31 日会进位 → 拒
+    return { ok: false, msg: '排查时间格式应为 YYYY-MM-DD HH:MM' };
+  }
+  if (t < Date.UTC(2020, 0, 1)) return { ok: false, msg: '排查时间不能早于 2020 年' };
+  if (t > Date.now() + HAZARD_TIME_FUTURE_SKEW_MS) {
+    return { ok: false, msg: '排查时间晚于当前时间，请检查手机时间设置' };
+  }
+  return { ok: true };
 }
+function hazardTimeValid(v) { return hazardTimeCheck(v).ok; }
 
 // 角色门：仅「公司管理 × 安环管理部」。返回 null = 通过。
 function hazardGate(env, payload, origin) {
@@ -2950,6 +3005,17 @@ function mapHazardRecord(rec) {
   };
 }
 
+// 隐患提交响应统一出口（leader / follower / 落库失败共用，保证形状一致）
+function hazardSubmitResponse(done, cid, dedup, origin) {
+  if (done && done.error) return done.error;
+  return jsonRes({
+    success: true, code: 'OK', deduplicated: !!dedup,
+    recordIds: (done && done.recordIds) || [],
+    hazardNo: (done && done.hazardNo) || '',
+    client_request_id: cid || '',
+  }, 200, corsHeaders(origin));
+}
+
 // ---- POST /api/mobile/hazard/submit：登记一条隐患 ----
 async function handleHazardSubmit(request, env, ctx) {
   const origin = corsOrigin(request, env);
@@ -2987,7 +3053,8 @@ async function handleHazardSubmit(request, env, ctx) {
       const d = new Date(), p = (n) => String(n).padStart(2, '0');
       findTime = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
     }
-    if (!hazardTimeValid(findTime)) return errRes('HAZARD_FIELD_INVALID', '排查时间格式应为 YYYY-MM-DD HH:MM', 400, corsHeaders(origin));
+    const timeChk = hazardTimeCheck(findTime);
+    if (!timeChk.ok) return errRes('HAZARD_FIELD_INVALID', timeChk.msg, 400, corsHeaders(origin));
 
     // 经纬度：非法值整段丢弃（写空绝不写错坐标）
     const geoNum = (v, lo, hi) => {
@@ -3013,7 +3080,7 @@ async function handleHazardSubmit(request, env, ctx) {
 
     // 幂等预查：先查本 isolate 缓存（近实时兜底），再查飞书 search（覆盖重启/换设备）
     if (cid) {
-      const cached = hazardCidGet(cid);
+      const cached = hazardCidGet(payload.sub, cid);
       if (cached) {
         return jsonRes({
           success: true, code: 'OK', deduplicated: true,
@@ -3028,6 +3095,14 @@ async function handleHazardSubmit(request, env, ctx) {
           recordIds: existing,
           client_request_id: cid,
         }, 200, corsHeaders(origin));
+      }
+      // 并发合并：弱网重试 / 连点两下提交时，两条请求会**同时**穿过上面的预查
+      //（都查不到），然后各写一条 ⇒「提交一次落两条」。同一 cid 的后到请求
+      // 直接共享先到那条的落库结果（recordIds 相同），不再建记录。
+      const pending = hazardInflightGet(payload.sub, cid);
+      if (pending) {
+        const done = await pending;
+        return hazardSubmitResponse(done, cid, true, origin);
       }
     }
 
@@ -3050,21 +3125,33 @@ async function handleHazardSubmit(request, env, ctx) {
     if (lng) record['经度'] = lng;
     if (photoTokens.length) record['现场照片'] = photoTokens.map((t) => ({ file_token: t }));
 
-    let recs;
-    try {
-      recs = await adapter.createRecords(env, cfg.fileId, tableId, [record]);
-    } catch (e) {
-      if (e && e.isRateLimit) return errRes('WPS_RATE_LIMITED', '存储限频，请稍后重试', 429, corsHeaders(origin));
-      return errRes('WPS_UPSTREAM_ERROR', '存储写入失败', 502, corsHeaders(origin));
+    // 落库（有 cid 时登记在途表，供并发同 cid 请求共享结果）
+    const runCreate = async () => {
+      let recs;
+      try {
+        recs = await adapter.createRecords(env, cfg.fileId, tableId, [record]);
+      } catch (e) {
+        if (e && e.isRateLimit) {
+          return { error: errRes('WPS_RATE_LIMITED', '存储限频，请稍后重试', 429, corsHeaders(origin)) };
+        }
+        return { error: errRes('WPS_UPSTREAM_ERROR', '存储写入失败', 502, corsHeaders(origin)) };
+      }
+      const recordIds = (recs || []).map((r) => (typeof r === 'string' ? r : r && r.id)).filter(Boolean);
+      if (cid && recordIds.length) hazardCidPut(payload.sub, cid, recordIds[0]);   // 近实时幂等缓存
+      return { recordIds, hazardNo: record['隐患编号'] };
+    };
+    if (cid) {
+      const task = runCreate();
+      hazardInflightPut(payload.sub, cid, task);
+      try {
+        const done = await task;
+        return hazardSubmitResponse(done, cid, false, origin);
+      } finally {
+        hazardCidInflight.delete(hazardCidKey(payload.sub, cid));   // 失败必须能重试：不留在途残影
+      }
     }
-    const recordIds = (recs || []).map((r) => (typeof r === 'string' ? r : r && r.id)).filter(Boolean);
-    if (cid && recordIds.length) hazardCidPut(cid, recordIds[0]);   // 近实时幂等缓存
-    return jsonRes({
-      success: true, code: 'OK',
-      recordIds,
-      hazardNo: record['隐患编号'],
-      client_request_id: cid || '',
-    }, 200, corsHeaders(origin));
+    const done = await runCreate();
+    return hazardSubmitResponse(done, cid, false, origin);
   } catch {
     return errRes('INTERNAL_ERROR', '内部错误，请稍后再试', 500, corsHeaders(origin));
   }
