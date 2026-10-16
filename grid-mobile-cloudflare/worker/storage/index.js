@@ -19,6 +19,8 @@ const ROLE_TABLE_NAMES = {
   identity: 'H5移动端身份表',
   roster: 'H5花名册表',
   prod: 'H5员工日常不安全行为台账',
+  // CF-WPS-95：隐患排查台账（安环管理部专用，独立表，勿与主台账混列）
+  hazard: 'H5隐患排查台账表',
 };
 
 // 模块级缓存：appToken -> Map(表名 -> tableId)（Workers isolate 内首次解析后复用）
@@ -50,6 +52,7 @@ export async function storageConfig(env) {
   const rosterSheetId = await tableIdFor(env, 'FS_ROSTER_TABLE_ID', ROLE_TABLE_NAMES.roster);
   const ledgerSheetId = await tableIdFor(env, 'FS_LEDGER_TABLE_ID', ROLE_TABLE_NAMES.identity); // 登录=身份表
   const prodSheetId = await tableIdFor(env, 'FS_PATROL_PRODUCTION_TABLE_ID', ROLE_TABLE_NAMES.prod); // 主台账=唯一写入目标
+  const hazardSheetId = await tableIdFor(env, 'FS_HAZARD_TABLE_ID', ROLE_TABLE_NAMES.hazard); // 隐患排查台账
   return {
     backend: 'feishu',
     fileId: appToken,
@@ -57,6 +60,7 @@ export async function storageConfig(env) {
     rosterSheetId,
     ledgerSheetId,
     prodSheetId,
+    hazardSheetId,
     uploadSupported: false, // 历史标志（已无消费方）：飞书照片上传走 feishuAdapter.uploadMedia
   };
 }

@@ -7,7 +7,7 @@
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-10-15.93">
+<meta name="hse-build" content="2026-10-16.96">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -227,6 +227,21 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
 .pwd-input:focus{border-color:var(--primary)}
 .pwd-row{display:flex;flex-direction:column;gap:6px;width:100%}
 .pwd-row .lab{font-size:var(--fs-sub);color:var(--t2)}
+/* CF-WPS-95：隐患排查表单（复用 opt-card/grid2 体系，只补输入件与照片条） */
+.hz-input{width:100%;height:var(--h-btn-row);padding:0 var(--pad-card);border-radius:var(--r-btn);
+  border:1px solid var(--line);background:var(--card);color:var(--t1);
+  font-size:var(--fs-body);font-family:inherit;outline:none;-webkit-appearance:none;box-sizing:border-box}
+.hz-input:focus{border-color:var(--primary)}
+textarea.hz-input{height:auto;padding:10px var(--pad-card);line-height:1.6;resize:none}
+.hz-photos{display:flex;gap:8px;flex-wrap:wrap}
+.hz-photo{position:relative;width:88px;height:88px;border-radius:var(--r-card);overflow:hidden;background:#E8E6E0;flex:0 0 auto}
+.hz-photo img{width:100%;height:100%;object-fit:cover;display:block}
+.hz-photo .hz-del{position:absolute;top:2px;right:2px;width:22px;height:22px;border-radius:var(--r-pill);
+  background:rgba(17,24,39,.72);color:#fff;border:none;font-size:13px;line-height:22px;text-align:center;cursor:pointer;padding:0}
+.hz-add{width:88px;height:88px;border:1.5px dashed var(--line);border-radius:var(--r-card);background:var(--card);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:var(--t3);
+  font-size:var(--fs-sub);cursor:pointer;flex:0 0 auto}
+.hz-req{color:var(--danger);font-weight:700}
 .big-cta{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--cta-icon-gap);height:var(--h-cta);border-radius:var(--r-card);background:var(--primary);color:#fff;cursor:pointer;border:none;box-shadow:0 10px 24px -4px rgba(29,78,216,.3)}
 .big-cta:active{transform:scale(.985)}
 .big-cta:disabled{background:#B6C4E8;box-shadow:none}
@@ -563,6 +578,20 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
     <div class="card" id="todo-card">
       <div style="font-size:var(--fs-body);font-weight:600;margin-bottom:6px">待办提醒</div>
       <div id="todo-list" style="font-size:var(--fs-body);color:var(--t2);line-height:1.9"></div>
+    </div>
+    <!-- CF-WPS-95：隐患排查入口。仅「公司管理 × 安环管理部」账号显示（isHazardUser），
+         接口侧同一道角色门（服务端为准，前端隐藏可被改 JS 绕过）。 -->
+    <div class="card" id="hazard-entry-card" style="display:none;cursor:pointer">
+      <div style="display:flex;align-items:center;gap:var(--gap)">
+        <div style="width:44px;height:44px;border-radius:var(--r-card);background:var(--warn-soft);display:flex;align-items:center;justify-content:center;flex:0 0 44px">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3.5l8.5 15.5H3.5L12 3.5z" stroke="#B45309" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 9.5v4.2" stroke="#B45309" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="16.6" r="1.1" fill="#B45309"/></svg>
+        </div>
+        <div style="flex:1">
+          <div style="font-size:var(--fs-title);font-weight:600">隐患排查</div>
+          <div style="font-size:var(--fs-sub);color:var(--t3);margin-top:2px">登记现场安全隐患，拍照留档追踪</div>
+        </div>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 5l7 7-7 7" stroke="#9CA3AF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
     </div>
     <div style="flex:1"></div>
   </div>
@@ -1035,6 +1064,68 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
   </div>
 </section>
 
+<!-- ============ CF-WPS-95：隐患排查（仅 公司管理 × 安环管理部） ============ -->
+<section class="view" id="view-hazard-list">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" data-back="home"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">隐患排查</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <button class="btn-primary btn-row" id="btn-hazard-new">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg>
+      登记新隐患
+    </button>
+    <div id="hazard-list"></div>
+  </div>
+</section>
+
+<section class="view" id="view-hazard-form">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" data-back="hazard-list"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">登记隐患</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <div class="field-label">隐患类别 <span class="hz-req">*</span></div>
+    <div class="field-sub">点击选择（与飞书台账类别一致）</div>
+    <div class="grid2" id="hz-cat-grid" style="margin-top:8px"></div>
+    <div class="field-label" style="margin-top:18px">隐患级别 <span class="hz-req">*</span></div>
+    <div class="grid2" id="hz-level-grid" style="margin-top:8px"></div>
+    <div class="field-label" style="margin-top:18px">隐患位置</div>
+    <div class="field-sub">可手输，也可点「定位」带入当前所在位置</div>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+      <input class="hz-input" id="hz-location" maxlength="100" placeholder="如：垃圾中转站东侧通道">
+      <button class="btn-ghost" id="btn-hz-geo" style="flex:0 0 auto;width:76px;height:var(--h-btn-row)">定位</button>
+    </div>
+    <div class="field-label" style="margin-top:18px">隐患描述 <span class="hz-req">*</span></div>
+    <div class="field-sub">具体情况、可能造成的风险（必填）</div>
+    <textarea class="hz-input" id="hz-desc" rows="4" maxlength="500" placeholder="例：通道堆物占用消防通道，雨天易滑倒，且影响应急通行…" style="margin-top:8px"></textarea>
+    <div class="field-sub" style="text-align:right" id="hz-desc-count">0 / 500</div>
+    <div class="field-label" style="margin-top:6px">现场照片（最多 3 张，选填）</div>
+    <div class="field-sub">隐患现状照片，提交后可在详情里回看</div>
+    <div class="hz-photos" id="hz-photos" style="margin-top:8px"></div>
+    <div class="btn-stack" style="margin-top:10px">
+      <button class="btn-ghost btn-row" id="btn-hz-camera">拍照</button>
+      <button class="btn-ghost btn-row" id="btn-hz-album">从相册上传</button>
+    </div>
+    <button class="btn-primary btn-row" id="btn-hz-submit" style="margin-top:18px">提交隐患</button>
+    <input type="file" accept="image/*" capture="environment" class="file-ghost" id="hz-file-camera">
+    <input type="file" accept="image/*" class="file-ghost" id="hz-file-album">
+  </div>
+</section>
+
+<section class="view" id="view-hazard-detail">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" data-back="hazard-list"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">隐患详情</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <div id="hazard-detail"></div>
+  </div>
+</section>
+
 <!-- ============ 无权限降级页 ============ -->
 <section class="view" id="view-noperm">
   <div class="statusbar"></div>
@@ -1076,8 +1167,8 @@ body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;backg
      读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
    - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
    - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
-<script src="./config.js?v=2026-10-15.93"></script>
-<script src="./app.js?v=2026-10-15.93"></script>
+<script src="./config.js?v=2026-10-16.96"></script>
+<script src="./app.js?v=2026-10-16.96"></script>
 <script>
 /* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
 (function(){
@@ -1630,6 +1721,15 @@ let checkFlowDone = false;
 const H5_NAV_ID = Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
 function showView(name){
   name = String(name || "").replace(/^view-/, "");   // 个别调用传了「view-」前缀（原实现会取错元素直接报错）
+  // CF-WPS-95：隐患排查三屏只对「公司管理 × 安环管理部」开放。
+  // 必须拦在 showView 这一层：data-back 返回箭头与 popstate 都经过这里
+  // （只拦 enterHome 会被绕过，见文件头 CF-WPS-61 同款教训）。
+  // 服务端接口同一道角色门，这里只是体验层捷径。
+  if(HAZARD_VIEWS.indexOf(name) >= 0 && !isHazardUser()){
+    flashMsg("隐患排查功能仅对安环管理部账号开放");
+    enterHome();
+    return;
+  }
   // CF-WPS-61：仍在用初始密码 → 任何「回首页」的动作都改去改密页。
   // 必须拦在 showView 这一层：所有 `data-back="home"` 的返回箭头都走这里，
   // 只拦 enterHome() 的话，点返回键就能绕过改密直接进首页（CDP C1 实测复现）。
@@ -1963,6 +2063,7 @@ function enterHome(){
   refreshHomeStats();
   showView("home");
   renderResumeCard();   // CF-WPS-42：有未完成的草稿就在首页挂「继续上次检查」
+  renderHazardEntry();  // CF-WPS-95：隐患排查入口（仅安环管理部账号可见）
   retryPendingSync();  // 回到首页顺带补传（幂等；失败静默，台账页可见待补传条数）
   startPrefetch();     // 幂等；boot 里已经发过，这里兜底防止从别处进首页时漏掉
   migrateTransferIds(); // CF-WPS-41：历史转派回填（只跑一次，见函数内注释）
@@ -5282,7 +5383,273 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#btn-noperm-logout").onclick = logout;
   $("#btn-logout").onclick = logout;
   function logout(){ clearSession(); clearLoginCreds(); redirectToLogin(); }
+
+  // CF-WPS-95：隐患排查模块（DOM 绑定集中在此；函数体在上方 CF-WPS-95 段）
+  $("#btn-hazard-new").onclick = () => { resetHazardForm(); showView("hazard-form"); };
+  $("#btn-hz-camera").onclick = () => $("#hz-file-camera").click();
+  $("#btn-hz-album").onclick = () => $("#hz-file-album").click();
+  $("#hz-file-camera").onchange = e => pickHazardPhoto(e.target);
+  $("#hz-file-album").onchange = e => pickHazardPhoto(e.target);
+  $("#btn-hz-submit").onclick = submitHazard;
+  $("#hz-desc").addEventListener("input", () => {
+    hazardForm.description = $("#hz-desc").value;
+    updateHzDescCount();
+  });
+  $("#hz-location").addEventListener("input", () => {
+    hazardForm.location = $("#hz-location").value;
+  });
+  // 「定位」：把后台 GPS 解析出的地址写进位置框，经纬度随提交一起落库
+  $("#btn-hz-geo").onclick = () => {
+    if(gps && gps.addr && gps.addr.indexOf("暂不可用") < 0){
+      $("#hz-location").value = gps.addr;
+      hazardForm.location = gps.addr;
+      flashMsg("已带入当前位置");
+    } else {
+      flashMsg("定位暂不可用，请手动输入位置");
+    }
+  };
 });
+
+/* ================= CF-WPS-95：隐患排查（仅 公司管理 × 安环管理部） =================
+   业务口径（用户确认 2026-10-16）：
+     · 入口只给「公司管理」里「安环管理部」的人（身份表分级压过花名册职位）；
+     · 数据落独立飞书表「H5隐患排查台账表」，与巡查主台账完全分离；
+     · 本期范围：隐患登记 + 我的隐患列表/详情（整改闭环后续迭代）；
+     · 照片走 /api/mobile/upload → file_token，详情经 /api/mobile/photo 取图；
+   权限双保险：入口显隐（isHazardUser）+ showView 拦截 + 服务端角色门。 */
+const HAZARD_VIEWS = ["hazard-list", "hazard-form", "hazard-detail"];
+// 类别/级别**必须与服务端 index.js 同名单**（后端校验拒绝不在名单内的值）
+const HAZARD_CATEGORIES = ["设备设施","消防安全","用电安全","危化品","作业安全","高处作业","交通运输","公共设施","环境卫生","违规操作","其他"];
+const HAZARD_LEVELS = ["一般隐患","重大隐患"];
+const HAZARD_PHOTO_MAX = 3;
+
+function isHazardUser(){
+  return !!session && session.role === "公司管理"
+    && String(session.dept || "").trim() === "安环管理部";
+}
+// 首页入口卡显隐（enterHome 每次调；非安环账号永远看不到）
+function renderHazardEntry(){
+  const card = $("#hazard-entry-card");
+  if(!card) return;
+  card.style.display = isHazardUser() ? "" : "none";
+  if(isHazardUser()){
+    card.onclick = () => { showView("hazard-list"); renderHazardList(); };
+  }
+}
+
+/* ---- 隐患类别/级别宫格（opt-card.selectable 体系） ---- */
+let hazardForm = { category: "", level: "", location: "", description: "", photos: [] };
+function resetHazardForm(){
+  hazardForm = { category: "", level: "", location: "", description: "", photos: [] };
+  $("#hz-location").value = "";
+  $("#hz-desc").value = "";
+  updateHzDescCount();
+  renderHzCatGrid();
+  renderHzLevelGrid();
+  renderHzPhotos();
+}
+function hzOptCard(label, selected, sub){
+  return '<div class="opt-card selectable' + (selected ? " selected" : "") + '">' +
+    '<div class="opt-title">' + esc(label) + '</div>' +
+    (sub ? '<div class="opt-sub">' + esc(sub) + '</div>' : '') +
+    '<div class="opt-mark"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M5 12.5l4.5 4.5L19 7" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></div>' +
+  '</div>';
+}
+function renderHzCatGrid(){
+  const g = $("#hz-cat-grid");
+  g.innerHTML = "";
+  HAZARD_CATEGORIES.forEach(name => {
+    const d = document.createElement("div");
+    d.innerHTML = hzOptCard(name, hazardForm.category === name);
+    d.firstElementChild.onclick = () => { hazardForm.category = name; renderHzCatGrid(); };
+    g.appendChild(d.firstElementChild);
+  });
+}
+function renderHzLevelGrid(){
+  const g = $("#hz-level-grid");
+  g.innerHTML = "";
+  HAZARD_LEVELS.forEach(name => {
+    const sub = name === "重大隐患" ? "可能造成人身伤害或较大财产损失" : "风险较低、可常规整改";
+    const d = document.createElement("div");
+    d.innerHTML = hzOptCard(name, hazardForm.level === name, sub);
+    d.firstElementChild.onclick = () => { hazardForm.level = name; renderHzLevelGrid(); };
+    g.appendChild(d.firstElementChild);
+  });
+}
+function updateHzDescCount(){
+  $("#hz-desc-count").textContent = String(hazardForm.description || "").length + " / 500";
+}
+/* ---- 现场照片（最多 3 张；压缩走 CF-WPS-59/63 内存安全版 compressImage） ---- */
+function renderHzPhotos(){
+  const box = $("#hz-photos");
+  box.innerHTML = "";
+  hazardForm.photos.forEach((p, i) => {
+    const d = document.createElement("div");
+    d.className = "hz-photo";
+    d.innerHTML = '<img alt="现场照片" src="' + p + '">' +
+      '<button class="hz-del" aria-label="删除这张照片">×</button>';
+    d.querySelector(".hz-del").onclick = (e) => {
+      e.stopPropagation();
+      hazardForm.photos.splice(i, 1);
+      renderHzPhotos();
+    };
+    box.appendChild(d);
+  });
+  if(hazardForm.photos.length < HAZARD_PHOTO_MAX){
+    const add = document.createElement("div");
+    add.className = "hz-add";
+    add.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span>加照片</span>';
+    add.onclick = () => {
+      // 已经 3 张时 add 不渲染，这里双保险
+      if(hazardForm.photos.length >= HAZARD_PHOTO_MAX){ flashMsg("最多上传 3 张照片"); return; }
+      $("#hz-file-camera").click();
+    };
+    box.appendChild(add);
+  }
+}
+function pickHazardPhoto(input){
+  const f = input.files && input.files[0];
+  input.value = "";   // 同一文件二次选择也要触发 change
+  if(!f) return;
+  if(hazardForm.photos.length >= HAZARD_PHOTO_MAX){ flashMsg("最多上传 3 张照片"); return; }
+  // CF-WPS-59/63：压缩失败 cb(null) —— 给人话提示，绝不写入坏 src 卡死流程
+  compressImage(f, dataUrl => {
+    if(!dataUrl){ flashMsg("照片读取失败，请重拍一次，或改用「从相册上传」"); return; }
+    hazardForm.photos.push(dataUrl);
+    renderHzPhotos();
+  });
+}
+// 提交隐患：先传照片拿 file_token，再建记录（任何一步失败都不落半截记录）
+async function submitHazard(){
+  const cat = hazardForm.category, lvl = hazardForm.level;
+  const desc = String(hazardForm.description || "").trim();
+  const loc = String(hazardForm.location || "").trim();
+  if(!cat){ flashMsg("请先选择隐患类别"); return; }
+  if(!lvl){ flashMsg("请先选择隐患级别"); return; }
+  if(!desc){ flashMsg("请填写隐患描述"); return; }
+  const btn = $("#btn-hz-submit");
+  if(btn){ btn.disabled = true; btn.textContent = "提交中…"; }
+  try{
+    // 照片上传（≤3）：失败即中止提交，提示重试 —— 绝不建一条「说有照片其实没传上」的记录
+    const tokens = [];
+    for(let i = 0; i < hazardForm.photos.length; i++){
+      const tk = await uploadPhotoToken(hazardForm.photos[i], "hazard", newClientRequestId());
+      if(!tk){
+        flashMsg("第 " + (i + 1) + " 张照片上传失败，请重试（或删掉该照片后提交）");
+        return;
+      }
+      tokens.push(tk);
+    }
+    const body = {
+      category: cat,
+      level: lvl,
+      description: desc,
+      location: loc,
+      find_time: nowLocalInspectTime(),
+      client_request_id: newClientRequestId(),
+    };
+    if(gps && Number.isFinite(gps.lat) && Number.isFinite(gps.lng)){
+      body.latitude = String(gps.lat);
+      body.longitude = String(gps.lng);
+    }
+    if(tokens.length) body.photo_tokens = tokens;
+    const r = await mobileApi("/api/mobile/hazard/submit", body);
+    if(r.status === 200 && r.body && r.body.success){
+      flashMsg("隐患已登记（编号 " + (r.body.hazardNo || "—") + "）");
+      resetHazardForm();
+      showView("hazard-list");
+      renderHazardList();
+    } else {
+      flashMsg((r.body && r.body.message) || "提交失败，请重试");
+    }
+  }catch(e){
+    flashMsg("提交异常，请检查网络后重试");
+  }finally{
+    if(btn){ btn.disabled = false; btn.textContent = "提交隐患"; }
+  }
+}
+/* ---- 我的隐患列表 / 详情 ---- */
+async function renderHazardList(){
+  const box = $("#hazard-list");
+  if(!box) return;
+  box.innerHTML = '<div class="empty-tip">正在读取隐患排查台账…</div>';
+  const body = await apiGet("/api/mobile/hazard/list");
+  if(!body){ box.innerHTML = '<div class="empty-tip">读取失败：' + esc(lastApiError || "请稍后重试") + '</div>'; return; }
+  const items = body.items || [];
+  if(!items.length){
+    box.innerHTML = '<div class="empty-tip">还没有登记的隐患<br><span style="font-size:var(--fs-sub)">点上方「登记新隐患」开始记录</span></div>';
+    return;
+  }
+  box.innerHTML = "";
+  items.forEach(x => {
+    const d = document.createElement("div");
+    d.className = "card";
+    d.style.cursor = "pointer";
+    const lvlChip = x.level === "重大隐患"
+      ? '<span class="chip red"><span class="dot"></span>重大隐患</span>'
+      : '<span class="chip yellow"><span class="dot"></span>一般隐患</span>';
+    d.innerHTML =
+      '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
+        '<span class="chip blue"><span class="dot"></span>' + esc(x.category || "未分类") + '</span>' +
+        lvlChip +
+        '<span style="flex:1"></span>' +
+        '<span style="font-size:var(--fs-sub);color:var(--t3)">' + esc(x.findTime || "") + '</span>' +
+      '</div>' +
+      '<div style="font-size:var(--fs-body);margin-top:8px;line-height:1.5">' + esc(x.description || "") + '</div>' +
+      '<div style="display:flex;align-items:center;gap:8px;margin-top:8px">' +
+        (x.photoTokens && x.photoTokens.length
+          ? '<img alt="隐患照片" src="' + hzPhotoUrl(x.photoTokens[0]) + '" style="width:52px;height:52px;border-radius:var(--r-card);object-fit:cover;background:#E8E6E0">'
+          : '') +
+        '<div style="flex:1;font-size:var(--fs-sub);color:var(--t3)">' +
+          (x.location ? esc(x.location) : "未填位置") +
+          (x.photoTokens && x.photoTokens.length ? ' · ' + x.photoTokens.length + ' 张照片' : '') +
+        '</div>' +
+        '<span class="chip green"><span class="dot"></span>' + esc(x.status || "待整改") + '</span>' +
+      '</div>';
+    d.onclick = () => { showView("hazard-detail"); renderHazardDetail(x.recordId); };
+    box.appendChild(d);
+  });
+}
+// 隐患照片代理（与派发图同一条 /api/mobile/photo，file_token → 二进制）
+function hzPhotoUrl(ft){ return API_BASE + "/api/mobile/photo?ft=" + encodeURIComponent(ft); }
+async function renderHazardDetail(recordId){
+  const box = $("#hazard-detail");
+  if(!box) return;
+  box.innerHTML = '<div class="empty-tip">正在读取…</div>';
+  const body = await apiGet("/api/mobile/hazard/detail?id=" + encodeURIComponent(recordId));
+  if(!body || !body.item){ box.innerHTML = '<div class="empty-tip">读取失败：' + esc(lastApiError || "请稍后重试") + '</div>'; return; }
+  const x = body.item;
+  let html =
+    '<div class="card">' +
+      '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
+        '<span class="chip blue"><span class="dot"></span>' + esc(x.category || "") + '</span>' +
+        (x.level === "重大隐患"
+          ? '<span class="chip red"><span class="dot"></span>重大隐患</span>'
+          : '<span class="chip yellow"><span class="dot"></span>' + esc(x.level || "一般隐患") + '</span>') +
+        '<span style="flex:1"></span>' +
+        '<span class="chip green"><span class="dot"></span>' + esc(x.status || "待整改") + '</span>' +
+      '</div>' +
+      '<div class="info-line" style="margin-top:10px">编号：' + esc(x.hazardNo || "—") + '<br>' +
+        '排查人：' + esc(x.finderName || "") + '（' + esc(x.finderDept || "") + '）<br>' +
+        '排查时间：' + esc(x.findTime || "") + '</div>' +
+    '</div>' +
+    '<div class="card"><div class="field-label">隐患位置</div>' +
+      '<div class="info-line" style="margin-top:6px">' + esc(x.location || "未填写") + '</div>' +
+      (x.latitude && x.longitude
+        ? '<div class="muted" style="margin-top:4px">坐标 ' + esc(x.latitude) + ', ' + esc(x.longitude) + '</div>'
+        : '') +
+    '</div>' +
+    '<div class="card"><div class="field-label">隐患描述</div>' +
+      '<div class="info-line" style="margin-top:6px;line-height:1.7">' + esc(x.description || "") + '</div>' +
+    '</div>';
+  if(x.photoTokens && x.photoTokens.length){
+    html += '<div class="card"><div class="field-label">现场照片（' + x.photoTokens.length + '）</div>' +
+      '<div class="hz-photos" style="margin-top:8px">' +
+      x.photoTokens.map(ft => '<div class="hz-photo" style="width:100%;height:auto;aspect-ratio:4/3"><img alt="隐患照片" src="' + hzPhotoUrl(ft) + '"></div>').join("") +
+      '</div></div>';
+  }
+  box.innerHTML = html;
+}
 
 function openEntry(go){
   if(go === "dispatch"){
@@ -5354,6 +5721,11 @@ function openEntry(go){
       if(rvHint) rvHint.textContent = "已整改提交、等你确认闭环 · " + rv.length + " 条";
     }
     showView("me");
+  }
+  // CF-WPS-95：隐患排查（isHazardUser 之外由 showView 拦截 + 服务端角色门兜底）
+  if(go === "hazard-list"){
+    showView("hazard-list");
+    renderHazardList();
   }
 }
 

@@ -26,8 +26,8 @@ WPS_OPENAPI_BASE = "https://openapi.wps.cn"
 # WPS 多维表目标文件/表 ID（正式文件 cn229thwalDs；Sheet 指向测试表 13，绝不指向 3/11/15）
 WPS_DBSHEET_FILE_ID = "cn229thwalDs"
 WPS_DBSHEET_SHEET_ID = "13"
-# CF-WPS-20：CORS 白名单（公网 Pages 域名；部署 Pages 后回填）
-CF_ALLOWED_ORIGINS = "https://grid-mobile-cloudflare.pages.dev"
+# CF-WPS-20：CORS 白名单（H5 自定义域名 + Pages 稳定域名；H5 直连 Worker API）
+CF_ALLOWED_ORIGINS = "https://grid1ns.dpdns.org,https://grid-mobile-cloudflare.pages.dev"
 # WPS 写开关：公网 E2E 需要 Sheet13 测试写入（生产目标仍由三开关 fail-closed 把关）
 ALLOW_WPS_WRITE = "true"
 
@@ -35,7 +35,8 @@ ALLOW_WPS_WRITE = "true"
 # H5移动端身份 Sheet ID（业务方经 WPS 网页界面人工创建，实测 id=14）
 WPS_DBSHEET_IDENTITY_SHEET_ID = "14"
 # 身份桥校验开关（on = 登录时对花名册 Sheet 做 employee_code 存在性+唯一性校验；off = 跳过，仅测试用）
-IDENTITY_ROSTER_CHECK = "on"
+# ⚠️ 生产花名册当前无 13385340822，临时关闭校验
+IDENTITY_ROSTER_CHECK = "off"
 # 员工花名册 Sheet ID（默认 11「员工信息维护」）
 IDENTITY_ROSTER_SHEET_ID = "11"
 
@@ -52,7 +53,8 @@ IDENTITY_ROSTER_SHEET_ID = "11"
 #   就重新吃一次 11 秒冷启动。花名册人员变动以天计，10 分钟 TTL 业务上无感知。
 ROSTER_CACHE_TTL_MS = "600000"
 # 身份激活状态（逗号分隔；仅这些「身份状态」可登录，其余统一 401）
-IDENTITY_ACTIVE_STATUS = "正常"
+# ⚠️ 生产身份表当前无「状态」列，临时关闭校验（空字符串 = 不校验）
+IDENTITY_ACTIVE_STATUS = ""
 # 移动端登录总开关（公网 E2E 需要真实登录链路）
 MOBILE_LOGIN_ENABLED = "true"
 # Session 有效期（秒；默认 7200 = 2h，下限 300，上限 7 天）
@@ -110,6 +112,8 @@ FS_IDENTITY_TABLE_ID = "tbl58t9kjyDlacSw"  # 「H5移动端身份表」＝登录
 FS_ROSTER_TABLE_ID = "tbl2ZHdXX5d8R12a"  # 「花名册」1291 人（选人 + 巡查网格解析的数据源）
 FS_PATROL_PRODUCTION_TABLE_ID = "tbl5QiCv5Qbal044"  # 「H5员工日常不安全行为台账」= 唯一主台账（2026-09-18 实测，单主台账口径）
 FS_LEDGER_TABLE_ID = "tbl58t9kjyDlacSw"  # 登录身份表（= H5移动端身份表，H5 登录唯一来源）
+# CF-WPS-95：隐患排查台账表（仅 公司管理 × 安环管理部 可读写；表名解析兜底 = 同名单表）
+FS_HAZARD_TABLE_ID = "tblnyMjxtxjpP08q"
 
 # --- CF-WPS-41 微信推送（WxPusher）---
 # 通道：WxPusher 标准推送。用户在「我的」页点关注链接关注应用后，把自己的 UID 填回 App 完成绑定；

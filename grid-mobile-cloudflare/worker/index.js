@@ -756,6 +756,7 @@ const PWD_GUARDED_ROUTES = new Set([
   '/api/mobile/patrol/submit', '/api/mobile/patrol/attach',
   '/api/mobile/assign', '/api/mobile/assign/complete',
   '/api/mobile/wx/bind', '/wps/records/create',
+  '/api/mobile/hazard/submit',
 ]);
 
 function pwdIter(env) {
@@ -2835,6 +2836,308 @@ async function resolveViewScope(adapter, env, cfg, payload) {
   return value;
 }
 
+// ============================================================================
+// CF-WPS-95 —— 隐患排查模块（仅「公司管理 × 安环管理部」账号可用）
+// ----------------------------------------------------------------------------
+// 数据落独立飞书表「H5隐患排查台账表」（storage/index.js 按表名解析 table_id，
+// env FS_HAZARD_TABLE_ID 可覆盖）。与主台账（巡查）完全分离：
+//   · 列名不混、统计口径不混、myChecks 等既有列表不含隐患记录；
+//   · 角色判定走身份表口径：role=公司管理 且 department=安环管理部
+//     （身份表「分级」压过花名册职位，与 ledgerChildren 同一套口径）。
+// 幂等：client_request_id 压进「备注」req:<id>，复用主台账同一套
+//   findExistingByClientRequestId（备注 contains 检索）。
+// 照片：走 /api/mobile/upload 的 file_token → 附件列「现场照片」（≤3）。
+// 取图：/api/mobile/photo?ft=<file_token>（复用派发图代理）。
+// 三条接口（submit/list/detail）都做同一道角色门 —— 显示层隐藏只是体验，
+// 权限判定以服务端为准（前端入口隐藏可被改 JS 绕过）。
+// ============================================================================
+
+const HAZARD_BODY_LIMIT = 16 * 1024;   // 提交体上限（不含照片二进制，照片走独立上传）
+const HAZARD_DESC_MAX = 500;           // 隐患描述长度上限
+const HAZARD_LOCATION_MAX = 100;       // 隐患位置长度上限
+const HAZARD_PHOTO_MAX = 3;            // 现场照片张数上限
+const HAZARD_TIME_MAX = 32;            // 排查时间字符串长度上限
+const HAZARD_LIST_LIMIT = 100;         // 我的隐患返回条数上限
+
+// 近实时幂等缓存（与 storage/index.js 的 mainLedgerCache 同思路）：
+// 飞书 search 索引有秒级延迟 —— 「提交后立刻重试」的窗口里 search 查不到刚落的记录
+// （主台账同款现象，见 CF-WPS-43）。hazard 提交频率低、但重复台账更难清理，
+// 故加一层 isolate 内 cid → recordId 缓存（TTL 5min）兜底；search 预查仍保留
+// （覆盖 isolate 重启 / 换设备重提的场景，best-effort）。
+const HAZARD_CID_TTL_MS = 5 * 60 * 1000;
+let hazardCidCache = new Map(); // cid -> { recordId, at }
+function hazardCidGet(cid) {
+  const hit = hazardCidCache.get(cid);
+  if (!hit) return null;
+  if (Date.now() - hit.at > HAZARD_CID_TTL_MS) { hazardCidCache.delete(cid); return null; }
+  return hit.recordId;
+}
+function hazardCidPut(cid, recordId) {
+  if (!cid || !recordId) return;
+  hazardCidCache.set(cid, { recordId, at: Date.now() });
+  if (hazardCidCache.size > 200) {   // 简单体积控制（安环部账号量级远小于此）
+    const old = [...hazardCidCache.entries()].sort((a, b) => a[1].at - b[1].at).slice(0, 100);
+    old.forEach(([k]) => hazardCidCache.delete(k));
+  }
+}
+
+// 类别 / 级别：**服务端权威清单**（前端硬编码同一份；新增类别两边必须同步改，
+// 否则前端能选、后端拒绝，形成静默失败 —— 与 patrol 三违库同纪律）。
+const HAZARD_CATEGORIES = ['设备设施', '消防安全', '用电安全', '危化品', '作业安全', '高处作业', '交通运输', '公共设施', '环境卫生', '违规操作', '其他'];
+const HAZARD_LEVELS = ['一般隐患', '重大隐患'];
+const HAZARD_STATUS_PENDING = '待整改';
+
+// 排查时间格式 "YYYY-MM-DD HH:MM"（本地时区；服务端兜底回填）
+function hazardTimeValid(v) {
+  if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(v)) return false;
+  const d = new Date(v.replace(' ', 'T') + ':00');
+  return !Number.isNaN(d.getTime()) && d.getFullYear() >= 2020;
+}
+
+// 角色门：仅「公司管理 × 安环管理部」。返回 null = 通过。
+function hazardGate(env, payload, origin) {
+  if (!env.WORKER_SESSION_SECRET) return errRes('SESSION_NOT_CONFIGURED', '会话密钥未配置', 503, corsHeaders(origin));
+  if (!payload) return errRes('UNAUTHORIZED', '未认证或登录态失效', 401, corsHeaders(origin));
+  const roleOk = String((payload && payload.role) || '').trim() === '公司管理';
+  const deptOk = String((payload && payload.department) || '').trim() === '安环管理部';
+  if (!roleOk || !deptOk) {
+    return errRes('FORBIDDEN_NOT_HAZARD_DEPT', '隐患排查功能仅对安环管理部账号开放', 403, corsHeaders(origin));
+  }
+  return null;
+}
+
+// 隐患编号：YH + yyyymmddHHmmss + 4 位随机（幂等由 client_request_id 兜底，
+// 编号仅作展示与人工检索用）
+function newHazardNo() {
+  const d = new Date(), p = (n) => String(n).padStart(2, '0');
+  return 'YH' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate())
+    + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds())
+    + String(Math.floor(1000 + Math.random() * 9000));
+}
+
+// 附件列 file_token 提取（飞书附件列 = [{file_token, name, ...}]，兼容已扁平化的字符串）
+function hazardPhotoTokens(fields) {
+  const raw = fields && fields['现场照片'];
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const a of raw) {
+    if (typeof a === 'string' && a) out.push(a);
+    else if (a && typeof a === 'object' && typeof a.file_token === 'string' && a.file_token) out.push(a.file_token);
+  }
+  return out;
+}
+
+// 飞书记录 → 前端隐患对象（list/detail 共用；附件列转 file_tokens 数组）
+function mapHazardRecord(rec) {
+  const f = rec.fields || {};
+  return {
+    recordId: rec.id,
+    hazardNo: fieldText(f['隐患编号']).trim(),
+    finderId: fieldText(f['排查人ID']).trim(),
+    finderName: fieldText(f['排查人姓名']).trim(),
+    finderDept: fieldText(f['排查人部门']).trim(),
+    finderPosition: fieldText(f['排查人职位']).trim(),
+    findTime: fieldText(f['排查时间']).trim(),
+    category: fieldText(f['隐患类别']).trim(),
+    level: fieldText(f['隐患级别']).trim(),
+    location: fieldText(f['隐患位置']).trim(),
+    description: fieldText(f['隐患描述']).trim(),
+    latitude: fieldText(f['纬度']).trim(),
+    longitude: fieldText(f['经度']).trim(),
+    status: fieldText(f['处理状态']).trim(),
+    note: fieldText(f['备注']).trim(),
+    photoTokens: hazardPhotoTokens(f),
+  };
+}
+
+// ---- POST /api/mobile/hazard/submit：登记一条隐患 ----
+async function handleHazardSubmit(request, env, ctx) {
+  const origin = corsOrigin(request, env);
+  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
+  try {
+    const adapter = getAdapter(env);
+    const cfg = await storageConfig(env);
+    const payload = await verifyWorkerSession(bearerToken(request), env.WORKER_SESSION_SECRET);
+    const denied = hazardGate(env, payload, origin);
+    if (denied) return denied;
+
+    const tableId = String((cfg && cfg.hazardSheetId) || '').trim();
+    if (!tableId) return errRes('HAZARD_TARGET_NOT_CONFIGURED', '隐患排查表未配置', 503, corsHeaders(origin));
+
+    const contentLen = Number(request.headers.get('content-length') || '0');
+    if (contentLen > HAZARD_BODY_LIMIT) return errRes('BODY_TOO_LARGE', `请求体超过上限（${HAZARD_BODY_LIMIT} 字节）`, 413, corsHeaders(origin));
+    let body;
+    try { body = await request.json(); } catch { return errRes('BAD_REQUEST', '请求格式不正确', 400, corsHeaders(origin)); }
+    if (!body || typeof body !== 'object') return errRes('BAD_REQUEST', '请求格式不正确', 400, corsHeaders(origin));
+
+    // 字段校验（category/level 必须命中服务端权威清单，禁止自造项污染统计）
+    const category = patrolText(body.category, 20);
+    if (!HAZARD_CATEGORIES.includes(category)) {
+      return errRes('HAZARD_FIELD_INVALID', `隐患类别不合法：${category || '(空)'}`, 400, corsHeaders(origin));
+    }
+    const level = patrolText(body.level, 20);
+    if (!HAZARD_LEVELS.includes(level)) {
+      return errRes('HAZARD_FIELD_INVALID', `隐患级别不合法：${level || '(空)'}`, 400, corsHeaders(origin));
+    }
+    const description = patrolText(body.description, HAZARD_DESC_MAX);
+    if (!description) return errRes('HAZARD_FIELD_INVALID', '隐患描述不能为空', 400, corsHeaders(origin));
+    const location = patrolText(body.location, HAZARD_LOCATION_MAX);
+    let findTime = patrolText(body.find_time, HAZARD_TIME_MAX);
+    if (!findTime) {
+      const d = new Date(), p = (n) => String(n).padStart(2, '0');
+      findTime = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+    }
+    if (!hazardTimeValid(findTime)) return errRes('HAZARD_FIELD_INVALID', '排查时间格式应为 YYYY-MM-DD HH:MM', 400, corsHeaders(origin));
+
+    // 经纬度：非法值整段丢弃（写空绝不写错坐标）
+    const geoNum = (v, lo, hi) => {
+      const n = Number(v);
+      return Number.isFinite(n) && n >= lo && n <= hi ? String(n) : '';
+    };
+    const lat = geoNum(body.latitude, -90, 90);
+    const lng = geoNum(body.longitude, -180, 180);
+
+    // 照片（可选，≤3）：file_token 必须来自 /api/mobile/upload
+    let photoTokens = [];
+    if (body.photo_tokens != null) {
+      const ok = Array.isArray(body.photo_tokens) && body.photo_tokens.length <= HAZARD_PHOTO_MAX
+        && body.photo_tokens.every((t) => typeof t === 'string' && /^[A-Za-z0-9]{10,120}$/.test(t));
+      if (!ok) return errRes('HAZARD_FIELD_INVALID', `photo_tokens 不合法（≤${HAZARD_PHOTO_MAX} 个、来自上传接口）`, 400, corsHeaders(origin));
+      photoTokens = [...new Set(body.photo_tokens)];
+    }
+
+    const cid = patrolText(body.client_request_id, 64);
+    if (cid && !/^[A-Za-z0-9_-]{8,64}$/.test(cid)) {
+      return errRes('HAZARD_FIELD_INVALID', 'client_request_id 不合法（8~64 位字母数字_-）', 400, corsHeaders(origin));
+    }
+
+    // 幂等预查：先查本 isolate 缓存（近实时兜底），再查飞书 search（覆盖重启/换设备）
+    if (cid) {
+      const cached = hazardCidGet(cid);
+      if (cached) {
+        return jsonRes({
+          success: true, code: 'OK', deduplicated: true,
+          recordIds: [cached],
+          client_request_id: cid,
+        }, 200, corsHeaders(origin));
+      }
+      const existing = await findExistingByClientRequestId(adapter, env, cfg.fileId, tableId, [cid]);
+      if (existing) {
+        return jsonRes({
+          success: true, code: 'OK', deduplicated: true,
+          recordIds: existing,
+          client_request_id: cid,
+        }, 200, corsHeaders(origin));
+      }
+    }
+
+    // record 全部服务端定值：身份一律取 Session，前端传入的一律忽略
+    const record = {
+      '隐患编号': newHazardNo(),
+      '排查人ID': String(payload.sub || ''),
+      '排查人姓名': patrolText(payload.name, 40),
+      '排查人部门': patrolText(payload.department, 40),
+      '排查人职位': patrolText(payload.position, 40),
+      '排查时间': findTime,
+      '隐患类别': category,
+      '隐患级别': level,
+      '隐患位置': location,
+      '隐患描述': description,
+      '处理状态': HAZARD_STATUS_PENDING,
+      '备注': cid ? `req:${cid}` : '',
+    };
+    if (lat) record['纬度'] = lat;
+    if (lng) record['经度'] = lng;
+    if (photoTokens.length) record['现场照片'] = photoTokens.map((t) => ({ file_token: t }));
+
+    let recs;
+    try {
+      recs = await adapter.createRecords(env, cfg.fileId, tableId, [record]);
+    } catch (e) {
+      if (e && e.isRateLimit) return errRes('WPS_RATE_LIMITED', '存储限频，请稍后重试', 429, corsHeaders(origin));
+      return errRes('WPS_UPSTREAM_ERROR', '存储写入失败', 502, corsHeaders(origin));
+    }
+    const recordIds = (recs || []).map((r) => (typeof r === 'string' ? r : r && r.id)).filter(Boolean);
+    if (cid && recordIds.length) hazardCidPut(cid, recordIds[0]);   // 近实时幂等缓存
+    return jsonRes({
+      success: true, code: 'OK',
+      recordIds,
+      hazardNo: record['隐患编号'],
+      client_request_id: cid || '',
+    }, 200, corsHeaders(origin));
+  } catch {
+    return errRes('INTERNAL_ERROR', '内部错误，请稍后再试', 500, corsHeaders(origin));
+  }
+}
+
+// ---- GET /api/mobile/hazard/list：我的隐患（仅本人登记的，按排查时间倒序）----
+async function handleHazardList(request, env) {
+  const origin = corsOrigin(request, env);
+  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
+  try {
+    const adapter = getAdapter(env);
+    const cfg = await storageConfig(env);
+    const payload = await verifyWorkerSession(bearerToken(request), env.WORKER_SESSION_SECRET);
+    const denied = hazardGate(env, payload, origin);
+    if (denied) return denied;
+
+    const tableId = String((cfg && cfg.hazardSheetId) || '').trim();
+    if (!tableId) return errRes('HAZARD_TARGET_NOT_CONFIGURED', '隐患排查表未配置', 503, corsHeaders(origin));
+
+    let rows;
+    try {
+      rows = await adapter.searchRecords(env, cfg.fileId, tableId, {
+        field: '排查人ID', operator: 'is', value: String(payload.sub || ''), maxPages: 2,
+      });
+    } catch {
+      return errRes('WPS_UPSTREAM_ERROR', '隐患列表暂不可用，请稍后再试', 502, corsHeaders(origin));
+    }
+    const items = rows.map(mapHazardRecord)
+      .sort((a, b) => String(b.findTime).localeCompare(String(a.findTime)))
+      .slice(0, HAZARD_LIST_LIMIT);
+    return jsonRes({ success: true, code: 'OK', items, total: items.length }, 200, corsHeaders(origin));
+  } catch {
+    return errRes('INTERNAL_ERROR', '内部错误，请稍后再试', 500, corsHeaders(origin));
+  }
+}
+
+// ---- GET /api/mobile/hazard/detail?id=<recordId>：单条详情（仅本人登记的）----
+async function handleHazardDetail(request, env) {
+  const origin = corsOrigin(request, env);
+  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
+  try {
+    const adapter = getAdapter(env);
+    const cfg = await storageConfig(env);
+    const payload = await verifyWorkerSession(bearerToken(request), env.WORKER_SESSION_SECRET);
+    const denied = hazardGate(env, payload, origin);
+    if (denied) return denied;
+
+    const tableId = String((cfg && cfg.hazardSheetId) || '').trim();
+    if (!tableId) return errRes('HAZARD_TARGET_NOT_CONFIGURED', '隐患排查表未配置', 503, corsHeaders(origin));
+
+    const url = new URL(request.url);
+    const recordId = String(url.searchParams.get('id') || '').trim();
+    if (!/^[A-Za-z0-9]{10,64}$/.test(recordId)) return errRes('BAD_REQUEST', '缺少或非法的记录 id', 400, corsHeaders(origin));
+
+    let hit;
+    try {
+      hit = await adapter.getRecord(env, cfg.fileId, tableId, recordId);
+    } catch (e) {
+      if (e && e.isNotFound) return errRes('NOT_FOUND', '记录不存在', 404, corsHeaders(origin));
+      return errRes('WPS_UPSTREAM_ERROR', '隐患详情暂不可用，请稍后再试', 502, corsHeaders(origin));
+    }
+    if (!hit) return errRes('NOT_FOUND', '记录不存在', 404, corsHeaders(origin));
+    const item = mapHazardRecord(hit);
+    // 归属校验：只能查看本人登记的隐患
+    if (item.finderId !== String(payload.sub || '')) {
+      return errRes('FORBIDDEN', '只能查看本人登记的隐患', 403, corsHeaders(origin));
+    }
+    return jsonRes({ success: true, code: 'OK', item }, 200, corsHeaders(origin));
+  } catch {
+    return errRes('INTERNAL_ERROR', '内部错误，请稍后再试', 500, corsHeaders(origin));
+  }
+}
+
 async function handlePatrolRecords(request, env) {
   const origin = corsOrigin(request, env);
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
@@ -3666,6 +3969,10 @@ export default {
     if (p === '/api/mobile/patrol/submit') return handlePatrolSubmit(request, env, ctx);
     if (p === '/api/mobile/patrol/attach') return handlePatrolAttach(request, env);
     if (p === '/api/mobile/patrol/records') return handlePatrolRecords(request, env);
+    // CF-WPS-95：隐患排查（仅 公司管理 × 安环管理部；角色门在 handler 内，服务端为准）
+    if (p === '/api/mobile/hazard/submit') return handleHazardSubmit(request, env, ctx);
+    if (p === '/api/mobile/hazard/list') return handleHazardList(request, env);
+    if (p === '/api/mobile/hazard/detail') return handleHazardDetail(request, env);
     // CF-WPS-36：整改待办（跨账号指派）
     if (p === '/api/mobile/assign') return handleAssign(request, env);
     if (p === '/api/mobile/inbox') return handleInbox(request, env);
@@ -3770,6 +4077,16 @@ export {
   WX_FIELD,
   handlePatrolRecords,
   patrolTarget,
+  // CF-WPS-95：隐患排查（单测/联调直接复用真实逻辑）
+  handleHazardSubmit,
+  handleHazardList,
+  handleHazardDetail,
+  hazardGate,
+  mapHazardRecord,
+  hazardCidGet,
+  hazardCidPut,
+  HAZARD_CATEGORIES,
+  HAZARD_LEVELS,
   patrolProblemTypes,
   normalizeGridAreas,
   validatePatrolBody,

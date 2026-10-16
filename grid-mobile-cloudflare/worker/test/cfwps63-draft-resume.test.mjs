@@ -216,6 +216,12 @@ console.log('\n═══ F. 历史栈：陈旧条目防护 ═══');
       const isCheckFlowView = (v) => ctx.flowViews.indexOf(v) >= 0;
       const enterHome = () => { ctx.enteredHome++; currentView = "home"; ctx.rendered.push("home"); };
       let currentView = ctx.initialView || "boot";
+      // CF-WPS-95：showView 入口的隐患排查权限门依赖这两个模块级符号，
+      // slice 抽不出它们 → 在此注入（语义与线上一致：HAZARD_VIEWS 名单 +
+      // isHazardUser 返回 false = 非安环账号，hazard 视图一律被拦回首页）。
+      const HAZARD_VIEWS = ['hazard-list', 'hazard-form', 'hazard-detail'];
+      const isHazardUser = () => false;
+      const flashMsg = (m) => { ctx.flash = (ctx.flash || []).concat(m); };
       const renderView = (name) => { currentView = name; ctx.rendered.push(name); };
       const syncTabbar = () => {};
       ${R_NAV}
