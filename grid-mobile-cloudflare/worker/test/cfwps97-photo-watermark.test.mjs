@@ -39,13 +39,14 @@ const sig = extractFn('compressImage');
 ck(/function compressImage\(file, cb, wmText\)/.test(sig), 'compressImage 第三参 wmText');
 const drawBody = sig.slice(sig.indexOf('const draw ='), sig.indexOf('if(typeof createImageBitmap'));
 ck(/if\(wmText\)\s*drawPhotoWatermark\(ctx, w, h, wmText\)/.test(drawBody), 'draw 内 encode 前画水印', 'if(wmText) drawPhotoWatermark(...)');
-// 全文件只允许「隐患一路」带水印：}, photoWatermarkDate());
+// CF-WPS-100 起共两路带水印：隐患登记（pickHazardPhoto）+ 整改提交（pickHazardRectifyPhoto）。
+// 两处都是「现场/整改完成后拍摄留证」，同日水印；巡检三件套（巡查/现场/整改）仍不带。
 const wmSites = src.match(/\}, photoWatermarkDate\(\)\);/g) || [];
-ck(wmSites.length === 1, '全文件仅 1 处带水印（只有隐患登记）', 'count=' + wmSites.length);
-// 另外三处 compressImage（巡查/现场/整改照片）必须仍是两参（同行不带日期参数）
+ck(wmSites.length === 2, '全文件仅 2 处带水印（隐患登记 + 整改提交）', 'count=' + wmSites.length);
+// 其余 compressImage（巡查/现场/整改照片）必须仍是两参（同行不带日期参数）
 const calls = src.split('\n').filter((l) => /compressImage\((f|file)\b/.test(l) && !/function compressImage/.test(l));
-ck(calls.length === 4 && calls.every((l) => !/photoWatermarkDate/.test(l)),
-   'compressImage 共 4 处调用、同行均不带水印参数（隐患那处的第三参在收尾行，由上一条断言管）',
+ck(calls.length === 5 && calls.every((l) => !/photoWatermarkDate/.test(l)),
+   'compressImage 共 5 处调用、同行均不带水印参数（隐患/整改两处的第三参在收尾行，由上一条断言管）',
    calls.map((l) => l.trim().slice(0, 40)).join(' | '));
 
 /* ================= B/C. drawPhotoWatermark 行为 ================= */

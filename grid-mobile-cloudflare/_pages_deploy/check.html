@@ -7,7 +7,7 @@
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-10-16.100">
+<meta name="hse-build" content="2026-10-16.101">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -242,6 +242,20 @@ textarea.hz-input{height:auto;padding:10px var(--pad-card);line-height:1.6;resiz
   display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:var(--t3);
   font-size:var(--fs-sub);cursor:pointer;flex:0 0 auto}
 .hz-req{color:var(--danger);font-weight:700}
+/* CF-WPS-100：整改闭环（指派选人 / 待办列表 / 验收）复用件 */
+.hz-cand{display:flex;align-items:center;gap:10px;padding:12px var(--pad-card);border-radius:var(--r-card);
+  background:var(--card);border:1.5px solid var(--line);cursor:pointer;margin-top:8px}
+.hz-cand.sel{border-color:var(--primary);background:rgba(29,78,216,.06)}
+.hz-cand:active{transform:scale(.99)}
+.hz-cand .nm{font-size:var(--fs-body);font-weight:600;color:var(--t1)}
+.hz-cand .sub{font-size:var(--fs-sub);color:var(--t3);margin-top:2px}
+.hz-deadline{width:100%;height:var(--h-btn-row);padding:0 var(--pad-card);border-radius:var(--r-btn);
+  border:1px solid var(--line);background:var(--card);color:var(--t1);
+  font-size:var(--fs-body);font-family:inherit;outline:none;-webkit-appearance:none;box-sizing:border-box}
+.hz-todo-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;
+  font-size:var(--fs-sub);color:var(--t3)}
+.hz-review-bar{display:flex;gap:8px;margin-top:12px}
+.hz-review-bar>button{flex:1}
 .big-cta{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--cta-icon-gap);height:var(--h-cta);border-radius:var(--r-card);background:var(--primary);color:#fff;cursor:pointer;border:none;box-shadow:0 10px 24px -4px rgba(29,78,216,.3)}
 .big-cta:active{transform:scale(.985)}
 .big-cta:disabled{background:#B6C4E8;box-shadow:none}
@@ -1039,6 +1053,15 @@ textarea.hz-input{height:auto;padding:10px var(--pad-card);line-height:1.6;resiz
       </div>
       <div style="font-size:var(--fs-sub);color:var(--t3);margin-top:2px">查看下属网格员的检查记录与闭环进度</div>
     </div>
+    <!-- CF-WPS-100：「派给我的隐患」入口（隐患整改待办，任何账号都可能有）。
+         没有待办时整卡隐藏；条数由 /api/mobile/hazard/todos 实时拉取。 -->
+    <div class="card" style="cursor:pointer;display:none" id="btn-me-hazard-todo">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div style="font-size:var(--fs-title);font-weight:600">派给我的隐患</div>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 5l7 7-7 7" stroke="#9CA3AF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div style="font-size:var(--fs-sub);color:var(--t3);margin-top:2px" id="me-hazard-todo-hint">安环管理部指派给你的隐患整改</div>
+    </div>
     <!-- 「添加到手机桌面」入口：点桌面图标直接进系统（登录态在本机 localStorage，通常免登录）。
          Android/Chrome：捕获 beforeinstallprompt → 用户主动触发系统安装对话框；
          iOS Safari：无原生入口，弹底部 sheet 手动引导「分享 → 添加到主屏幕」。
@@ -1076,6 +1099,13 @@ textarea.hz-input{height:auto;padding:10px var(--pad-card);line-height:1.6;resiz
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg>
       登记新隐患
     </button>
+    <div class="btn-stack" style="margin-top:10px">
+      <button class="btn-ghost btn-row" id="btn-hazard-review">隐患验收（指派 / 通过 / 打回）</button>
+    </div>
+    <div class="seg" style="margin-top:14px">
+      <button class="seg-item active" data-hscope="mine">我登记的</button>
+      <button class="seg-item" data-hscope="all">全部隐患</button>
+    </div>
     <div id="hazard-list"></div>
   </div>
 </section>
@@ -1119,11 +1149,96 @@ textarea.hz-input{height:auto;padding:10px var(--pad-card);line-height:1.6;resiz
 <section class="view" id="view-hazard-detail">
   <div class="statusbar"></div>
   <div class="navbar">
-    <div class="icon-btn" data-back="hazard-list"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="icon-btn" id="hz-detail-back" data-back="hazard-list"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
     <div class="nav-title">隐患详情</div><div style="width:40px"></div>
   </div>
   <div class="page">
     <div id="hazard-detail"></div>
+  </div>
+</section>
+
+<!-- ============ CF-WPS-100：指派整改（安环部；全公司账号任选 + 期限） ============ -->
+<section class="view" id="view-hazard-assign">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" data-back="hazard-list"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">指派整改</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <div class="card"><div class="field-label">待指派隐患</div>
+      <div class="info-line" style="margin-top:6px;line-height:1.6" id="hz-assign-brief">—</div>
+    </div>
+    <div class="card">
+      <div class="field-label">整改人 <span class="hz-req">*</span></div>
+      <div class="field-sub">全公司账号任选（有 App 账号的人才能收到待办）</div>
+      <input class="hz-input" id="hz-assign-q" style="margin-top:8px" maxlength="32" placeholder="搜索姓名 / 手机号 / 部门">
+      <div id="hz-assign-cands"></div>
+    </div>
+    <div class="card">
+      <div class="field-label">整改期限 <span class="hz-req">*</span></div>
+      <div class="field-sub">到期未整改将标注逾期（默认一周内）</div>
+      <input class="hz-deadline" type="date" id="hz-assign-deadline" style="margin-top:8px">
+    </div>
+    <button class="btn-primary btn-row" id="btn-hz-assign-ok" style="margin-top:14px">确认指派</button>
+  </div>
+</section>
+
+<!-- ============ CF-WPS-100：派给我的隐患（整改人待办，任何账号） ============ -->
+<section class="view" id="view-hazard-todos">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" data-back="me"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">派给我的隐患</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <div id="hazard-todo-list"></div>
+  </div>
+</section>
+
+<!-- ============ CF-WPS-100：提交整改（整改人：照片 + 说明 → 待验收） ============ -->
+<section class="view" id="view-hazard-rectify">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" data-back="hazard-todos"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">提交整改</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <div class="card"><div class="field-label">隐患内容</div>
+      <div class="info-line" style="margin-top:6px;line-height:1.6" id="hz-rectify-brief">—</div>
+    </div>
+    <div class="card">
+      <div class="field-label">整改后照片（最多 3 张，选填）</div>
+      <div class="field-sub">整改完成后的现场照片，供安环部验收比对</div>
+      <div class="hz-photos" id="hz-rectify-photos" style="margin-top:8px"></div>
+      <div class="btn-stack" style="margin-top:10px">
+        <button class="btn-ghost btn-row" id="btn-hz-rectify-camera">拍照</button>
+        <button class="btn-ghost btn-row" id="btn-hz-rectify-album">从相册上传</button>
+      </div>
+      <input type="file" accept="image/*" capture="environment" class="file-ghost" id="hz-rectify-file-camera">
+      <input type="file" accept="image/*" class="file-ghost" id="hz-rectify-file-album">
+    </div>
+    <div class="card">
+      <div class="field-label">整改说明（选填）</div>
+      <textarea class="hz-input" id="hz-rectify-note" rows="3" maxlength="500" placeholder="采取了什么措施、是否还需进一步处理…" style="margin-top:8px"></textarea>
+    </div>
+    <button class="btn-primary btn-row" id="btn-hz-rectify-ok" style="margin-top:14px">提交整改</button>
+    <div class="muted" style="margin-top:8px">提交后由安环管理部验收，通过才闭环；被打回需重新整改再提交。</div>
+  </div>
+</section>
+
+<!-- ============ CF-WPS-100：隐患验收（安环部；待验收 / 已闭环） ============ -->
+<section class="view" id="view-hazard-review">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" data-back="hazard-list"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">隐患验收</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <div class="seg">
+      <button class="seg-item active" data-hseg="review">待验收</button>
+      <button class="seg-item" data-hseg="closed">已闭环</button>
+    </div>
+    <div id="hazard-review-list"></div>
   </div>
 </section>
 
@@ -1168,8 +1283,8 @@ textarea.hz-input{height:auto;padding:10px var(--pad-card);line-height:1.6;resiz
      读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
    - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
    - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
-<script src="./config.js?v=2026-10-16.100"></script>
-<script src="./app.js?v=2026-10-16.100"></script>
+<script src="./config.js?v=2026-10-16.101"></script>
+<script src="./app.js?v=2026-10-16.101"></script>
 <script>
 /* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
 (function(){
@@ -5456,6 +5571,13 @@ document.addEventListener("DOMContentLoaded", () => {
   // CF-WPS-95：隐患排查模块（DOM 绑定集中在此；函数体在上方 CF-WPS-95 段）
   // CF-WPS-96：开表单走 openHazardForm（有草稿先续传，见 HZ_DRAFT_KEY）
   $("#btn-hazard-new").onclick = () => openHazardForm();
+  // CF-WPS-100：隐患验收（待验收/已闭环）入口 + 列表「我登记的/全部隐患」切换
+  $("#btn-hazard-review").onclick = () => {
+    hazardReviewSeg = "review";
+    $$("#view-hazard-review .seg-item").forEach(s => s.classList.toggle("active", s.dataset.hseg === "review"));
+    showView("hazard-review");
+    renderHazardReview();
+  };
   $("#btn-hz-camera").onclick = () => $("#hz-file-camera").click();
   $("#btn-hz-album").onclick = () => $("#hz-file-album").click();
   $("#hz-file-camera").onchange = e => pickHazardPhoto(e.target);
@@ -5483,6 +5605,36 @@ document.addEventListener("DOMContentLoaded", () => {
   };
   // CF-WPS-96：手动清空表单 + 丢弃草稿（长表单误触后的一键重来）
   $("#btn-hz-clear").onclick = () => { resetHazardForm(); flashMsg("表单已清空"); };
+  // CF-WPS-100：指派整改（搜索防抖 + 确认指派）
+  $("#hz-assign-q").addEventListener("input", onHzAssignInput);
+  $("#btn-hz-assign-ok").onclick = () => submitHazardAssign();
+  // CF-WPS-100：提交整改（拍照/相册 + 提交）
+  $("#btn-hz-rectify-camera").onclick = () => $("#hz-rectify-file-camera").click();
+  $("#btn-hz-rectify-album").onclick = () => $("#hz-rectify-file-album").click();
+  $("#hz-rectify-file-camera").onchange = e => pickHazardRectifyPhoto(e.target);
+  $("#hz-rectify-file-album").onchange = e => pickHazardRectifyPhoto(e.target);
+  $("#btn-hz-rectify-ok").onclick = () => submitHazardRectify();
+  // CF-WPS-100：「我的」页「派给我的隐患」入口
+  const todoCard = $("#btn-me-hazard-todo");
+  if(todoCard) todoCard.onclick = () => { showView("hazard-todos"); renderHazardTodos(); };
+});
+
+// CF-WPS-100：隐患列表 scope 切换 + 验收分段切换（挂在 document 上，
+// 与既有 .seg-item 全局处理器共存：那边只负责 active 类的统一切换）
+document.addEventListener("click", e => {
+  const scope = e.target.closest("[data-hscope]");
+  if(scope){
+    hazardListScope = scope.dataset.hscope;
+    $$("#view-hazard-list .seg-item").forEach(x => x.classList.toggle("active", x === scope));
+    renderHazardList();
+    return;
+  }
+  const seg = e.target.closest("[data-hseg]");
+  if(seg){
+    hazardReviewSeg = seg.dataset.hseg;
+    $$("#view-hazard-review .seg-item").forEach(x => x.classList.toggle("active", x === seg));
+    renderHazardReview();
+  }
 });
 
 /* ================= CF-WPS-95/96：隐患排查（仅 公司管理 × 安环管理部） =================
@@ -5497,7 +5649,10 @@ document.addEventListener("DOMContentLoaded", () => {
        低端安卓调起相机时页面被系统回收 / 误刷新，长描述不再全丢；
      · 提交响应识别服务端 deduplicated（弱网重试 / 连点两下），
        明确告知「未重复提交」而不是含糊的成功。 */
-const HAZARD_VIEWS = ["hazard-list", "hazard-form", "hazard-detail"];
+const HAZARD_VIEWS = ["hazard-list", "hazard-form", "hazard-detail", "hazard-assign", "hazard-review"];
+// CF-WPS-100：这两个屏对**任何登录账号**开放（被指派人就是全公司任选的结果），
+// 故不进 HAZARD_VIEWS 门禁；归属校验在服务端（rectify 只许整改人、detail 许三种人）。
+const HAZARD_TODO_VIEWS = ["hazard-todos", "hazard-rectify"];
 // 类别/级别**必须与服务端 index.js 同名单**（后端校验拒绝不在名单内的值）
 const HAZARD_CATEGORIES = ["设备设施","消防安全","用电安全","危化品","作业安全","高处作业","交通运输","公共设施","环境卫生","违规操作","其他"];
 const HAZARD_LEVELS = ["一般隐患","重大隐患"];
@@ -5709,15 +5864,52 @@ async function submitHazard(){
   }
 }
 /* ---- 我的隐患列表 / 详情 ---- */
+// CF-WPS-100：scope = mine（我登记的，默认）| all（全部隐患，安环部验收/管理视角）。
+// 服务端 hazardGate 已保证只有安环管理部能调这个接口，scope=all 不放任何权限。
+let hazardListScope = "mine";
+// 闭环状态 chips（三态 + 逾期；存量空串按「待整改」显示）
+function hazardStatusChip(x){
+  const st = x.status || "待整改";
+  if(st === "已闭环") return '<span class="chip green"><span class="dot"></span>已闭环</span>';
+  if(st === "待验收") return '<span class="chip blue"><span class="dot"></span>待验收</span>';
+  return '<span class="chip yellow"><span class="dot"></span>' + esc(st) + '</span>';
+}
+function hazardOverdueChip(x){
+  return x.overdue ? '<span class="chip red"><span class="dot"></span>已逾期</span>' : '';
+}
+// 列表 / 待办 / 验收三处共用的卡片主体（点击行为由调用方决定）
+function hazardCardHtml(x){
+  return '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
+      '<span class="chip blue"><span class="dot"></span>' + esc(x.category || "未分类") + '</span>' +
+      (x.level === "重大隐患"
+        ? '<span class="chip red"><span class="dot"></span>重大隐患</span>'
+        : '<span class="chip yellow"><span class="dot"></span>' + esc(x.level || "一般隐患") + '</span>') +
+      '<span style="flex:1"></span>' +
+      hazardStatusChip(x) + hazardOverdueChip(x) +
+    '</div>' +
+    '<div style="font-size:var(--fs-body);margin-top:8px;line-height:1.5">' + esc(x.description || "") + '</div>' +
+    '<div class="hz-todo-meta">' +
+      (x.findTime ? '<span>' + esc(x.findTime) + '</span>' : '') +
+      (x.rectifierName
+        ? '<span>整改人：' + esc(x.rectifierName) + (x.rectifierDept ? '（' + esc(x.rectifierDept) + '）' : '') + '</span>'
+        : '<span>未指派</span>') +
+      (x.deadline ? '<span>期限：' + esc(x.deadline) + '</span>' : '') +
+      (x.location ? '<span>' + esc(x.location) + '</span>' : '') +
+      (x.rectifyPhotoTokens && x.rectifyPhotoTokens.length ? '<span>整改照片 ' + x.rectifyPhotoTokens.length + ' 张</span>' : '') +
+      (x.rejectCount ? '<span style="color:var(--danger)">打回 ' + x.rejectCount + ' 次</span>' : '') +
+    '</div>';
+}
 async function renderHazardList(){
   const box = $("#hazard-list");
   if(!box) return;
   box.innerHTML = '<div class="empty-tip">正在读取隐患排查台账…</div>';
-  const body = await apiGet("/api/mobile/hazard/list");
+  const body = await apiGet("/api/mobile/hazard/list" + (hazardListScope === "all" ? "?scope=all" : ""));
   if(!body){ box.innerHTML = '<div class="empty-tip">读取失败：' + esc(lastApiError || "请稍后重试") + '</div>'; return; }
   const items = body.items || [];
   if(!items.length){
-    box.innerHTML = '<div class="empty-tip">还没有登记的隐患<br><span style="font-size:var(--fs-sub)">点上方「登记新隐患」开始记录</span></div>';
+    box.innerHTML = '<div class="empty-tip">' +
+      (hazardListScope === "all" ? "台账里还没有隐患记录" : "还没有登记的隐患") +
+      '<br><span style="font-size:var(--fs-sub)">点上方「登记新隐患」开始记录</span></div>';
     return;
   }
   box.innerHTML = "";
@@ -5726,24 +5918,7 @@ async function renderHazardList(){
     const d = document.createElement("div");
     d.className = "card";
     d.style.cursor = "pointer";
-    const lvlChip = x.level === "重大隐患"
-      ? '<span class="chip red"><span class="dot"></span>重大隐患</span>'
-      : '<span class="chip yellow"><span class="dot"></span>一般隐患</span>';
-    d.innerHTML =
-      '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
-        '<span class="chip blue"><span class="dot"></span>' + esc(x.category || "未分类") + '</span>' +
-        lvlChip +
-        '<span style="flex:1"></span>' +
-        '<span style="font-size:var(--fs-sub);color:var(--t3)">' + esc(x.findTime || "") + '</span>' +
-      '</div>' +
-      '<div style="font-size:var(--fs-body);margin-top:8px;line-height:1.5">' + esc(x.description || "") + '</div>' +
-      '<div style="display:flex;align-items:center;gap:8px;margin-top:8px" class="hz-card-foot">' +
-        '<div style="flex:1;font-size:var(--fs-sub);color:var(--t3)">' +
-          (x.location ? esc(x.location) : "未填位置") +
-          (x.photoTokens && x.photoTokens.length ? ' · ' + x.photoTokens.length + ' 张照片' : '') +
-        '</div>' +
-        '<span class="chip green"><span class="dot"></span>' + esc(x.status || "待整改") + '</span>' +
-      '</div>';
+    d.innerHTML = hazardCardHtml(x);
     // 照片缩略图：**不能**用 <img src="/api/mobile/photo?ft="> —— 该接口要登录态，
     // 而 img 标签带不上 Authorization 头 → 401 裂图（2026-10-16 用户实测）。
     // 走台账同一条懒加载队（全局并发 3 + 进视口才拉原图），失败整块摘掉不留破图。
@@ -5753,8 +5928,8 @@ async function renderHazardList(){
       img.dataset.ft = x.photoTokens[0];
       img.style.cssText = "width:52px;height:52px;border-radius:var(--r-card);object-fit:cover;background:#E8E6E0;flex:0 0 auto";
       img.onerror = () => img.remove();
-      const foot = d.querySelector(".hz-card-foot");
-      if(foot) foot.insertBefore(img, foot.firstChild);
+      const foot = d.querySelector(".hz-todo-meta");
+      if(foot) foot.appendChild(img);
       const io = thumbObserver();
       if(io) io.observe(img); else thumbQueue.push({ img: img, wrap: img, ft: x.photoTokens[0] });
     }
@@ -5787,9 +5962,13 @@ async function renderHazardPhotos(container, tokens){
     container.innerHTML = '<div style="font-size:var(--fs-sub);color:var(--t4)">照片加载失败，请稍后重试</div>';
   }
 }
-async function renderHazardDetail(recordId){
+async function renderHazardDetail(recordId, from){
   const box = $("#hazard-detail");
   if(!box) return;
+  // CF-WPS-100：从「待办/验收」进来时，返回箭头回到来的那一屏（默认回列表）
+  const back = $("#hz-detail-back");
+  if(back) back.dataset.back = from || "hazard-list";
+  hazardDetailFrom = from || "hazard-list";
   box.innerHTML = '<div class="empty-tip">正在读取…</div>';
   const body = await apiGet("/api/mobile/hazard/detail?id=" + encodeURIComponent(recordId));
   if(!body || !body.item){ box.innerHTML = '<div class="empty-tip">读取失败：' + esc(lastApiError || "请稍后重试") + '</div>'; return; }
@@ -5802,7 +5981,7 @@ async function renderHazardDetail(recordId){
           ? '<span class="chip red"><span class="dot"></span>重大隐患</span>'
           : '<span class="chip yellow"><span class="dot"></span>' + esc(x.level || "一般隐患") + '</span>') +
         '<span style="flex:1"></span>' +
-        '<span class="chip green"><span class="dot"></span>' + esc(x.status || "待整改") + '</span>' +
+        hazardStatusChip(x) + hazardOverdueChip(x) +
       '</div>' +
       '<div class="info-line" style="margin-top:10px">编号：' + esc(x.hazardNo || "—") + '<br>' +
         '排查人：' + esc(x.finderName || "") + '（' + esc(x.finderDept || "") + '）<br>' +
@@ -5821,9 +6000,342 @@ async function renderHazardDetail(recordId){
     html += '<div class="card"><div class="field-label">现场照片（' + x.photoTokens.length + '）</div>' +
       '<div class="hz-photos" id="hz-detail-photos" style="margin-top:8px"></div></div>';
   }
+  // CF-WPS-100：整改进展卡（整改人/期限/逾期/整改说明/整改后照片/验收结论/打回次数 + 操作按钮）
+  html += hazardClosureCardHtml(x);
   box.innerHTML = html;
   // 照片墙异步回填（带登录态取图，见 renderHazardPhotos）
   if(x.photoTokens && x.photoTokens.length) renderHazardPhotos($("#hz-detail-photos"), x.photoTokens);
+  if(x.rectifyPhotoTokens && x.rectifyPhotoTokens.length) renderHazardPhotos($("#hz-rectify-detail-photos"), x.rectifyPhotoTokens);
+  wireHazardDetailActions(x);
+}
+let hazardDetailFrom = "hazard-list";   // 详情页返回目标（list / hazard-todos / hazard-review）
+
+/* ---- CF-WPS-100：整改进展卡 ----
+   谁来点哪个按钮全靠 status + isHazardUser 决定；服务端同一道门，这里只是体验层。 */
+function hazardClosureCardHtml(x){
+  const st = x.status || "待整改";
+  let rows = "";
+  if(x.rectifierName){
+    rows += '<div class="info-line" style="margin-top:6px">整改人：' + esc(x.rectifierName) +
+      (x.rectifierDept ? '（' + esc(x.rectifierDept) + '）' : '') +
+      (x.assignerName ? '<br>指派人：' + esc(x.assignerName) + (x.assignedAt ? ' · ' + esc(x.assignedAt) : '') : '') +
+      '</div>';
+  }
+  if(x.deadline){
+    rows += '<div class="info-line" style="margin-top:4px">整改期限：' + esc(x.deadline) +
+      (x.overdue ? ' <span style="color:var(--danger);font-weight:600">已逾期</span>' : '') + '</div>';
+  }
+  if(x.rectifySubmittedAt){
+    rows += '<div class="info-line" style="margin-top:4px">整改提交：' + esc(x.rectifySubmittedAt) + '</div>';
+  }
+  if(x.rectifyNote){
+    rows += '<div class="info-line" style="margin-top:4px">整改说明：' + esc(x.rectifyNote) + '</div>';
+  }
+  if(x.reviewer){
+    rows += '<div class="info-line" style="margin-top:4px">验收：' + esc(x.reviewer) +
+      (x.reviewAt ? ' · ' + esc(x.reviewAt) : '') +
+      (x.reviewResult ? ' · ' + esc(x.reviewResult) : '') + '</div>';
+  }
+  if(x.closedAt) rows += '<div class="info-line" style="margin-top:4px">闭环时间：' + esc(x.closedAt) + '</div>';
+  if(x.rejectCount) rows += '<div class="info-line" style="margin-top:4px;color:var(--danger)">被打回 ' + x.rejectCount + ' 次</div>';
+  if(!rows) rows = '<div class="muted" style="margin-top:6px">尚未指派整改人</div>';
+
+  let html = '<div class="card"><div class="field-label">整改进展</div>' +
+    '<div style="display:flex;align-items:center;gap:8px;margin-top:8px">' + hazardStatusChip(x) + hazardOverdueChip(x) + '</div>' +
+    rows;
+  if(x.rectifyPhotoTokens && x.rectifyPhotoTokens.length){
+    html += '<div class="field-label" style="margin-top:12px">整改后照片（' + x.rectifyPhotoTokens.length + '）</div>' +
+      '<div class="hz-photos" id="hz-rectify-detail-photos" style="margin-top:8px"></div>';
+  }
+  // 操作区（安环部）：待整改 → 指派；待验收 → 通过 / 打回。已闭环只读。
+  if(isHazardUser() && st === "待整改"){
+    html += '<button class="btn-primary btn-row" id="btn-hz-detail-assign" style="margin-top:12px">指派整改</button>';
+  }
+  if(isHazardUser() && st === "待验收"){
+    html += '<div class="hz-review-bar">' +
+        '<button class="btn-primary" id="btn-hz-detail-pass">验收通过</button>' +
+        '<button class="btn-ghost" id="btn-hz-detail-reject">打回</button>' +
+      '</div>' +
+      '<textarea class="hz-input" id="hz-reject-comment" rows="2" maxlength="200" placeholder="打回原因（选填，整改人可见）" style="margin-top:8px;display:none"></textarea>' +
+      '<button class="btn-ghost btn-row" id="btn-hz-reject-ok" style="margin-top:8px;display:none">确认打回</button>';
+  }
+  // 整改人视角：待整改 → 去提交；待验收/已闭环 → 只读等待
+  if(x.rectifierId === (session && session.id) && st === "待整改" && !isHazardUser()){
+    html += '<button class="btn-primary btn-row" id="btn-hz-detail-go-rectify" style="margin-top:12px">去提交整改</button>';
+  }
+  return html + '</div>';
+}
+function wireHazardDetailActions(x){
+  const go = $("#btn-hz-detail-go-rectify");
+  if(go) go.onclick = () => openHazardRectify(x);
+  const a = $("#btn-hz-detail-assign");
+  if(a) a.onclick = () => openHazardAssign(x);
+  const p = $("#btn-hz-detail-pass");
+  if(p) p.onclick = () => hzDoReview(x, "pass", "");
+  const r = $("#btn-hz-detail-reject");
+  if(r) r.onclick = () => {
+    const ta = $("#hz-reject-comment");
+    if(ta) ta.style.display = "";
+    const ok = $("#btn-hz-reject-ok");
+    if(ok) ok.style.display = "";
+    if(ta) ta.focus();
+  };
+  const ok = $("#btn-hz-reject-ok");
+  if(ok) ok.onclick = () => hzDoReview(x, "reject", String(($("#hz-reject-comment") || {}).value || "").trim());
+}
+// 验收通过 / 打回（安环部）
+async function hzDoReview(x, action, comment){
+  const btn = action === "pass" ? $("#btn-hz-detail-pass") : $("#btn-hz-reject-ok");
+  const btnText = action === "pass" ? "验收通过" : "确认打回";
+  if(btn){ btn.disabled = true; btn.textContent = "提交中…"; }
+  try{
+    const r = await mobileApi("/api/mobile/hazard/review", {
+      record_id: x.recordId, action: action, comment: comment || "",
+    });
+    if(r.status === 200 && r.body && r.body.success){
+      flashMsg(action === "pass" ? "已验收通过，隐患闭环" : "已打回，整改人需重新整改后再次提交");
+      renderHazardDetail(x.recordId, hazardDetailFrom);
+    } else {
+      flashMsg((r.body && r.body.message) || "操作失败，请稍后重试");
+      if(btn){ btn.disabled = false; btn.textContent = btnText; }
+    }
+  }catch(e){
+    flashMsg("操作异常，请检查网络后重试");
+    if(btn){ btn.disabled = false; btn.textContent = btnText; }
+  }
+}
+
+/* ================= CF-WPS-100：隐患整改闭环（待办 / 指派 / 提交 / 验收） ================= */
+
+/* ---- 派给我的隐患（整改人待办；任何账号，服务端只认 整改人ID == 我） ---- */
+let hazardTodos = [], hazardTodosAt = 0;
+async function loadHazardTodos(force){
+  if(!force && hazardTodos.length && Date.now() - hazardTodosAt < 30000) return hazardTodos;
+  const body = await apiGet("/api/mobile/hazard/todos");
+  hazardTodos = (body && body.items) || [];
+  hazardTodosAt = Date.now();
+  return hazardTodos;
+}
+async function renderHazardTodos(){
+  const box = $("#hazard-todo-list");
+  if(!box) return;
+  box.innerHTML = '<div class="empty-tip">正在读取…</div>';
+  const items = await loadHazardTodos(true);
+  if(!items.length){ box.innerHTML = '<div class="empty-tip">暂无名下隐患整改任务</div>'; return; }
+  box.innerHTML = "";
+  items.forEach(x => {
+    const d = document.createElement("div");
+    d.className = "card"; d.style.cursor = "pointer";
+    d.innerHTML = hazardCardHtml(x);
+    d.onclick = () => {
+      // 待整改 → 提交页；待验收 / 已闭环 → 只读详情（服务端允许整改人看自己的）
+      if((x.status || "待整改") === "待整改") openHazardRectify(x);
+      else { showView("hazard-detail"); renderHazardDetail(x.recordId, "hazard-todos"); }
+    };
+    box.appendChild(d);
+  });
+}
+// 「我的」页入口条数（无待办时卡片隐藏，不占位）
+async function refreshMeHazardEntry(){
+  const card = $("#btn-me-hazard-todo");
+  if(!card) return;
+  if(!session || !session.id){ card.style.display = "none"; return; }
+  let items = [];
+  try{ items = await loadHazardTodos(false); }catch(e){}
+  const n = items.filter(x => (x.status || "待整改") === "待整改").length;
+  card.style.display = n ? "" : "none";
+  const hint = $("#me-hazard-todo-hint");
+  if(hint) hint.textContent = n ? "安环管理部指派给你的隐患整改 · " + n + " 条待处理" : "安环管理部指派给你的隐患整改";
+}
+
+/* ---- 指派整改（安环部；全公司账号任选 + 期限） ---- */
+let hazardAssignTarget = null, hazardAssignSel = null, hzAssignTimer = 0;
+function hzDefaultDeadline(){
+  const d = new Date(Date.now() + 7 * 86400000), p = n => String(n).padStart(2, "0");
+  return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());   // 本机时区，date input 直接吃
+}
+async function openHazardAssign(x){
+  hazardAssignTarget = x;
+  hazardAssignSel = null;
+  $("#hz-assign-brief").innerHTML = "<b>" + esc(x.category || "") + " · " + esc(x.level || "") + "</b><br>" +
+    esc(x.description || "") + (x.location ? "<br>位置：" + esc(x.location) : "");
+  $("#hz-assign-q").value = "";
+  $("#hz-assign-deadline").value = hzDefaultDeadline();
+  const ok = $("#btn-hz-assign-ok");
+  if(ok){ ok.disabled = true; ok.textContent = "确认指派"; }
+  showView("hazard-assign");
+  await searchHazardAssignable("");
+}
+function onHzAssignInput(){
+  clearTimeout(hzAssignTimer);
+  hzAssignTimer = setTimeout(() => searchHazardAssignable(String(($("#hz-assign-q") || {}).value || "").trim()), 300);
+}
+async function searchHazardAssignable(q){
+  const box = $("#hz-assign-cands");
+  if(!box) return;
+  box.innerHTML = '<div class="empty-tip">正在加载候选人…</div>';
+  const body = await apiGet("/api/mobile/hazard/assignable" + (q ? "?q=" + encodeURIComponent(q) : ""));
+  if(!body){ box.innerHTML = '<div class="empty-tip">候选人加载失败：' + esc(lastApiError || "请稍后重试") + '</div>'; return; }
+  const items = body.items || [];
+  if(!items.length){ box.innerHTML = '<div class="empty-tip">没有匹配的账号，换个关键词试试</div>'; return; }
+  box.innerHTML = "";
+  items.forEach(p => {
+    const d = document.createElement("div");
+    d.className = "hz-cand";
+    d.innerHTML = '<div style="flex:1"><div class="nm">' + esc(p.name) + '</div>' +
+      '<div class="sub">' + esc([p.dept, p.position].filter(Boolean).join(" · ") || "—") + ' · ' + esc(p.code) + '</div></div>';
+    d.onclick = () => {
+      hazardAssignSel = p;
+      $$("#hz-assign-cands .hz-cand").forEach(el => el.classList.remove("sel"));
+      d.classList.add("sel");
+      const ok = $("#btn-hz-assign-ok");
+      if(ok) ok.disabled = false;
+    };
+    box.appendChild(d);
+  });
+}
+async function submitHazardAssign(){
+  const x = hazardAssignTarget, p = hazardAssignSel;
+  if(!x || !p){ flashMsg("请先选择整改人"); return; }
+  const deadline = String(($("#hz-assign-deadline") || {}).value || "");
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(deadline)){ flashMsg("请选择整改期限"); return; }
+  const btn = $("#btn-hz-assign-ok");
+  if(btn){ btn.disabled = true; btn.textContent = "指派中…"; }
+  try{
+    const r = await mobileApi("/api/mobile/hazard/assign", {
+      record_id: x.recordId, assignee_id: p.code, deadline: deadline,
+    });
+    if(r.status === 200 && r.body && r.body.success){
+      flashMsg("已指派给 " + p.name + "，期限 " + deadline + (r.body.notify === "sent" ? "，微信已通知" : ""));
+      showView("hazard-detail");
+      renderHazardDetail(x.recordId, hazardDetailFrom);
+      refreshMeHazardEntry();   // 派给人自己也可能有名下待办，顺手刷入口
+    } else {
+      flashMsg((r.body && r.body.message) || "指派失败，请稍后重试");
+      if(btn){ btn.disabled = false; btn.textContent = "确认指派"; }
+    }
+  }catch(e){
+    flashMsg("指派异常，请检查网络后重试");
+    if(btn){ btn.disabled = false; btn.textContent = "确认指派"; }
+  }
+}
+
+/* ---- 提交整改（整改人：照片 + 说明 → 待验收） ---- */
+let hazardRectifyTarget = null, hazardRectifyPhotos = [];
+function openHazardRectify(x){
+  hazardRectifyTarget = x;
+  hazardRectifyPhotos = [];
+  $("#hz-rectify-brief").innerHTML = "<b>" + esc(x.category || "") + " · " + esc(x.level || "") + "</b><br>" +
+    esc(x.description || "") + (x.location ? "<br>位置：" + esc(x.location) : "") +
+    (x.deadline ? "<br>期限：" + esc(x.deadline) + (x.overdue ? "（已逾期）" : "") : "");
+  $("#hz-rectify-note").value = "";
+  const btn = $("#btn-hz-rectify-ok");
+  if(btn){ btn.disabled = false; btn.textContent = "提交整改"; }
+  renderHzRectifyPhotos();
+  showView("hazard-rectify");
+}
+// 整改后照片网格（与现场照片同一套 DOM / 水印 / 上限）
+function renderHzRectifyPhotos(){
+  const box = $("#hz-rectify-photos");
+  if(!box) return;
+  box.innerHTML = "";
+  hazardRectifyPhotos.forEach((p, i) => {
+    const d = document.createElement("div");
+    d.className = "hz-photo";
+    d.innerHTML = '<img alt="整改后照片" src="' + p + '">' +
+      '<button class="hz-del" aria-label="删除这张照片">×</button>';
+    d.querySelector(".hz-del").onclick = (e) => {
+      e.stopPropagation();
+      hazardRectifyPhotos.splice(i, 1);
+      renderHzRectifyPhotos();
+    };
+    box.appendChild(d);
+  });
+  if(hazardRectifyPhotos.length < HAZARD_PHOTO_MAX){
+    const add = document.createElement("div");
+    add.className = "hz-add";
+    add.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span>加照片</span>';
+    add.onclick = () => {
+      if(hazardRectifyPhotos.length >= HAZARD_PHOTO_MAX){ flashMsg("最多上传 3 张照片"); return; }
+      $("#hz-rectify-file-camera").click();
+    };
+    box.appendChild(add);
+  }
+}
+function pickHazardRectifyPhoto(input){
+  const f = input.files && input.files[0];
+  input.value = "";   // 同一文件二次选择也要触发 change
+  if(!f) return;
+  if(hazardRectifyPhotos.length >= HAZARD_PHOTO_MAX){ flashMsg("最多上传 3 张照片"); return; }
+  // CF-WPS-97：右下角当日日期水印（整改完成取证）
+  compressImage(f, dataUrl => {
+    if(!dataUrl){ flashMsg("照片读取失败，请重拍一次，或改用「从相册上传」"); return; }
+    hazardRectifyPhotos.push(dataUrl);
+    renderHzRectifyPhotos();
+  }, photoWatermarkDate());
+}
+async function submitHazardRectify(){
+  const x = hazardRectifyTarget;
+  if(!x){ return; }
+  const note = String(($("#hz-rectify-note") || {}).value || "").trim();
+  const btn = $("#btn-hz-rectify-ok");
+  if(btn){ btn.disabled = true; btn.textContent = "提交中…"; }
+  try{
+    // 先传照片拿 file_token，再提交（任何一步失败都不落半截记录）
+    const tokens = [];
+    for(let i = 0; i < hazardRectifyPhotos.length; i++){
+      const tk = await uploadPhotoToken(hazardRectifyPhotos[i], "hazard", newClientRequestId());
+      if(!tk){
+        flashMsg("第 " + (i + 1) + " 张照片上传失败，请重试");
+        if(btn){ btn.disabled = false; btn.textContent = "提交整改"; }
+        return;
+      }
+      tokens.push(tk);
+    }
+    const r = await mobileApi("/api/mobile/hazard/rectify", {
+      record_id: x.recordId, note: note, photo_tokens: tokens,
+    });
+    if(r.status === 200 && r.body && r.body.success){
+      hazardTodos = []; hazardTodosAt = 0;   // 失效待办缓存
+      hazardRectifyPhotos = []; hazardRectifyTarget = null;
+      flashMsg("整改已提交，等待安环部验收");
+      showView("hazard-todos");
+      renderHazardTodos();
+      refreshMeHazardEntry();
+    } else {
+      flashMsg((r.body && r.body.message) || "提交失败，请稍后重试");
+      if(btn){ btn.disabled = false; btn.textContent = "提交整改"; }
+    }
+  }catch(e){
+    flashMsg("提交异常，请检查网络后重试");
+    if(btn){ btn.disabled = false; btn.textContent = "提交整改"; }
+  }
+}
+
+/* ---- 隐患验收（安环部；待验收 / 已闭环） ---- */
+let hazardReviewSeg = "review";
+async function renderHazardReview(){
+  const box = $("#hazard-review-list");
+  if(!box) return;
+  box.innerHTML = '<div class="empty-tip">正在读取…</div>';
+  const body = await apiGet("/api/mobile/hazard/list?scope=all");
+  if(!body){ box.innerHTML = '<div class="empty-tip">读取失败：' + esc(lastApiError || "请稍后重试") + '</div>'; return; }
+  const want = hazardReviewSeg === "review" ? "待验收" : "已闭环";
+  const items = (body.items || []).filter(x => (x.status || "待整改") === want)
+    .sort((a, b) => String(b.rectifySubmittedAt || b.findTime || "").localeCompare(String(a.rectifySubmittedAt || a.findTime || "")));
+  if(!items.length){
+    box.innerHTML = '<div class="empty-tip">' + (want === "待验收" ? "暂无待验收隐患" : "暂无已闭环隐患") + '</div>';
+    return;
+  }
+  box.innerHTML = "";
+  items.forEach(x => {
+    const d = document.createElement("div");
+    d.className = "card"; d.style.cursor = "pointer";
+    d.innerHTML = hazardCardHtml(x) +
+      (x.reviewResult ? '<div class="muted" style="margin-top:6px">结论：' + esc(x.reviewResult) + '</div>' : "");
+    d.onclick = () => { showView("hazard-detail"); renderHazardDetail(x.recordId, "hazard-review"); };
+    box.appendChild(d);
+  });
 }
 
 function openEntry(go){
@@ -5895,6 +6407,8 @@ function openEntry(go){
       const rvHint = document.getElementById("me-review-hint");
       if(rvHint) rvHint.textContent = "已整改提交、等你确认闭环 · " + rv.length + " 条";
     }
+    // CF-WPS-100：「派给我的隐患」入口（异步拉条数；失败就保持隐藏，不挡其他入口）
+    refreshMeHazardEntry();
     showView("me");
   }
   // CF-WPS-95：隐患排查（isHazardUser 之外由 showView 拦截 + 服务端角色门兜底）
