@@ -7,7 +7,7 @@
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-10-16.97">
+<meta name="hse-build" content="2026-10-16.98">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -1168,8 +1168,8 @@ textarea.hz-input{height:auto;padding:10px var(--pad-card);line-height:1.6;resiz
      读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
    - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
    - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
-<script src="./config.js?v=2026-10-16.97"></script>
-<script src="./app.js?v=2026-10-16.97"></script>
+<script src="./config.js?v=2026-10-16.98"></script>
+<script src="./app.js?v=2026-10-16.98"></script>
 <script>
 /* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
 (function(){
@@ -3056,13 +3056,77 @@ function resetScenePhotoUI(){
         峰值位图从 48MB 降到 ~2.5MB；拿原始宽高的 probe 用完立即 close()
      ③ 任何一步失败都 cb(null)，绝不让异常中断拍照流程（由调用方给提示） */
 const PHOTO_MAX_EDGE = 800;
-function compressImage(file, cb){
+/* CF-WPS-97：照片水印 —— 右下角、白字深色描边（任何底色都可读）。
+   字号按短边比例（300px 小图也不会糊成一团），位置/内容全部参数化；
+   用假 ctx 的单元测试即可覆盖（cfwps97-photo-watermark），不依赖浏览器。
+   调用方传空串 = 不画（巡查等不需要水印的链路原样）。 */
+function drawPhotoWatermark(ctx, w, h, text){
+  const t = String(text || "").trim();
+  if(!ctx || !t || !w || !h) return;
+  try{
+    const size = Math.max(14, Math.round(Math.min(w, h) * 0.05));
+    const pad = Math.round(size * 0.8);
+    ctx.save();
+    ctx.font = 'bold ' + size + 'px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
+    ctx.textAlign = "right";
+    ctx.textBaseline = "alphabetic";
+    ctx.lineJoin = "round";
+    ctx.lineWidth = Math.max(2, Math.round(size / 8));
+    ctx.strokeStyle = "rgba(0,0,0,0.55)";
+    ctx.strokeText(t, w - pad, h - pad);   // 深色描边：压住亮底色
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(t, w - pad, h - pad);
+  }catch(e){} finally{ try{ ctx.restore(); }catch(e){} }
+}
+// 水印日期串：本机「年-月-日」（排查登记按拍摄当日计，不掺时分秒）
+function photoWatermarkDate(){
+  const d = new Date(), p = n => String(n).padStart(2, "0");
+  return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+}
+/* CF-WPS-97：只读文件头解析原始像素宽（不解码、不吃内存，最多读 64KB）。
+   为什么需要它：createImageBitmap 的 resizeWidth 是「缩放到指定宽」——
+   对**小于** 800px 的图（微信转发图、截图、二次压缩图）会**放大**，
+   结果是变模糊还更占上传流量。先探原始宽度，小于 800 就按原样解码。
+   支持 PNG / JPEG（拍照与相册的绝大多数）；其余格式或解析失败返回 null，
+   调用方维持「按 800 缩」的原行为，绝不影响拍照主流程。 */
+function probeImageWidth(file){
+  return (async () => {
+    try{
+      if(!file || typeof file.slice !== "function") return null;
+      const u8 = new Uint8Array(await file.slice(0, 65536).arrayBuffer());
+      // PNG：签名 + IHDR，宽在偏移 16（大端 4 字节）
+      if(u8.length > 24 && u8[0]===0x89 && u8[1]===0x50 && u8[2]===0x4e && u8[3]===0x47){
+        return (u8[16]<<24 | u8[17]<<16 | u8[18]<<8 | u8[19]) >>> 0;
+      }
+      // JPEG：顺着段长扫到 SOFn（0xFFC0~C3 / C5~C7 / C9~CB / CD~CF），宽是段内后 2 字节
+      if(u8.length > 4 && u8[0]===0xff && u8[1]===0xd8){
+        let i = 2;
+        while(i + 9 < u8.length){
+          if(u8[i] !== 0xff){ i++; continue; }
+          const m = u8[i+1];
+          if(m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc){
+            return (u8[i+7]<<8 | u8[i+8]) >>> 0;
+          }
+          if(m === 0xd8 || m === 0x01 || (m >= 0xd0 && m <= 0xd7)){ i += 2; continue; }
+          const len = (u8[i+2]<<8 | u8[i+3]) >>> 0;
+          if(len < 2) break;
+          i += 2 + len;   // APPn/COM/DQT/DHT 等都按段长跳过（相机常见 EXIF 头）
+        }
+      }
+      return null;
+    }catch(e){ return null; }
+  })();
+}
+function compressImage(file, cb, wmText){
   const fail = () => cb(null);
   const draw = (src, w, h, release) => {
     try{
       const c = document.createElement("canvas");
       c.width = w; c.height = h;
-      c.getContext("2d").drawImage(src, 0, 0, w, h);
+      const ctx = c.getContext("2d");
+      ctx.drawImage(src, 0, 0, w, h);
+      // CF-WPS-97：水印在压缩后、编码前一步画上（只画一次；走 canvas 不增加额外解码）
+      if(wmText) drawPhotoWatermark(ctx, w, h, wmText);
       cb(c.toDataURL("image/jpeg", 0.7));
     }catch(e){ fail(); }
     finally{ try{ release && release(); }catch(e){} }
@@ -3077,7 +3141,11 @@ function compressImage(file, cb){
     (async () => {
       let src = null;
       try{
-        src = await createImageBitmap(file, { resizeWidth: PHOTO_MAX_EDGE, resizeQuality: "medium" });
+        // CF-WPS-97：先只读文件头探原始宽度 —— resizeWidth 对小于 800 的图是**放大**
+        // （微信转发图/截图被抬到 800px，糊且更占流量）；探不到才维持按 800 缩。
+        const pw = await probeImageWidth(file);
+        const rw = Math.max(1, Math.min(PHOTO_MAX_EDGE, pw || PHOTO_MAX_EDGE));
+        src = await createImageBitmap(file, { resizeWidth: rw, resizeQuality: "medium" });
         const sw = src.width || 1, sh = src.height || 1;
         // 兜底：个别内核会忽略 resize 选项而返回原尺寸 → 这里再收敛一次，
         // 保证 canvas 尺寸一定 ≤ PHOTO_MAX_EDGE（canvas 小，内存就不会爆）。
@@ -5577,11 +5645,12 @@ function pickHazardPhoto(input){
   if(!f) return;
   if(hazardForm.photos.length >= HAZARD_PHOTO_MAX){ flashMsg("最多上传 3 张照片"); return; }
   // CF-WPS-59/63：压缩失败 cb(null) —— 给人话提示，绝不写入坏 src 卡死流程
+  // CF-WPS-97：第三参带当日日期 → 照片右下角落水印（拍摄当日，取证用）
   compressImage(f, dataUrl => {
     if(!dataUrl){ flashMsg("照片读取失败，请重拍一次，或改用「从相册上传」"); return; }
     hazardForm.photos.push(dataUrl);
     renderHzPhotos();
-  });
+  }, photoWatermarkDate());
 }
 // 提交隐患：先传照片拿 file_token，再建记录（任何一步失败都不落半截记录）
 async function submitHazard(){
