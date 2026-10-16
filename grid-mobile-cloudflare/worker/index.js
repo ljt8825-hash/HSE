@@ -616,9 +616,9 @@ async function notifyAssign(env, cfg, o) {
 /*
  * 隐患指派成功后的微信通知（CF-WPS-100）。与 notifyAssign 同思路、但隐患文案独立：
  * 「网格巡查」与「隐患排查」是两个业务模块，推送文案不能混。
- * ⚠️ 整改人是从**全公司花名册**选的，而 WX UID 只存在于身份表（app 账号）——
- *    花名册有、身份表没有的人拿不到 uid → 返回 'no_uid'（指派本身照常成功，
- *    待办会在App内可见，只是没有微信提醒）。推送失败绝不影响指派结果。
+ * 整改人候选已限定为身份表中所属部门=安环管理部的账号，因此可用手机号查询 WX UID；
+ *    未绑定 WX UID 时返回 'no_uid'（指派本身照常成功，App 内待办仍可见）。
+ *    推送失败绝不影响指派结果。
  */
 async function notifyHazardAssign(env, cfg, o) {
   const src = o || {};
@@ -2868,7 +2868,7 @@ async function resolveViewScope(adapter, env, cfg, payload) {
 }
 
 // ============================================================================
-// CF-WPS-95 —— 隐患排查模块（仅「公司管理 × 安环管理部」账号可用）
+// CF-WPS-95/100/102 —— 隐患登记与整改闭环（仅安环管理部所属人员可用）
 // ----------------------------------------------------------------------------
 // 数据落独立飞书表「H5隐患排查台账表」（storage/index.js 按表名解析 table_id，
 // env FS_HAZARD_TABLE_ID 可覆盖）。与主台账（巡查）完全分离：
@@ -3073,14 +3073,13 @@ function hazardTimeCheck(v) {
 }
 function hazardTimeValid(v) { return hazardTimeCheck(v).ok; }
 
-// 角色门：仅「公司管理 × 安环管理部」。返回 null = 通过。
+// 部门门：仅「安环管理部」身份可使用隐患模块（含整改待办/提交）。返回 null = 通过。
 function hazardGate(env, payload, origin) {
   if (!env.WORKER_SESSION_SECRET) return errRes('SESSION_NOT_CONFIGURED', '会话密钥未配置', 503, corsHeaders(origin));
   if (!payload) return errRes('UNAUTHORIZED', '未认证或登录态失效', 401, corsHeaders(origin));
-  const roleOk = String((payload && payload.role) || '').trim() === '公司管理';
   const deptOk = String((payload && payload.department) || '').trim() === '安环管理部';
-  if (!roleOk || !deptOk) {
-    return errRes('FORBIDDEN_NOT_HAZARD_DEPT', '隐患排查功能仅对安环管理部账号开放', 403, corsHeaders(origin));
+  if (!deptOk) {
+    return errRes('FORBIDDEN_NOT_HAZARD_DEPT', '隐患整改闭环功能仅对安环管理部人员开放', 403, corsHeaders(origin));
   }
   return null;
 }
@@ -3304,8 +3303,8 @@ async function handleHazardSubmit(request, env, ctx) {
 // ---- GET /api/mobile/hazard/list：我的隐患（按排查时间倒序）----
 // scope=mine（默认）：仅本人登记的（安环部个人视角）
 // scope=all：全部记录（安环部部门视角，指派/验收管理用）。
-//   ⚠️ 该参数不给跨权限放大：hazardGate 已保证调用者必是「公司管理 × 安环管理部」，
-//      全公司隐患对本部门本就该可见；非安环部账号连门都进不来。
+//   ⚠️ 该参数不给跨权限放大：hazardGate 已保证调用者所属部门为安环管理部；
+//      全部隐患只对本部门开放，其他部门/作业中心无法进入。
 async function handleHazardList(request, env) {
   const origin = corsOrigin(request, env);
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
@@ -3341,10 +3340,7 @@ async function handleHazardList(request, env) {
   }
 }
 
-// ---- GET /api/mobile/hazard/detail?id=<recordId>：单条详情 ----
-// CF-WPS-100 起**不再整门 hazardGate**：整改人（全公司任选的结果，任何角色）也要能
-// 打开自己名下的隐患看「到底改什么」。权限收敛靠下面三选一归属校验
-//（登记人 / 整改人 / 安环管理部），比「整个部门都能看」更严也更准。
+// ---- GET /api/mobile/hazard/detail?id=<recordId>：单条详情（仅安环管理部）----
 async function handleHazardDetail(request, env) {
   const origin = corsOrigin(request, env);
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
@@ -3352,8 +3348,8 @@ async function handleHazardDetail(request, env) {
     const adapter = getAdapter(env);
     const cfg = await storageConfig(env);
     const payload = await verifyWorkerSession(bearerToken(request), env.WORKER_SESSION_SECRET);
-    if (!env.WORKER_SESSION_SECRET) return errRes('SESSION_NOT_CONFIGURED', '会话密钥未配置', 503, corsHeaders(origin));
-    if (!payload) return errRes('UNAUTHORIZED', '未认证或登录态失效', 401, corsHeaders(origin));
+    const denied = hazardGate(env, payload, origin);
+    if (denied) return denied;
 
     const tableId = String((cfg && cfg.hazardSheetId) || '').trim();
     if (!tableId) return errRes('HAZARD_TARGET_NOT_CONFIGURED', '隐患排查表未配置', 503, corsHeaders(origin));
@@ -3371,15 +3367,7 @@ async function handleHazardDetail(request, env) {
     }
     if (!hit) return errRes('NOT_FOUND', '记录不存在', 404, corsHeaders(origin));
     const item = mapHazardRecord(hit);
-    // 归属校验（CF-WPS-100 起三种人可见）：
-    //   ① 登记人本人；② 整改人（要看到底改什么）；③ 安环管理部（指派/验收需要）。
-    // 其余账号一律拒 —— 隐患内容含位置坐标，不是全公司可见的数据。
-    const isHazardDept = String((payload && payload.role) || '').trim() === '公司管理'
-      && String((payload && payload.department) || '').trim() === '安环管理部';
-    const me = String(payload.sub || '');
-    if (item.finderId !== me && item.rectifierId !== me && !isHazardDept) {
-      return errRes('FORBIDDEN', '只能查看本人登记或指派的隐患', 403, corsHeaders(origin));
-    }
+    // hazardGate 已限制为安环管理部，部门内可查看隐患详情用于管理与验收。
     return jsonRes({ success: true, code: 'OK', item }, 200, corsHeaders(origin));
   } catch {
     return errRes('INTERNAL_ERROR', '内部错误，请稍后再试', 500, corsHeaders(origin));
@@ -3387,20 +3375,18 @@ async function handleHazardDetail(request, env) {
 }
 
 /* ============================================================================
-   CF-WPS-100 隐患整改闭环（四接口）------------------------------------------------
+   CF-WPS-100/102 隐患整改闭环（四接口）------------------------------------------
    业务口径（2026-10-16 用户确认）：
-     · 指派对象 = 全公司任选（花名册搜索，不受组织层级限制）；
+     · 隐患闭环仅安环管理部内部使用，候选整改人也仅限安环管理部身份表账号；
      · 全部隐患都要安环管理部验收通过才闭环（无一般/重大分级豁免）；
      · 打回 = 回「待整改」重改，「打回次数」累加留痕。
    与巡查派发机器（TODO_FIELDS / patrolTarget 硬编码主台账）**完全独立**：
    隐患闭环只读写 hazard 表自己的列，不动巡查主链一根汗毛。
    ============================================================================ */
 
-// ---- GET /api/mobile/hazard/assignable?q=&limit=：隐患整改人候选（全公司账号）----
-// 与巡查派发的选人（组织层级收敛）不同：用户 2026-10-16 确认「全公司任选」——
-// 不按乡镇/下级收敛，但限定在**有 App 账号的人**（身份表，实测 72 人）：
-// 花名册 1372 人里绝大多数没账号，派给他们没人能登录看到待办（死单）。
-// 公司管理分级账号不当整改人（CF-WPS-58 口径），直接从候选里剔除。
+// ---- GET /api/mobile/hazard/assignable?q=&limit=：安环管理部内部整改人候选 ----
+// 仅从身份表中筛选安环管理部且有 App 账号的人；非安环部门/作业中心人员不进入闭环流程。
+// 部门内账号均可作为整改人，避免因分级筛除导致安环管理部没有可选人。
 async function handleHazardAssignable(request, env) {
   const origin = corsOrigin(request, env);
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
@@ -3419,7 +3405,7 @@ async function handleHazardAssignable(request, env) {
     try { idRows = await getIdentityRows(adapter, env, cfg.fileId, cfg.ledgerSheetId); }
     catch { return errRes('WPS_UPSTREAM_ERROR', '身份表暂不可用，请稍后再试', 502, corsHeaders(origin)); }
     const items = idRows.map(mapLedgerRecord)
-      .filter((r) => r.name && r.phone && !isCompanyGrade(r))
+      .filter((r) => r.name && r.phone && String(r.department || '').trim() === '安环管理部')
       .map((r) => ({ code: r.phone, name: r.name, dept: r.department, position: r.position }))
       .filter((r) => !q || r.name.toLowerCase().includes(q) || r.code.includes(q)
         || (r.dept || '').toLowerCase().includes(q) || (r.position || '').toLowerCase().includes(q))
@@ -3431,7 +3417,7 @@ async function handleHazardAssignable(request, env) {
   }
 }
 
-// ---- POST /api/mobile/hazard/assign：指派隐患整改（安环部 → 全公司任选）----
+// ---- POST /api/mobile/hazard/assign：指派隐患整改（仅限安环管理部内部）----
 // body: { record_id, assignee_id, deadline }（assignee_id = 手机号或工号）
 async function handleHazardAssign(request, env) {
   const origin = corsOrigin(request, env);
@@ -3479,9 +3465,8 @@ async function handleHazardAssign(request, env) {
       return errRes('HAZARD_STATUS_INVALID', '该隐患已闭环，不能指派', 409, corsHeaders(origin));
     }
 
-    // 整改人必须是**有 App 账号的人**（身份表），且全公司任选（不按组织层级收敛，
-    // 2026-10-16 用户确认）。2026-10-16 实测：身份表 72 个账号 / 花名册 1372 人 ——
-    // 花名册里绝大多数人没有账号，派给他们等于死单（没人能登录看到待办）。
+    // 整改人必须是身份表中的有效账号，且所属部门必须为安环管理部；
+    // 即使绕过候选列表直接构造请求，也不能把隐患派给其他部门或作业中心。
     let idRows;
     try { idRows = await getIdentityRows(adapter, env, cfg.fileId, cfg.ledgerSheetId); }
     catch { return errRes('WPS_UPSTREAM_ERROR', '身份表暂不可用，请稍后再试', 502, corsHeaders(origin)); }
@@ -3494,9 +3479,8 @@ async function handleHazardAssign(request, env) {
     if (!person.name || !person.phone) {
       return errRes('HAZARD_FIELD_INVALID', '整改人账号信息不完整，请重新选择', 400, corsHeaders(origin));
     }
-    // CF-WPS-58 口径：身份表「分级=公司管理」压过花名册职位，公司管理账号不当整改人
-    if (isCompanyGrade(person)) {
-      return errRes('FORBIDDEN', '公司管理账号不能作为整改人', 403, corsHeaders(origin));
+    if (String(person.department || '').trim() !== '安环管理部') {
+      return errRes('FORBIDDEN_NOT_HAZARD_DEPT', '整改人必须属于安环管理部', 403, corsHeaders(origin));
     }
 
     const rectifierId = person.phone;
@@ -3556,8 +3540,7 @@ async function handleHazardAssign(request, env) {
   }
 }
 
-// ---- GET /api/mobile/hazard/todos：派给我的隐患待办（任何登录账号）----
-// 整改人不限角色（全公司任选的结果），所以这里**不走 hazardGate**，只校验登录态。
+// ---- GET /api/mobile/hazard/todos：安环管理部内部整改待办 ----
 async function handleHazardTodos(request, env) {
   const origin = corsOrigin(request, env);
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
@@ -3565,7 +3548,8 @@ async function handleHazardTodos(request, env) {
     const adapter = getAdapter(env);
     const cfg = await storageConfig(env);
     const payload = await verifyWorkerSession(bearerToken(request), env.WORKER_SESSION_SECRET);
-    if (!payload) return errRes('UNAUTHORIZED', '未认证或登录态失效', 401, corsHeaders(origin));
+    const denied = hazardGate(env, payload, origin);
+    if (denied) return denied;
 
     const tableId = String((cfg && cfg.hazardSheetId) || '').trim();
     if (!tableId) return errRes('HAZARD_TARGET_NOT_CONFIGURED', '隐患排查表未配置', 503, corsHeaders(origin));
@@ -3599,7 +3583,8 @@ async function handleHazardRectify(request, env) {
     const adapter = getAdapter(env);
     const cfg = await storageConfig(env);
     const payload = await verifyWorkerSession(bearerToken(request), env.WORKER_SESSION_SECRET);
-    if (!payload) return errRes('UNAUTHORIZED', '未认证或登录态失效', 401, corsHeaders(origin));
+    const denied = hazardGate(env, payload, origin);
+    if (denied) return denied;
 
     const tableId = String((cfg && cfg.hazardSheetId) || '').trim();
     if (!tableId) return errRes('HAZARD_TARGET_NOT_CONFIGURED', '隐患排查表未配置', 503, corsHeaders(origin));
@@ -4585,11 +4570,11 @@ export default {
     if (p === '/api/mobile/patrol/submit') return handlePatrolSubmit(request, env, ctx);
     if (p === '/api/mobile/patrol/attach') return handlePatrolAttach(request, env);
     if (p === '/api/mobile/patrol/records') return handlePatrolRecords(request, env);
-    // CF-WPS-95：隐患排查（仅 公司管理 × 安环管理部；角色门在 handler 内，服务端为准）
+    // CF-WPS-95/100/102：隐患登记与整改闭环（所属部门=安环管理部；部门门禁在 handler 内）
     if (p === '/api/mobile/hazard/submit') return handleHazardSubmit(request, env, ctx);
     if (p === '/api/mobile/hazard/list') return handleHazardList(request, env);
     if (p === '/api/mobile/hazard/detail') return handleHazardDetail(request, env);
-    // CF-WPS-100：隐患整改闭环（assign/review 走 hazardGate；todos/rectify 只校验登录态）
+    // CF-WPS-100/102：隐患整改闭环全部路由均在 handler 内经 hazardGate 限定安环管理部
     if (p === '/api/mobile/hazard/assignable') return handleHazardAssignable(request, env);
     if (p === '/api/mobile/hazard/assign') return handleHazardAssign(request, env);
     if (p === '/api/mobile/hazard/todos') return handleHazardTodos(request, env);

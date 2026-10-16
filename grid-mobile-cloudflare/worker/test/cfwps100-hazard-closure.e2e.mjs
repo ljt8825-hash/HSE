@@ -1,6 +1,7 @@
 // CF-WPS-100：隐患整改闭环回归测试。
 // 背景（2026-10-16 用户确认的设计）：
-//   · 指派对象 = 全公司账号任选（不按组织层级收敛）；
+//   · 隐患登记、查看、指派、待办、整改提交、验收均仅限安环管理部内部；
+//   · 指派对象仅限身份表所属部门为安环管理部的账号；
 //   · 全部隐患都要安环管理部验收通过才闭环；打回回「待整改」并累加打回次数；
 //   · 状态机：待整改 →（整改人提交）→ 待验收 →（安环部通过）→ 已闭环。
 // 结构：
@@ -45,11 +46,13 @@ ck('整改进展卡展示整改后照片（复用带登录态取图）',
 ck('整改后照片也带当日水印（CF-WPS-97 机制复用）',
   (html.match(/\}, photoWatermarkDate\(\)\);/g) || []).length === 2);
 
-// ---- 前端门禁：待办两屏任何人都能进，指派/验收仍只归安环部 ----
-ck('HAZARD_VIEWS 含 assign/review（安环部专属）',
-  /const HAZARD_VIEWS = \[[^\]]*"hazard-assign"[^\]]*"hazard-review"/.test(html));
-ck('HAZARD_TODO_VIEWS 不含 assign/review（指派人也能进）',
-  /const HAZARD_TODO_VIEWS = \["hazard-todos", "hazard-rectify"\]/.test(html));
+// ---- 前端门禁：所有隐患管理/待办/整改页面均只对安环管理部开放 ----
+ck('HAZARD_VIEWS 覆盖管理、待办、整改全部页面',
+  /const HAZARD_VIEWS = \[[^\]]*"hazard-assign"[^\]]*"hazard-review"[^\]]*"hazard-todos"[^\]]*"hazard-rectify"/.test(html));
+ck('非安环账号的我的页不显示隐患待办入口',
+  /async function refreshMeHazardEntry\(\)[\s\S]{0,240}!isHazardUser\(\)/.test(html));
+ck('showView 对所有隐患页面统一做安环部门门禁',
+  /function showView\(name\)[\s\S]{0,500}HAZARD_VIEWS\.indexOf\(name\) >= 0 && !isHazardUser\(\)/.test(html));
 
 // ---- Worker 侧 ----
 for (const h of ['handleHazardAssign', 'handleHazardAssignable', 'handleHazardTodos',
@@ -65,22 +68,28 @@ ck('三个写路由进 PWD_GUARDED_ROUTES（初始密码不可写）',
     .every((s) => workerSrc.includes(s)));
 ck('assignable/todos 是读接口、不进写门禁',
   !workerSrc.includes("'/api/mobile/hazard/assignable', '/api/mobile/hazard/rectify'"));
-ck('assign/review 走 hazardGate（服务端角色门，安环部专属）',
-  /async function handleHazardAssign[\s\S]{0,900}const denied = hazardGate/.test(workerSrc)
-  && /async function handleHazardReview[\s\S]{0,900}const denied = hazardGate/.test(workerSrc));
-ck('rectify/todos 只校验登录态（整改人不限角色）',
-  /async function handleHazardRectify[\s\S]{0,700}if \(!payload\) return errRes\('UNAUTHORIZED'/.test(workerSrc)
-  && /async function handleHazardTodos[\s\S]{0,700}if \(!payload\) return errRes\('UNAUTHORIZED'/.test(workerSrc));
-ck('指派校验整改人须是身份表账号（花名册没账号的人派了=死单）',
+ck('登记/详情/候选/指派/待办/整改/验收均经过 hazardGate',
+  ['handleHazardSubmit', 'handleHazardList', 'handleHazardDetail', 'handleHazardAssignable',
+    'handleHazardAssign', 'handleHazardTodos', 'handleHazardRectify', 'handleHazardReview']
+    .every((h) => new RegExp('async function ' + h + '[\\s\\S]{0,1800}const denied = hazardGate').test(workerSrc)));
+ck('hazardGate 按安环管理部部门授权，不要求公司管理角色',
+  workerSrc.includes("String((payload && payload.department) || '').trim() === '安环管理部'")
+  && !/function hazardGate[\\s\\S]{0,700}roleOk/.test(workerSrc));
+ck('指派候选只含身份表内安环管理部账号',
+  workerSrc.includes("String(r.department || '').trim() === '安环管理部'")
+  && workerSrc.includes('整改人必须属于安环管理部'));
+ck('指派仍验证整改人必须是身份表有效账号',
   workerSrc.includes('getIdentityRows(adapter, env, cfg.fileId, cfg.ledgerSheetId)')
   && workerSrc.includes('整改人不是有效账号，请从候选人列表选择'));
-ck('指派拒公司管理账号当整改人（CF-WPS-58 口径）',
-  /async function handleHazardAssign[\s\S]{0,4000}公司管理账号不能作为整改人/.test(workerSrc));
 ck('指派状态守卫：待验收/已闭环不能改派',
   workerSrc.includes('整改已提交、正在等待验收，不能改派')
   && workerSrc.includes('该隐患已闭环，不能指派'));
-ck('rectify 归属校验：只有整改人能提交',
-  workerSrc.includes('只有整改人可以提交整改'));
+ck('rectify 归属校验：只有本部门指派整改人能提交',
+  workerSrc.includes('只有整改人可以提交整改')
+  && /async function handleHazardRectify[\s\S]{0,900}const denied = hazardGate/.test(workerSrc));
+ck('detail 由安环部门门统一授权，不向登记人/其他部门放宽',
+  /async function handleHazardDetail[\s\S]{0,1100}const denied = hazardGate/.test(workerSrc)
+  && !workerSrc.includes('item.finderId !== me && item.rectifierId !== me'));
 ck('review 状态守卫：只有待验收能验收',
   workerSrc.includes('整改尚未提交') && workerSrc.includes('该隐患已闭环')
   && workerSrc.includes("'，不能验收'"));
@@ -91,8 +100,9 @@ ck('review 通过写闭环时间',
 ck('mapHazardRecord 扩展闭环字段（rectifyPhotoTokens/overdue/rejectCount）',
   workerSrc.includes('rectifyPhotoTokens: hazardPhotoTokens(f, HAZARD_FIELDS.rectifyPhotos)')
   && workerSrc.includes('overdue: hazardOverdue(status, deadline)'));
-ck('detail 归属放宽为三种人（登记人/整改人/安环部）',
-  workerSrc.includes('item.finderId !== me && item.rectifierId !== me && !isHazardDept'));
+ck('前端角色判断以安环管理部所属部门为准',
+  /function isHazardUser\(\)\{[\s\S]{0,180}session\.dept[\s\S]{0,100}安环管理部/.test(html)
+  && !/function isHazardUser\(\)\{[\s\S]{0,180}session\.role/.test(html));
 ck('闭环列幂等补建（换 base / 手工删列不 1254045）',
   workerSrc.includes('async function ensureHazardRectFields'));
 ck('指派成功后微信通知整改人（独立文案，不混网格巡查）',
@@ -107,7 +117,12 @@ try {
   sk('worker 导出 import', e.message);
 }
 if (mod) {
-  const { hazardDeadlineCheck, hazardStatusNorm, hazardOverdue, cnToday } = mod;
+  const { hazardDeadlineCheck, hazardStatusNorm, hazardOverdue, cnToday, hazardGate } = mod;
+  const gateEnv = { WORKER_SESSION_SECRET: 'test-secret' };
+  ck('安环部非公司管理角色也通过部门门', hazardGate(gateEnv,
+    { role: '管理员', department: '安环管理部' }, '') === null);
+  ck('其他部门公司管理角色仍被拒', hazardGate(gateEnv,
+    { role: '公司管理', department: '环卫作业中心' }, '').status === 403);
   // 期限校验
   ck('deadline 合法明天', hazardDeadlineCheck(cnToday().replace(/(\d{4})-(\d{2})-(\d{2})/, (m, y, mo, d) => {
     const t = new Date(Date.UTC(+y, +mo - 1, +d) + 86400000);
@@ -141,7 +156,7 @@ if (!live || !mod) {
   sk('E2E 全链路', !live ? '本地 Worker 不在线（' + BASE + '）' : 'worker 导出不可用');
 } else {
   const { signJwtHs256 } = mod;
-  // 测试账号（身份表实测：72 个账号；刘金涛=公司管理，马金华=管理员）
+  // 测试账号：刘金涛、孟祥宇属于安环管理部；张秋生属于其他部门。
   const A_DEPT = '安环管理部';
   // ⚠️ 伪造 token 用的 secret 必须与本地 wrangler dev 的 WORKER_SESSION_SECRET 一致，
   //    否则验签失败全 401。secret 从 worker/.dev.vars 读（测试库专用）。
@@ -165,10 +180,9 @@ if (!live || !mod) {
     let j = null; try { j = await r.json(); } catch { /* 非 JSON */ }
     return { status: r.status, body: j };
   };
-  const A = await tok('13385340822', '刘金涛', A_DEPT, '公司管理');        // 安环部
-  const R = await tok('13774955144', '马金华', '宁城街道一班', '管理员');   // 整改人
-  const X = await tok('13969270399', '张秋生', '津城街道一班', '管理员');   // 无关账号
-  const C = await tok('15621259666', '张康', A_DEPT, '公司管理');          // 另一个公司管理
+  const A = await tok('13385340822', '刘金涛', A_DEPT, '公司管理');        // 安环部登记/验收
+  const R = await tok('17515036348', '孟祥宇', A_DEPT, '公司管理');         // 安环部内部整改人
+  const X = await tok('13969270399', '张秋生', '津城街道一班', '管理员');   // 其他部门账号
 
   const created = [];
   try {
@@ -186,24 +200,27 @@ if (!live || !mod) {
     ck('返回 recordId', !!recId, recId);
     if (recId) created.push(recId);
 
-    // 2) 指派给马金华（明天到期）
+    // 2) 指派给安环部内部整改人孟祥宇（明天到期）
     const tm = new Date(Date.now() + 86400000);
     const deadline = `${tm.getFullYear()}-${pad(tm.getMonth() + 1)}-${pad(tm.getDate())}`;
     const as = await api('POST', '/api/mobile/hazard/assign', {
-      record_id: recId, assignee_id: '13774955144', deadline,
+      record_id: recId, assignee_id: '17515036348', deadline,
     }, A);
-    ck('指派 200 且整改人马金华', as.status === 200 && as.body && as.body.item
-      && as.body.item.rectifierName === '马金华' && as.body.item.deadline === deadline
+    ck('指派 200 且整改人为安环部孟祥宇', as.status === 200 && as.body && as.body.item
+      && as.body.item.rectifierName === '孟祥宇' && as.body.item.deadline === deadline
       && as.body.item.status === '待整改', as.body && as.body.item);
+    const cand = await api('GET', '/api/mobile/hazard/assignable', undefined, A);
+    ck('候选人仅限安环管理部，包含孟祥宇、不含外部门张秋生', cand.status === 200
+      && (cand.body.items || []).some((x) => x.code === '17515036348')
+      && !(cand.body.items || []).some((x) => x.code === '13969270399')
+      && (cand.body.items || []).every((x) => x.dept === A_DEPT), cand.body && cand.body.items);
 
-    // 3) 整改人看到待办
+    // 3) 安环管理部内部整改人看到待办；其他部门不能调用待办接口
     const td = await api('GET', '/api/mobile/hazard/todos', undefined, R);
-    ck('整改人待办含本记录', td.status === 200 && (td.body.items || []).some((x) => x.recordId === recId),
+    ck('安环部整改人待办含本记录', td.status === 200 && (td.body.items || []).some((x) => x.recordId === recId),
       td.body && (td.body.items || []).length);
-
-    // 4) 无关账号看不到
     const tdX = await api('GET', '/api/mobile/hazard/todos', undefined, X);
-    ck('无关账号待办为空', tdX.status === 200 && (tdX.body.items || []).length === 0);
+    ck('其他部门不能读取隐患待办（403）', tdX.status === 403);
 
     // 5) 整改人提交 → 待验收
     const rf = await api('POST', '/api/mobile/hazard/rectify', { record_id: recId, note: '已更换护罩' }, R);
@@ -235,15 +252,21 @@ if (!live || !mod) {
     ck('重复验收 409', ps2.status === 409);
 
     // 11) 权限/参数负例
-    ck('整改人不能指派（403）', (await api('POST', '/api/mobile/hazard/assign',
-      { record_id: recId, assignee_id: '13774955144', deadline }, R)).status === 403);
-    ck('整改人不能验收（403）', (await api('POST', '/api/mobile/hazard/review',
-      { record_id: recId, action: 'pass' }, R)).status === 403);
-    ck('无关账号不能提交整改（403）', (await api('POST', '/api/mobile/hazard/rectify',
+    ck('其他部门不能指派（403）', (await api('POST', '/api/mobile/hazard/assign',
+      { record_id: recId, assignee_id: '17515036348', deadline }, X)).status === 403);
+    ck('其他部门不能验收（403）', (await api('POST', '/api/mobile/hazard/review',
+      { record_id: recId, action: 'pass' }, X)).status === 403);
+    ck('其他部门不能提交整改（403）', (await api('POST', '/api/mobile/hazard/rectify',
       { record_id: recId }, X)).status === 403);
-    ck('无关账号不能看详情（403）', (await api('GET', '/api/mobile/hazard/detail?id=' + recId, undefined, X)).status === 403);
+    ck('其他部门不能看详情（403）', (await api('GET', '/api/mobile/hazard/detail?id=' + recId, undefined, X)).status === 403);
+    ck('其他部门不能查看隐患列表（403）', (await api('GET', '/api/mobile/hazard/list', undefined, X)).status === 403);
+    ck('其他部门不能登记隐患（403）', (await api('POST', '/api/mobile/hazard/submit', {
+      category: '设备设施', level: '一般隐患', description: '越权测试', find_time: findTime,
+      client_request_id: 'e2e100x' + Date.now().toString(36),
+    }, X)).status === 403);
+    ck('其他部门不能取整改候选人（403）', (await api('GET', '/api/mobile/hazard/assignable', undefined, X)).status === 403);
     const rd = await api('GET', '/api/mobile/hazard/detail?id=' + recId, undefined, R);
-    ck('整改人可以看详情（200）', rd.status === 200, rd.body && rd.body.message);
+    ck('安环部内部整改人可以看详情（200）', rd.status === 200, rd.body && rd.body.message);
     ck('安环部可以看任何人详情（200）', (await api('GET', '/api/mobile/hazard/detail?id=' + recId, undefined, A)).status === 200);
     // 12) 指派负例要在**仍处于待整改**的记录上验（已闭环记录会先被状态守卫拦成 409，
     //     验证不到后面的参数/账号校验）→ 现开一条专门给负例用。
@@ -254,15 +277,15 @@ if (!live || !mod) {
     const rec3 = (sub3.body && sub3.body.recordIds && sub3.body.recordIds[0]) || '';
     if (rec3) created.push(rec3);
     ck('截止昨天被拒（400）', (await api('POST', '/api/mobile/hazard/assign',
-      { record_id: rec3, assignee_id: '13774955144', deadline: '2020-01-01' }, A)).status === 400);
+      { record_id: rec3, assignee_id: '17515036348', deadline: '2020-01-01' }, A)).status === 400);
     ck('期限格式错被拒（400）', (await api('POST', '/api/mobile/hazard/assign',
-      { record_id: rec3, assignee_id: '13774955144', deadline: '明天' }, A)).status === 400);
+      { record_id: rec3, assignee_id: '17515036348', deadline: '明天' }, A)).status === 400);
     ck('花名册外手机号被拒（400）', (await api('POST', '/api/mobile/hazard/assign',
       { record_id: rec3, assignee_id: '19900000000', deadline }, A)).status === 400);
-    ck('公司管理账号不能被派（403）', (await api('POST', '/api/mobile/hazard/assign',
-      { record_id: rec3, assignee_id: '15621259666', deadline }, A)).status === 403);
+    ck('其他部门人员不能被派（403）', (await api('POST', '/api/mobile/hazard/assign',
+      { record_id: rec3, assignee_id: '13969270399', deadline }, A)).status === 403);
     ck('已闭环记录不能再指派（409）', (await api('POST', '/api/mobile/hazard/assign',
-      { record_id: recId, assignee_id: '13774955144', deadline }, A)).status === 409);
+      { record_id: recId, assignee_id: '17515036348', deadline }, A)).status === 409);
 
     // 12b) 待验收记录不能改派：现开一条 → 指派 → 整改人提交 → 再指派应 409
     const sub4 = await api('POST', '/api/mobile/hazard/submit', {
@@ -271,27 +294,29 @@ if (!live || !mod) {
     }, A);
     const rec4 = (sub4.body && sub4.body.recordIds && sub4.body.recordIds[0]) || '';
     if (rec4) created.push(rec4);
-    await api('POST', '/api/mobile/hazard/assign', { record_id: rec4, assignee_id: '13774955144', deadline }, A);
+    await api('POST', '/api/mobile/hazard/assign', { record_id: rec4, assignee_id: '17515036348', deadline }, A);
     await api('POST', '/api/mobile/hazard/rectify', { record_id: rec4 }, R);
     ck('待验收记录不能改派（409）', (await api('POST', '/api/mobile/hazard/assign',
       { record_id: rec4, assignee_id: '13969270399', deadline }, A)).status === 409);
 
-    // 13) 改派链路：新建一条 → 指派马金华 → 改派张秋生，确认整改人切换
+    // 13) 改派链路：安环部内部改派给另一名安环部人员，非安环人员不能成为整改人
     const sub2 = await api('POST', '/api/mobile/hazard/submit', {
       category: '消防安全', level: '重大隐患', description: 'CF-WPS-100 改派测试（可删）',
       find_time: findTime, client_request_id: 'e2e100b' + Date.now().toString(36),
     }, A);
     const rec2 = (sub2.body && sub2.body.recordIds && sub2.body.recordIds[0]) || '';
     if (rec2) created.push(rec2);
-    const as2 = await api('POST', '/api/mobile/hazard/assign', { record_id: rec2, assignee_id: '13774955144', deadline }, A);
-    ck('第二次指派成功', as2.status === 200);
-    const as3 = await api('POST', '/api/mobile/hazard/assign', { record_id: rec2, assignee_id: '13969270399', deadline }, C);
-    ck('改派给张秋生（另一安环部账号也可指派）', as3.status === 200 && as3.body && as3.body.item
-      && as3.body.item.rectifierId === '13969270399', as3.body && as3.body.item);
-    const td2 = await api('GET', '/api/mobile/hazard/todos', undefined, X);
+    const as2 = await api('POST', '/api/mobile/hazard/assign', { record_id: rec2, assignee_id: '17515036348', deadline }, A);
+    ck('安环部内部指派成功', as2.status === 200);
+    const as3 = await api('POST', '/api/mobile/hazard/assign', { record_id: rec2, assignee_id: '13385340822', deadline }, R);
+    ck('安环部内部改派成功', as3.status === 200 && as3.body && as3.body.item
+      && as3.body.item.rectifierId === '13385340822', as3.body && as3.body.item);
+    const td2 = await api('GET', '/api/mobile/hazard/todos', undefined, A);
     ck('改派后新整改人看到待办', td2.status === 200 && (td2.body.items || []).some((x) => x.recordId === rec2));
     const td3 = await api('GET', '/api/mobile/hazard/todos', undefined, R);
     ck('改派后旧整改人不再看到', !(td3.body.items || []).some((x) => x.recordId === rec2));
+    ck('安环部不能把隐患改派给其他部门（403）', (await api('POST', '/api/mobile/hazard/assign',
+      { record_id: rec2, assignee_id: '13969270399', deadline }, A)).status === 403);
 
     // 13) scope=all 含两条测试记录
     const all = await api('GET', '/api/mobile/hazard/list?scope=all', undefined, A);

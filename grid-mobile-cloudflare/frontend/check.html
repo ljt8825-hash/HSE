@@ -7,7 +7,7 @@
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-10-16.101">
+<meta name="hse-build" content="2026-10-16.108">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -101,15 +101,20 @@
      列表行主标题有 21/20/19/17 四个值。用户看到的「同功能大小不一致」正源于此。
      现按视觉层级收敛为 6 级，**组件只准引用这 6 个变量**。
      映射规则：同类语义 → 取原值中出现频次最高的那个作为定值。
+     ---- 屏幕自适应（2026-10-16）------------------------------------------------
+     定值 px 在不同宽度的手机上观感不一：320px 窄屏偏大、430px 宽屏偏小。
+     现改为 clamp(下限, vw, 上限) 流式取值：以 390px 视口为设计基准（vw 恰好等于原 px），
+     320px 触底不再缩小、≥390px 封顶保持原设计值 —— 组件引用方式不变，全局生效。
+     注意：这只解决「屏幕宽度」差异；系统大字体缩放由 tab 栏 / 高度令牌的弹性改造兜底。
      -------------------------------------------------------------------------- */
-  --fs-hero:30px;     /* 主视觉（首页姓名、HSE 看板标题）—— 全站仅 2 处 */
-  --fs-h1:26px;       /* 大数字 / 页面级标题（统计数、分组标签、完成页大标题） */
-  --fs-h2:24px;       /* 区块标题（选择块、大按钮 CTA、记录卡标题） */
-  --fs-btn:22px;      /* 按钮文字 / 次要标题 */
-  --fs-title:20px;    /* 列表行主标题（乡镇名 / 人名）/ 输入框文字 ← 原 21/20/19/17 合并 */
-  --fs-body:15px;     /* 正文、菜单项、次级信息 ← 原 16/15/14 合并（14 出现最多） */
-  --fs-sub:13px;      /* 副标题 / 说明 / 徽章 */
-  --fs-cap:11px;      /* 最小字号（底部导航标签） */
+  --fs-hero:clamp(24px, 7.7vw, 30px);  /* 主视觉（首页姓名、HSE 看板标题）—— 全站仅 2 处 */
+  --fs-h1:clamp(21px, 6.7vw, 26px);    /* 大数字 / 页面级标题（统计数、分组标签、完成页大标题） */
+  --fs-h2:clamp(19px, 6.2vw, 24px);    /* 区块标题（选择块、大按钮 CTA、记录卡标题） */
+  --fs-btn:clamp(18px, 5.65vw, 22px);  /* 按钮文字 / 次要标题 */
+  --fs-title:clamp(16px, 5.15vw, 20px);/* 列表行主标题（乡镇名 / 人名）/ 输入框文字 ← 原 21/20/19/17 合并 */
+  --fs-body:clamp(12px, 3.85vw, 15px); /* 正文、菜单项、次级信息 ← 原 16/15/14 合并（14 出现最多） */
+  --fs-sub:clamp(11px, 3.35vw, 13px);  /* 副标题 / 说明 / 徽章 */
+  --fs-cap:clamp(9px, 2.85vw, 11px);   /* 最小字号（底部导航标签） */
   --h-cta:190px;      /* 主操作大按钮（拍现场照片 / 拍整改后照片 / 开始检查）—— 三个同类按钮统一同高
                          （改版前：首页 190 / 现场拍照 150 / 整改后拍照 140，同类三值） */
   --h-photo:180px;    /* 照片预览区空框高度 —— 拍现场 / 拍整改后两处统一
@@ -256,7 +261,9 @@ textarea.hz-input{height:auto;padding:10px var(--pad-card);line-height:1.6;resiz
   font-size:var(--fs-sub);color:var(--t3)}
 .hz-review-bar{display:flex;gap:8px;margin-top:12px}
 .hz-review-bar>button{flex:1}
-.big-cta{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--cta-icon-gap);height:var(--h-cta);border-radius:var(--r-card);background:var(--primary);color:#fff;cursor:pointer;border:none;box-shadow:0 10px 24px -4px rgba(29,78,216,.3)}
+/* 2026-10-16：height → min-height —— 系统大字体放大图标/文字时按钮能撑高不裁切；
+   正常字体下内容 ≈150px < 190px，仍由 min-height 定高，外观不变。 */
+.big-cta{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--cta-icon-gap);min-height:var(--h-cta);border-radius:var(--r-card);background:var(--primary);color:#fff;cursor:pointer;border:none;box-shadow:0 10px 24px -4px rgba(29,78,216,.3)}
 .big-cta:active{transform:scale(.985)}
 .big-cta:disabled{background:#B6C4E8;box-shadow:none}
 /* 「开始检查」专用：图标 + 文字左右排列（其他 big-cta 拍现场/拍整改后仍保持竖排）*/
@@ -362,13 +369,17 @@ textarea.hz-input{height:auto;padding:10px var(--pad-card);line-height:1.6;resiz
   background:linear-gradient(180deg,rgba(245,244,241,0) 0%,var(--bg) 36%);pointer-events:none}
 .tabbar-wrap .tabbar{pointer-events:auto}
 /* CF-WPS-45：底部导航由 4 个 tab 增到 5 个（新增「派发记录」），左右内边距 24px→12px。
-   360px 窄屏下 5 个 tab 的内可用宽度 = 360-32(wrap)-24(tabbar) = 304px，
-   最宽的标签「派发记录 / 整改任务 / 巡查台账」4 字 ×11px = 44px 仍有余量，不会换行。
-   注意 .tab-item 是 flex 项、min-width:auto，不会被压到换行；角标 right:-6px 溢出可见。 */
+   屏幕自适应 + 系统大字体兜底（2026-10-16）：
+   · .tab-item 改 flex:1 1 0 + min-width:0 —— 每个 tab 严格等分导航栏宽度，
+     标签再宽也不会把相邻 tab 挤走（旧行为 min-width:auto + 内容超宽时，
+     各标签横向溢出自己的槽位、互相粘连成一串，见 2026-10-16 真机截图事故）；
+   · 标签统一缩为 2 字（派发/整改/台账），叠加 --fs-cap 的 clamp 下限，
+     320px 窄屏 + 系统字体放大 1.5x 时单标签 ≈31px << 等分槽位 ≈53px，仍放得下；
+   · 角标 right:-6px 溢出可见 —— .tab-item 不加 overflow:hidden，避免裁掉角标。 */
 .tabbar{height:var(--h-tabbar);background:var(--card);border:1px solid var(--line);border-radius:var(--r-card);display:flex;align-items:stretch;justify-content:space-evenly;padding:0 12px;box-shadow:0 6px 18px -8px rgba(0,0,0,.18)}
-/* white-space:nowrap 是给现场安卓机留的余量：系统字体缩放会把 11px 渲染得更大，
+/* white-space:nowrap 是给现场安卓机留的余量：系统字体缩放会把标签渲染得更大，
    一旦标签被压到换行，5 个 tab 的导航栏高度会被撑破。禁止换行是唯一安全解。 */
-.tab-item{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:var(--fs-cap);color:var(--t4);cursor:pointer;border:none;background:none;font-family:inherit;position:relative;white-space:nowrap}
+.tab-item{flex:1 1 0;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:var(--fs-cap);color:var(--t4);cursor:pointer;border:none;background:none;font-family:inherit;position:relative;white-space:nowrap}
 .tab-item.active{color:var(--primary);font-weight:600}
 .tab-item svg{width:var(--icon-glyph);height:var(--icon-glyph)}
 /* CF-WPS-40：底部 tab 红色未读角标。此前 setBadge() 调用的三个 id 在 DOM 里都不存在，
@@ -390,14 +401,16 @@ textarea.hz-input{height:auto;padding:10px var(--pad-card);line-height:1.6;resiz
 .photo-box:empty{display:none}
 .photo-thumb{width:var(--icon-thumb);height:var(--icon-thumb);border-radius:var(--r-card);object-fit:cover;flex:none}
 .stat-row{display:flex;gap:var(--gap)}
-/* 统计卡与入口卡同高（原 78 / 76 两个值 → 统一 --h-entry） */
-.stat-card{flex:1;height:var(--h-entry);border-radius:var(--r-card);background:var(--card);border:1px solid var(--line);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px}
+/* 统计卡与入口卡同高（原 78 / 76 两个值 → 统一 --h-entry）。
+   2026-10-16：height → min-height —— 系统大字体把卡内文字放大时卡片能跟着撑高，
+   否则大数字会溢出 78px 固定高度；正常字体下内容不足 78px，外观与原固定高完全一致。 */
+.stat-card{flex:1;min-height:var(--h-entry);border-radius:var(--r-card);background:var(--card);border:1px solid var(--line);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px}
 .stat-card.drillable{cursor:pointer}
 .stat-card.drillable:active{transform:scale(.97)}
 .stat-card .num{font-size:var(--fs-h1);font-weight:700}
 .stat-card .lab{font-size:var(--fs-sub);color:var(--t3)}
 .entry-row{display:flex;gap:var(--gap)}
-.entry-card{flex:1;height:var(--h-entry);border-radius:var(--r-card);background:var(--card);border:1px solid var(--line);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;font-size:var(--fs-body);font-weight:600;cursor:pointer;position:relative}
+.entry-card{flex:1;min-height:var(--h-entry);border-radius:var(--r-card);background:var(--card);border:1px solid var(--line);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;font-size:var(--fs-body);font-weight:600;cursor:pointer;position:relative}
 .entry-card:active{transform:scale(.97)}
 .entry-card .badge{position:absolute;top:8px;right:10px;min-width:var(--icon-badge);height:var(--icon-badge);border-radius:var(--r-pill);background:var(--danger);color:#fff;font-size:var(--fs-cap);font-weight:600;display:flex;align-items:center;justify-content:center;padding:0 6px}
 /* CF-WPS-91：首页待办提醒里**可点**的那几行。
@@ -501,6 +514,23 @@ textarea.hz-input{height:auto;padding:10px var(--pad-card);line-height:1.6;resiz
   border-radius:50%;animation:hseSpin .7s linear infinite}
 #hse-busy .busy-txt{font-size:var(--fs-body);font-weight:600;color:var(--t1);text-align:center}
 #hse-busy .busy-sub{font-size:var(--fs-cap);color:var(--t3);text-align:center;margin-top:-4px}
+/* ===== 落表悬浮加载窗（CF-WPS-106）=====
+   终屏（检查完成）出现即弹：半透明深色浮层像加载窗一样大字跟随上报进度——
+   很多人看完「检查完成」直接关页，等不到点「返回首页」，所以触发时机必须在终屏渲染瞬间；
+   落定后原地切换结果态（成功绿勾 / 失败原因）并自动淡出。
+   非阻断：容器 pointer-events:none，弱网下用户仍可正常操作（保住「可先返回」语义）；
+   点浮层卡片可提前收起。深色半透明卡在浅色主题与 Chrome 强制深色下均可读。 */
+#h5-sync-float{position:fixed;inset:0;z-index:9998;display:flex;align-items:flex-start;justify-content:center;
+  pointer-events:none;padding-top:calc(11vh + env(safe-area-inset-top))}
+#h5-sync-float>div{pointer-events:auto;min-width:230px;max-width:78vw;
+  background:rgba(17,24,39,.88);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
+  border-radius:16px;padding:24px 28px;display:flex;flex-direction:column;align-items:center;gap:10px;
+  box-shadow:0 12px 32px rgba(0,0,0,.35);animation:hsePop .16s cubic-bezier(.2,.8,.3,1)}
+#h5-sync-float .sf-ico{font-size:36px;line-height:1;font-weight:700}
+#h5-sync-float .sf-spin{width:30px;height:30px;border:3px solid rgba(255,255,255,.25);border-top-color:#fff;
+  border-radius:50%;animation:hseSpin .7s linear infinite}
+#h5-sync-float .sf-txt{font-size:var(--fs-title);font-weight:600;color:#fff;text-align:center;line-height:1.45}
+#h5-sync-float .sf-sub{font-size:var(--fs-cap);color:rgba(255,255,255,.72);text-align:center;line-height:1.5}
 /* 离线模式顶部提示（现场断网凭缓存身份进入时显示） */
 #offline-bar{position:fixed;top:0;left:0;right:0;z-index:9998;background:var(--warn-soft);color:#92400E;font-size:var(--fs-body);font-weight:600;text-align:center;padding:10px 16px calc(10px + env(safe-area-inset-top))}
 /* file input 专用：视觉隐藏但保持渲染。不能用 display:none —— 老版 X5/部分安卓 WebView
@@ -593,8 +623,8 @@ textarea.hz-input{height:auto;padding:10px var(--pad-card);line-height:1.6;resiz
       <div style="font-size:var(--fs-body);font-weight:600;margin-bottom:6px">待办提醒</div>
       <div id="todo-list" style="font-size:var(--fs-body);color:var(--t2);line-height:1.9"></div>
     </div>
-    <!-- CF-WPS-95：隐患排查入口。仅「公司管理 × 安环管理部」账号显示（isHazardUser），
-         接口侧同一道角色门（服务端为准，前端隐藏可被改 JS 绕过）。 -->
+    <!-- CF-WPS-95/102：隐患排查与整改闭环入口，仅所属部门=安环管理部的账号显示；
+         Worker 接口按可信登录态部门字段再次校验。 -->
     <div class="card" id="hazard-entry-card" style="display:none;cursor:pointer">
       <div style="display:flex;align-items:center;gap:var(--gap)">
         <div style="width:44px;height:44px;border-radius:var(--r-card);background:var(--warn-soft);display:flex;align-items:center;justify-content:center;flex:0 0 44px">
@@ -1053,8 +1083,8 @@ textarea.hz-input{height:auto;padding:10px var(--pad-card);line-height:1.6;resiz
       </div>
       <div style="font-size:var(--fs-sub);color:var(--t3);margin-top:2px">查看下属网格员的检查记录与闭环进度</div>
     </div>
-    <!-- CF-WPS-100：「派给我的隐患」入口（隐患整改待办，任何账号都可能有）。
-         没有待办时整卡隐藏；条数由 /api/mobile/hazard/todos 实时拉取。 -->
+    <!-- CF-WPS-100/102：「派给我的隐患」入口仅供安环管理部内部人员处理部门内任务。
+         没有待办时整卡隐藏；非安环人员无此入口也无对应接口权限。 -->
     <div class="card" style="cursor:pointer;display:none" id="btn-me-hazard-todo">
       <div style="display:flex;align-items:center;justify-content:space-between">
         <div style="font-size:var(--fs-title);font-weight:600">派给我的隐患</div>
@@ -1087,7 +1117,7 @@ textarea.hz-input{height:auto;padding:10px var(--pad-card);line-height:1.6;resiz
   </div>
 </section>
 
-<!-- ============ CF-WPS-95：隐患排查（仅 公司管理 × 安环管理部） ============ -->
+<!-- ============ CF-WPS-95/102：隐患排查与整改闭环（仅安环管理部） ============ -->
 <section class="view" id="view-hazard-list">
   <div class="statusbar"></div>
   <div class="navbar">
@@ -1157,7 +1187,7 @@ textarea.hz-input{height:auto;padding:10px var(--pad-card);line-height:1.6;resiz
   </div>
 </section>
 
-<!-- ============ CF-WPS-100：指派整改（安环部；全公司账号任选 + 期限） ============ -->
+<!-- ============ CF-WPS-100/102：指派整改（安环部内部 + 期限） ============ -->
 <section class="view" id="view-hazard-assign">
   <div class="statusbar"></div>
   <div class="navbar">
@@ -1170,7 +1200,7 @@ textarea.hz-input{height:auto;padding:10px var(--pad-card);line-height:1.6;resiz
     </div>
     <div class="card">
       <div class="field-label">整改人 <span class="hz-req">*</span></div>
-      <div class="field-sub">全公司账号任选（有 App 账号的人才能收到待办）</div>
+      <div class="field-sub">仅可指派给安环管理部内部人员</div>
       <input class="hz-input" id="hz-assign-q" style="margin-top:8px" maxlength="32" placeholder="搜索姓名 / 手机号 / 部门">
       <div id="hz-assign-cands"></div>
     </div>
@@ -1183,7 +1213,7 @@ textarea.hz-input{height:auto;padding:10px var(--pad-card);line-height:1.6;resiz
   </div>
 </section>
 
-<!-- ============ CF-WPS-100：派给我的隐患（整改人待办，任何账号） ============ -->
+<!-- ============ CF-WPS-100/102：安环管理部内部隐患整改待办 ============ -->
 <section class="view" id="view-hazard-todos">
   <div class="statusbar"></div>
   <div class="navbar">
@@ -1255,20 +1285,22 @@ textarea.hz-input{height:auto;padding:10px var(--pad-card);line-height:1.6;resiz
   </div>
 </section>
 
-<!-- ============ 底部导航（全局常驻：首页 / 任务反馈 / 巡查台账 / 我的） ============ -->
+<!-- ============ 底部导航（全局常驻：首页 / 派发 / 整改 / 巡查台账 / 我的）
+     2026-10-16 屏幕适配：页签标签统一缩为 2 字（派发/整改/台账），
+     页内导航栏标题（nav-title）保持原全称不变，只动页签。 ============ -->
 <div class="tabbar-wrap hidden" id="tabbar-wrap">
   <div class="tabbar" id="tabbar">
     <button class="tab-item active" data-tab="home">
       <svg viewBox="0 0 24 24" fill="none"><path d="M3 10.5L12 3l9 7.5V21a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1v-10.5z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>首页
     </button>
     <button class="tab-item" data-tab="dispatch" id="tab-dispatch" style="display:none">
-      <svg viewBox="0 0 24 24" fill="none"><path d="M21.5 2.5L10.5 13.5M21.5 2.5l-7 19-4-8-8-4 19-7z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="tab-dispatch-label">派发记录</span><span class="tab-badge" id="badge-dispatch"></span>
+      <svg viewBox="0 0 24 24" fill="none"><path d="M21.5 2.5L10.5 13.5M21.5 2.5l-7 19-4-8-8-4 19-7z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="tab-dispatch-label">派发</span><span class="tab-badge" id="badge-dispatch"></span>
     </button>
     <button class="tab-item" data-tab="my-rectify" id="tab-rectify">
-      <svg viewBox="0 0 24 24" fill="none"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="tab-rectify-label">整改任务</span><span class="tab-badge" id="badge-rectify"></span>
+      <svg viewBox="0 0 24 24" fill="none"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="tab-rectify-label">整改</span><span class="tab-badge" id="badge-rectify"></span>
     </button>
     <button class="tab-item" data-tab="my-checks">
-      <svg viewBox="0 0 24 24" fill="none"><rect x="3.5" y="3.5" width="6.5" height="6.5" rx="1" stroke="currentColor" stroke-width="1.8"/><rect x="14" y="3.5" width="6.5" height="6.5" rx="1" stroke="currentColor" stroke-width="1.8"/><rect x="3.5" y="14" width="6.5" height="6.5" rx="1" stroke="currentColor" stroke-width="1.8"/><rect x="14" y="14" width="6.5" height="6.5" rx="1" stroke="currentColor" stroke-width="1.8"/></svg>巡查台账<span class="tab-badge" id="badge-checks"></span>
+      <svg viewBox="0 0 24 24" fill="none"><rect x="3.5" y="3.5" width="6.5" height="6.5" rx="1" stroke="currentColor" stroke-width="1.8"/><rect x="14" y="3.5" width="6.5" height="6.5" rx="1" stroke="currentColor" stroke-width="1.8"/><rect x="3.5" y="14" width="6.5" height="6.5" rx="1" stroke="currentColor" stroke-width="1.8"/><rect x="14" y="14" width="6.5" height="6.5" rx="1" stroke="currentColor" stroke-width="1.8"/></svg>台账<span class="tab-badge" id="badge-checks"></span>
     </button>
     <button class="tab-item" data-tab="me">
       <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.8"/><path d="M4 21c1.5-3.5 4.5-5 8-5s6.5 1.5 8 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>我的
@@ -1283,8 +1315,8 @@ textarea.hz-input{height:auto;padding:10px var(--pad-card);line-height:1.6;resiz
      读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
    - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
    - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
-<script src="./config.js?v=2026-10-16.101"></script>
-<script src="./app.js?v=2026-10-16.101"></script>
+<script src="./config.js?v=2026-10-16.108"></script>
+<script src="./app.js?v=2026-10-16.108"></script>
 <script>
 /* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
 (function(){
@@ -1704,6 +1736,7 @@ function loadDB(){
    策略：① 先整体试写；② 失败则瘦身——丢掉**已上报（syncState==='synced'）**
    记录的照片（照片已在服务端，本机只需留记录文本）；③ 仍失败就放弃本次落盘，但不抛错。 */
 function saveDB(){
+  bgScheduleMirror();   // CF-WPS-105：db 变化 → 重镜像关页补传队列（执行时读最新 db，先排程即可）
   try{ localStorage.setItem(STORE_KEY, JSON.stringify(db)); return true; }
   catch(e){}
   try{
@@ -1837,12 +1870,10 @@ let checkFlowDone = false;
 const H5_NAV_ID = Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
 function showView(name){
   name = String(name || "").replace(/^view-/, "");   // 个别调用传了「view-」前缀（原实现会取错元素直接报错）
-  // CF-WPS-95：隐患排查三屏只对「公司管理 × 安环管理部」开放。
-  // 必须拦在 showView 这一层：data-back 返回箭头与 popstate 都经过这里
-  // （只拦 enterHome 会被绕过，见文件头 CF-WPS-61 同款教训）。
-  // 服务端接口同一道角色门，这里只是体验层捷径。
+  // CF-WPS-95/100/102：隐患模块的管理页、待办、详情和整改页均仅对安环管理部开放。
+  // 必须拦在 showView 入口，覆盖 data-back 返回箭头与 popstate；服务端接口也做同一部门校验。
   if(HAZARD_VIEWS.indexOf(name) >= 0 && !isHazardUser()){
-    flashMsg("隐患排查功能仅对安环管理部账号开放");
+    flashMsg("隐患整改闭环功能仅对安环管理部人员开放");
     enterHome();
     return;
   }
@@ -1958,6 +1989,7 @@ function enterOffline(){
   session = cached;
   STORE_KEY = "hse_check_v1_" + session.id;
   loadDB();
+  bgMergeFromMirror().then(() => bgScheduleMirror());   // CF-WPS-105：离线进入也合并 SW 夜间落表结果
   renderOfflineBar();
   enterHome();
   return true;
@@ -2002,6 +2034,9 @@ async function boot(){
   }
   STORE_KEY = "hse_check_v1_" + session.id; // 记录按登录账号隔离
   loadDB();
+  // CF-WPS-105：先合并 SW 关页补传的落表结果（夜间自动补传），再重建镜像/注册 sync
+  await bgMergeFromMirror();
+  bgScheduleMirror();
   clearPickCache();
   // CF-WPS-61：仍在用初始密码 → 强制先改密，改完才能进首页
   // （放在 /me 之后、进首页之前：新登录 / 刷新 / 重开三条路都会经过这里）
@@ -2088,7 +2123,8 @@ function renderIdentity(){
   $("#home-avatar").textContent = session.name[0];
   // 经理：下属检查入口在「我的」页；公司管理人员整改任务 Tab 显示"任务反馈"
   $("#btn-me-sub").style.display = session.role === "经理" ? "" : "none";
-  $("#tab-rectify-label").textContent = session.role === "公司管理" ? "任务反馈" : "整改任务";
+  // （2026-10-16 屏幕适配：页签标签统一 2 字，防系统大字体下横向溢出）
+  $("#tab-rectify-label").textContent = session.role === "公司管理" ? "反馈" : "整改";
   applyDispatchTabGate();   // CF-WPS-45：「派发记录」页签只给会派发的角色（公司管理 / 经理）
   // 强制刷新按钮：解决「页面卡在旧 JS / 旧组织树缓存」—— 现场人员极少主动重开浏览器，
   //   加这个按钮等于「一键等价于关闭重开」。
@@ -4005,6 +4041,7 @@ async function syncRecordOnce(rec, assignTo){
     if(res.ok){
       rec.syncState = "synced";
       rec.syncError = null;
+      rec.syncedAt = Date.now();   // CF-WPS-103：落表时间（徽标 title / 终屏「✓ 已落」据此显示）
       rec.serverRecordId = res.recordId;
       rec.deduplicated = !!res.deduplicated;
       if(assignTo && assignTo.assignee_id) rec.assignedToServer = res.assigned;   // CF-WPS-43 建单即指派
@@ -4049,6 +4086,226 @@ function retryPendingSync(){
   p.catch(() => {}).finally(() => { if(retrySyncInFlight === p) retrySyncInFlight = null; });
   return p;
 }
+// 轻提示条（CF-WPS-103，3s 自动消失）：补传成功这类「用户必须知道、但不必打断操作」的反馈
+function syncToast(msg){
+  try{
+    let t = document.getElementById("h5-sync-toast");
+    if(!t){
+      t = document.createElement("div");
+      t.id = "h5-sync-toast";
+      t.style.cssText = "position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:9999;background:#065F46;color:#fff;font-size:13px;padding:8px 14px;border-radius:999px;box-shadow:0 4px 14px rgba(0,0,0,.18);max-width:86vw;text-align:center;line-height:1.5";
+      document.body.appendChild(t);
+    }
+    t.textContent = msg;
+    t.style.display = "block";
+    clearTimeout(t._tm);
+    t._tm = setTimeout(() => { t.style.display = "none"; }, 3000);
+  }catch(e){ /* 静默：提示条失败不影响主流程 */ }
+}
+/* ---- 落表悬浮加载窗（CF-WPS-106）：终屏出现即弹，醒目跟随上报进度 ----
+   很多人看完「检查完成」直接关页，等不到点「返回首页」——所以浮层在终屏渲染瞬间就弹，
+   关页前至少看得到进度（关页后由 CF-WPS-105 关页补传兜底）。
+   · 非阻断：容器 pointer-events:none，不挡用户继续操作；点卡片可提前收起；
+   · 复用 syncRecord 单飞锁 —— 这里的 .then 只是等结果，绝不重复提交；
+   · 只有「终屏出现」这条路触发（boot/轮询补传仍走 syncToast，不弹大窗打扰）。 */
+function syncFloatEl(){
+  let f = document.getElementById("h5-sync-float");
+  if(!f){
+    f = document.createElement("div");
+    f.id = "h5-sync-float";
+    f.innerHTML = "<div></div>";
+    document.body.appendChild(f);
+  }
+  return f;
+}
+function syncFloatPaint(rec, mode){   // mode: "load"（转圈跟随）| "done"（按 rec.syncState 渲染结果态）
+  const card = syncFloatEl().firstElementChild;
+  if(mode === "load"){
+    card.innerHTML = '<div class="sf-spin"></div>' +
+      '<div class="sf-txt">正在上报到飞书多维表格…</div>' +
+      '<div class="sf-sub">弱网时较慢 · 记录已存本机不会丢</div>';
+  } else if(rec.syncState === "synced"){
+    card.innerHTML = '<div class="sf-ico" style="color:#4ADE80">✓</div>' +
+      '<div class="sf-txt">已落到飞书多维表格' + (rec.syncedAt ? "（" + fmtTime(rec.syncedAt).slice(11) + "）" : "") + "</div>" +
+      '<div class="sf-sub">点击任意处继续</div>';
+  } else {
+    card.innerHTML = '<div class="sf-ico" style="color:#F87171">⚠</div>' +
+      '<div class="sf-txt">暂未上报：' + esc(rec.syncError || "网络异常") + "</div>" +
+      '<div class="sf-sub">记录已保存在本机，网络恢复后自动补传，无需重复填写</div>';
+  }
+}
+function syncFloatShow(rec, mode){    // 弹出/刷新；点卡片立即收起
+  const f = syncFloatEl();
+  clearTimeout(f._tm); clearTimeout(f._out);
+  f.style.display = "flex"; f.style.opacity = ""; f.style.transition = "";
+  syncFloatPaint(rec, mode);
+  f.firstElementChild.onclick = () => syncFloatHide(0);
+}
+function syncFloatHide(delayMs){
+  const f = syncFloatEl();
+  clearTimeout(f._tm); clearTimeout(f._out);
+  f._tm = setTimeout(() => {
+    f.style.transition = "opacity .2s"; f.style.opacity = "0";
+    f._out = setTimeout(() => { f.style.display = "none"; f.style.opacity = ""; f.style.transition = ""; }, 220);
+  }, delayMs || 0);
+}
+function syncFloatFollow(rec){        // 终屏渲染即调：已落表→结果快闪；未落表→转圈跟随到落定
+  try{
+    if(rec.syncState === "synced"){
+      syncFloatShow(rec, "done");
+      syncFloatHide(1800);
+      return;
+    }
+    syncFloatShow(rec, "load");
+    syncRecord(rec).then(() => {      // failed 也会再试一次（单飞锁复用在途请求，绝不重复提交）
+      syncFloatShow(rec, "done");
+      syncFloatHide(rec.syncState === "synced" ? 2000 : 4500);
+    });
+  }catch(e){ /* 静默：浮层失败不影响主流程 */ }
+}
+/* ================= 关页补传镜像层（CF-WPS-105，Background Sync 方案一） =================
+   场景：乡镇弱网提交失败 → 用户关页走人 → 晚上回家连上 WiFi，Chrome 唤醒 Service
+   Worker 重放「静默重登 → 照片上传 → 建单」，全程无需打开页面（用户确认方案一）。
+   SW 读不到 localStorage ⇒ 镜像两样东西到 IndexedDB：待传队列（含照片 dataURL）+
+   会话/凭据。铁律：
+   · 镜像只在「合并完成」之后重建（bgMerging 互斥），绝不覆盖 SW 夜间落表结果；
+   · 提交载荷在页面侧用 toPatrolBody 固化（含当时的网格解析/照片 token 状态），SW 只做
+     HTTP 重放，不重复实现业务；
+   · 幂等由 client_request_id 保证（服务端先查后写），页面与 SW 并发重放绝不建重单；
+   · Firefox/iOS 无 SyncManager → 注册静默跳过，一切退回「打开页面补传」现状（CF-WPS-103）。 */
+const BG_IDB_NAME = "hse-bg-sync", BG_IDB_STORE = "kv";
+function bgIdbOpen(){
+  return new Promise((resolve) => {
+    try{
+      const rq = indexedDB.open(BG_IDB_NAME, 1);
+      rq.onupgradeneeded = () => { try{ rq.result.createObjectStore(BG_IDB_STORE); }catch(e){} };
+      rq.onsuccess = () => resolve(rq.result);
+      rq.onerror = () => resolve(null);
+    }catch(e){ resolve(null); }
+  });
+}
+async function bgIdbSet(key, val){
+  const d = await bgIdbOpen(); if(!d) return;
+  try{
+    await new Promise((res, rej) => {
+      const tx = d.transaction(BG_IDB_STORE, "readwrite");
+      tx.objectStore(BG_IDB_STORE).put(val, key);
+      tx.oncomplete = res; tx.onerror = () => rej(tx.error); tx.onabort = () => rej(tx.error);
+    });
+  }catch(e){ /* 存储不可用：关页补传静默降级为「打开页面补传」 */ }
+}
+async function bgIdbGet(key){
+  const d = await bgIdbOpen(); if(!d) return undefined;
+  try{
+    return await new Promise((res, rej) => {
+      const tx = d.transaction(BG_IDB_STORE, "readonly");
+      const rq = tx.objectStore(BG_IDB_STORE).get(key);
+      rq.onsuccess = () => res(rq.result); tx.onerror = () => rej(tx.error); tx.onabort = () => rej(tx.error);
+    });
+  }catch(e){ return undefined; }
+}
+// 本机记录 → SW 可重放条目：载荷固化 + 照片（dataURL）+ 建单即指派的 assign 块。
+// needUpload 对齐页面口径（photoFp 不匹配=换过图 → 旧 token 作废，SW 必须重传）。
+function bgBuildEntry(r){
+  if(!r || r.fromServer || r.syncState === "synced") return null;
+  const needUpload = !!r.scenePhoto && (!r.photoToken || r.photoTokenFp !== photoFp(r.scenePhoto));
+  const bodyBase = toPatrolBody(needUpload ? Object.assign({}, r, { photoToken: null }) : r);
+  return {
+    id: r.id,
+    state: "pending",          // SW 侧独立状态：pending | synced | failed（合并时对齐回 rec.syncState）
+    error: null,
+    ts: Date.now(),
+    body: bodyBase,
+    assign: (r._pendingAssign && !r.assignedToServer) ? r._pendingAssign : null,
+    photo: r.scenePhoto ? { dataUrl: r.scenePhoto, cid: "H5P-" + (r.clientRequestId || r.id), needUpload: needUpload } : null,
+  };
+}
+let bgMirrorTimer = 0, bgMirroring = false, bgMirrorSig = "";
+function bgScheduleMirror(){
+  if(bgMirrorTimer) clearTimeout(bgMirrorTimer);
+  bgMirrorTimer = setTimeout(() => { bgMirrorTimer = 0; bgMirrorQueue(); }, 1200);
+}
+async function bgMirrorQueue(){
+  if(bgMirroring) return;
+  bgMirroring = true;
+  try{
+    // 先取旧镜像：SW 已定态（synced/failed）的结果必须保留，直到「打开页面合并回写」消费掉——
+    // 否则页面每次失败重试的 saveDB 都会把 SW 夜间落表结果覆盖回 pending（CF-WPS-105 验证中实测发现）。
+    const priorArr = await bgIdbGet("queue");
+    const priorMap = {};
+    if(Array.isArray(priorArr)) for(const p of priorArr){ if(p && p.id && p.state !== "pending") priorMap[p.id] = p; }
+    const entries = [];
+    for(const r of (db.records || [])){
+      const e = bgBuildEntry(r); if(!e) continue;
+      const pv = priorMap[e.id];
+      if(pv){ e.state = pv.state; e.error = pv.error; e.serverRecordId = pv.serverRecordId; e.syncedAt = pv.syncedAt; e.assigned = pv.assigned; }
+      entries.push(e);
+    }
+    const sig = JSON.stringify(entries);
+    if(sig !== bgMirrorSig){ bgMirrorSig = sig; await bgIdbSet("queue", entries); }
+    // 会话/凭据镜像（SW 关页后自行静默重登；凭据仅本机，与「记住我」同源同权，未勾选则为 null）
+    await bgIdbSet("session", { token: getToken(), exp: getSessionExp(), creds: loadLoginCreds() });
+    if(entries.length) bgRegisterSync();
+    if(entries.some(e => { const r = db.records.find(x => x && x.id === e.id); return r && r.syncState === "failed"; })) bgArmNotifyAsk();
+  }catch(e){ /* 静默 */ }
+  finally { bgMirroring = false; }
+}
+// 注册 Background Sync（Chromium 系生效；Firefox/iOS 无 sync API → 静默跳过）
+async function bgRegisterSync(){
+  try{
+    if(!("serviceWorker" in navigator)) return;
+    const reg = await navigator.serviceWorker.ready;
+    if(!reg.sync || typeof reg.sync.register !== "function") return;
+    await reg.sync.register("hse-patrol-sync");
+  }catch(e){ /* 静默 */ }
+}
+// 合并 SW 夜间落表结果 → 本机 db（打开页面时执行；只升级不降级：synced 恒采纳，failed 仅覆盖 pending）
+let bgMerging = false;
+async function bgMergeFromMirror(){
+  if(bgMerging) return;
+  bgMerging = true;
+  try{
+    const q = await bgIdbGet("queue");
+    if(Array.isArray(q) && q.length && db && Array.isArray(db.records)){
+      let syncedChanged = 0, failedChanged = 0;
+      for(const e of q){
+        if(!e || !e.id || e.state === "pending") continue;
+        const rec = db.records.find(r => r && r.id === e.id);
+        if(!rec || rec.fromServer || rec.syncState === "synced") continue;
+        if(e.state === "synced"){
+          rec.syncState = "synced"; rec.syncError = null;
+          rec.serverRecordId = e.serverRecordId || rec.serverRecordId;
+          rec.syncedAt = e.syncedAt || Date.now();
+          if(e.assigned) rec.assignedToServer = true;
+          syncedChanged++;
+        } else if(e.state === "failed" && rec.syncState === "pending"){
+          rec.syncState = "failed"; rec.syncError = e.error || "上报失败，请到「巡查台账」重试";
+          failedChanged++;
+        }
+      }
+      // 成功/失败分开计——failed 只是同步「失败原因」，绝不弹「已补传」成功提示（验证用例3 实测发现）
+      if(syncedChanged || failedChanged){
+        saveDB();
+        if(syncedChanged) syncToast("✓ 已补传 " + syncedChanged + " 条记录到飞书台账");
+      }
+    }
+  }catch(e){ /* 静默 */ }
+  finally { bgMerging = false; }
+}
+// 通知授权（方案二兜底的前置）：requestPermission 必须借用户手势 —— 武装一次性捕获点击，
+// 仅在出现「试过但失败」的记录后触发一次，不做任何打扰式弹窗。
+let bgNotifyArmed = false;
+function bgArmNotifyAsk(){
+  try{
+    if(bgNotifyArmed || !("Notification" in window) || Notification.permission !== "default") return;
+    bgNotifyArmed = true;
+    const ask = () => {
+      document.removeEventListener("click", ask, true);
+      try{ const p = Notification.requestPermission(); if(p && p.catch) p.catch(() => {}); }catch(e){}
+    };
+    document.addEventListener("click", ask, true);
+  }catch(e){}
+}
 async function retryPendingSyncOnce(){
   // CF-WPS-90：整改人本机暂存的整改后照片（派发记录不在 db.records，单靠下面的循环覆盖不到）
   //   先跑一遍补挂；没有待传的会立刻返回，不产生网络请求。
@@ -4076,6 +4333,10 @@ async function retryPendingSyncOnce(){
       }
     }
   }
+  // CF-WPS-103：落表反馈 —— 自动补传成功几条就明确告诉用户「已落到台账」，
+  // 夜里打开页面 boot 补传成功的场景尤其需要（此前静默成功，用户无从得知）。
+  const landed = pend.filter(r => r.syncState === "synced").length;
+  if(landed > 0) syncToast("✓ 已补传 " + landed + " 条记录到飞书台账");
   renderSyncBar();
   // 只在本页可见时重渲染 —— 否则每次进首页都会白拉一次台账
   if(viewStack[viewStack.length - 1] === "my-checks") renderMyChecks();
@@ -4094,6 +4355,25 @@ function renderSyncBar(){
   bar.innerHTML = '<span>有 ' + pend.length + " 条记录待上报" + (failed ? "（" + failed + " 条上次失败）" : "") +
     '，点击重试</span><span style="font-weight:600">重试</span>';
   bar.onclick = () => retryPendingSync();
+}
+/* ---- 落表状态行（CF-WPS-103）：终屏实时反馈「是否已落到飞书多维表格」 ----
+   弱网场景（乡镇巡查）下用户最关心「这条记录到底进表没有」：
+   · pending  → 正在上报（弱网较慢，明说可先返回、记录已存本机）；
+   · synced   → ✓ 已落到飞书多维表格（含落表时间 syncedAt）；
+   · failed   → 暂未上报 + 真实原因 + 安心话（已存本机、自动补传、无需重复填写）。
+   渲染后若未定态，attachDoneSyncLine 挂 syncRecord 完成回调原地刷新 ——
+   终屏从此不再是「一成不变的未上报」。 */
+function doneSyncLineHtml(rec){
+  if(rec.syncState === "synced") return '<span style="color:var(--success);font-weight:600">✓ 已落到飞书多维表格' + (rec.syncedAt ? "（" + fmtTime(rec.syncedAt).slice(11) + "）" : "") + "</span>";
+  if(rec.syncState === "failed") return '<span style="color:var(--danger)">⚠ 暂未上报：' + esc(rec.syncError || "网络异常") + '<br><span style="color:var(--t3)">记录已保存在本机，网络恢复后自动补传（下次打开也会自动上传），无需重复填写</span></span>';
+  return '<span style="color:#B45309;font-weight:600">正在上报到飞书多维表格…（弱网时较慢，可先返回，记录已存本机不会丢）</span>';
+}
+// 未定态时挂回调：syncRecord 有单飞锁，这里只是复用在途请求、绝不重复提交
+function attachDoneSyncLine(rec, el){
+  if(!rec.syncState || rec.syncState === "synced") return;
+  syncRecord(rec).then(() => {
+    if(el.isConnected) el.innerHTML = doneSyncLineHtml(rec);   // 用户已离开终屏则丢弃
+  });
 }
 function showDone(rec, title){
   // 终屏守卫 checkFlowDone 由 renderView("done") 统一置位（见 renderView 内注释），
@@ -4120,14 +4400,12 @@ function showDone(rec, title){
       rows.push('<div class="info-line" style="color:var(--danger)">⚠ 指派未送达：' + esc(rec.assignError) + "</div>");
     }
   }
-  // CF-WPS-84：整条记录没同步成功时，把**真实原因**（syncError）摆到终屏上。
-  // 以前终屏只显示「指派未送达 + 请到台账补传」，可遇到「网格未解析/现场照片上传失败」
-  // 这类重试一万次也不会好的硬失败，用户被误导去反复点补传（本地实测：测试账号没配
-  // 花名册 → 网格恒为空 → 每条提交都注定失败，终屏却让用户「补传后重新指派」）。
-  // 台账页顶部的「待上报」条本来就是给 rec.syncError 的口径，这里对齐。
-  if(rec.syncState && rec.syncState !== "synced"){
-    rows.push('<div class="info-line" style="color:var(--danger)">⚠ 记录未上报：' +
-      esc(rec.syncError || "未知原因，请到「巡查台账」重试") + "</div>");
+  // CF-WPS-103：落表状态行（替代 CF-WPS-84 的静态 ⚠ 行）。
+  // 提交是后台异步的，终屏渲染瞬间 syncState 多半还是 pending —— 旧行把 pending 也
+  // 写成「⚠ 记录未上报：未知原因」且此后**永不更新**，用户每次提交都看到「未上报」，
+  // 弱网下更是无从判断记录到底落没落飞书台账。现在渲染即显真实状态。
+  if(rec.syncState){
+    rows.push('<div class="info-line" id="done-sync-line">' + doneSyncLineHtml(rec) + "</div>");
   }
   // CF-WPS-87：原记录没上报、但整改后照片已拍 ⇒ 明确告诉用户照片**没丢**，
   //   免得以为白干一场。照片已随记录暂存本机，原记录补传成功后会一并补挂。
@@ -4135,6 +4413,9 @@ function showDone(rec, title){
     rows.push('<div class="info-line" style="color:var(--t3)">整改照片已暂存本机，原记录补传成功后会一并上传</div>');
   }
   c.innerHTML = rows.join("");
+  const dsl = $("#done-sync-line");
+  if(dsl) attachDoneSyncLine(rec, dsl);   // CF-WPS-103：未定态时挂回调，落表后原地刷新
+  syncFloatFollow(rec);   // CF-WPS-106：终屏出现即弹浮层跟随落表（很多人看完「检查完成」直接关页，等不到点返回）
   $("#btn-done-home").onclick = () => { enterHome(); };
   showView("done");
 }
@@ -4156,15 +4437,17 @@ function statusChip(rec){
   return '<span class="chip green"><span class="dot"></span>已完成</span>';
 }
 function fmtTime(t){ const d = new Date(t); return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0") + " " + String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0"); }
-// 上报状态徽标（服务端落库状态；synced 是常态，不在卡片上占视觉）
+// 上报状态徽标（服务端落库状态；CF-WPS-103 文案对齐「落表」语义，回应现场用户的
+// 「怎么知道记录有没有落到飞书多维表格」：已落台账 / 待补传（失败过）/ 待上报（排队中）。
+// synced 是常态，不在卡片上占视觉）
 function syncChip(rec){
   // CF-WPS-79：上级指派来的服务端待办（fromServer）根本没有「本机上报」这回事 ——
   // 它本来就在飞书台账里（是别人建的单）。todoToRec 不带 syncState，以前会落到最后一行
   // 显示「上报中」⇒「我的整改」里每条指派任务都挂着一个假徽标（实测确认）。
   if(rec.fromServer) return "";
-  if(rec.syncState === "synced") return '<span class="chip green" title="已上报飞书台账"><span class="dot"></span>已上报</span>';
-  if(rec.syncState === "failed") return '<span class="chip red" title="' + esc(rec.syncError || "上报失败") + '"><span class="dot"></span>待补传</span>';
-  return '<span class="chip yellow"><span class="dot"></span>上报中</span>';
+  if(rec.syncState === "synced") return '<span class="chip green" title="已写入飞书多维表格' + (rec.syncedAt ? " · " + fmtTime(rec.syncedAt) : "") + '"><span class="dot"></span>已落台账</span>';
+  if(rec.syncState === "failed") return '<span class="chip red" title="' + esc(rec.syncError || "上报失败") + '（已存本机，网络恢复后自动补传）"><span class="dot"></span>待补传</span>';
+  return '<span class="chip yellow" title="已保存在本机，等待网络可用后自动上报"><span class="dot"></span>待上报</span>';
 }
 function recordCard(rec, opts){
   opts = opts || {};
@@ -4796,7 +5079,7 @@ function sceneReplaceBox(rec, from, after, opts){
   const box = mk('<div class="card" style="display:flex;flex-direction:column;gap:8px"></div>');
   box.appendChild(mk('<div style="display:flex;justify-content:space-between;align-items:center">' +
     '<span style="font-size:var(--fs-body);font-weight:600">' + (addMode ? "补传现场照片" : "换一张现场照片") + '</span>' +
-    '<span style="font-size:var(--fs-sub);color:var(--t3)">' + (rec.serverRecordId ? "已上报" : "未上报") + "</span></div>"));
+    '<span style="font-size:var(--fs-sub);color:var(--t3)">' + (rec.serverRecordId ? "已落台账" : "待上报") + "</span></div>"));
   const acts = mk('<div class="btn-stack"></div>');
   const btnCam = mk('<button class="btn-ghost btn-row" style="justify-content:center">拍现场照片</button>');
   const btnAlb = mk('<button class="btn-ghost btn-row" style="justify-content:center">从相册上传</button>');
@@ -5265,6 +5548,12 @@ document.addEventListener("DOMContentLoaded", () => {
   };
   window.addEventListener("online", tryAutoSync);   // 网络一恢复立即补传
   setInterval(tryAutoSync, 40000);                  // 兜底：页面开着但网络悄然恢复（未触发 online）时，每 40s 试一次
+  // CF-WPS-103：切回页面立即补传 —— 锁屏/切走再回来（或晚上到家打开）不用等 40s 轮询，
+  // 弱网兜底提速；与下面 25s inbox 轮询的 visibilitychange 同一套路。
+  document.addEventListener("visibilitychange", () => {
+    // CF-WPS-105：切回时顺带合并 SW 关页补传的落表结果并刷新镜像
+    if(!document.hidden){ tryAutoSync(); bgMergeFromMirror(); bgScheduleMirror(); }
+  });
 
   // CF-WPS：被指派后实时刷新（无需退出重登）。
   // 之前只在进首页/进 my-rectify 才拉 inbox + 算角标，停留在页面上的用户
@@ -5468,6 +5757,7 @@ document.addEventListener("DOMContentLoaded", () => {
           assignee_id: node.phone, assignee_name: node.name,
           town: draft.transferTown || "", note: (rec.behavior || "三违") + " · 请限期整改",
         } : null;
+        rec._pendingAssign = (assignTo && assignTo.assignee_id) ? assignTo : null;   // CF-WPS-105：镜像给 SW 关页补传复用（建单即指派）
         await syncRecord(rec, assignTo);
         let assigned = rec.assignedToServer === true, why = "";
         if(!rec.serverRecordId) why = "记录尚未同步到服务端，请到「巡查台账」补传后重新指派";
@@ -5535,7 +5825,12 @@ document.addEventListener("DOMContentLoaded", () => {
     c.innerHTML = '<div style="font-size:var(--fs-body);font-weight:600;color:var(--primary)">记录编号　' + rec.no + "</div>" +
       '<div class="info-line">三违行为：' + esc(rec.behavior) + "</div>" +
       '<div class="info-line">违章人员：' + esc(rec.personName || "未指定") + "</div>" +
-      '<div class="info-line">状态：<span style="color:var(--danger);font-weight:600">未完成</span>　请到「巡查台账」继续整改</div>';
+      '<div class="info-line">状态：<span style="color:var(--danger);font-weight:600">未完成</span>　请到「巡查台账」继续整改</div>' +
+      // CF-WPS-103：落表状态行与 showDone 同口径（弱网下用户同样需要知道落没落表）
+      (rec.syncState ? '<div class="info-line" id="done-sync-line">' + doneSyncLineHtml(rec) + "</div>" : "");
+    const dslLater = $("#done-sync-line");
+    if(dslLater) attachDoneSyncLine(rec, dslLater);
+    syncFloatFollow(rec);   // CF-WPS-106：同 showDone 主路径——终屏出现即弹
     $("#btn-done-home").onclick = () => { enterHome(); };
     showView("done");
   };
@@ -5616,7 +5911,10 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#btn-hz-rectify-ok").onclick = () => submitHazardRectify();
   // CF-WPS-100：「我的」页「派给我的隐患」入口
   const todoCard = $("#btn-me-hazard-todo");
-  if(todoCard) todoCard.onclick = () => { showView("hazard-todos"); renderHazardTodos(); };
+  if(todoCard) todoCard.onclick = () => {
+    if(!isHazardUser()) return;
+    showView("hazard-todos"); renderHazardTodos();
+  };
 });
 
 // CF-WPS-100：隐患列表 scope 切换 + 验收分段切换（挂在 document 上，
@@ -5637,30 +5935,22 @@ document.addEventListener("click", e => {
   }
 });
 
-/* ================= CF-WPS-95/96：隐患排查（仅 公司管理 × 安环管理部） =================
-   业务口径（用户确认 2026-10-16）：
-     · 入口只给「公司管理」里「安环管理部」的人（身份表分级压过花名册职位）；
+/* ================= CF-WPS-95/96/100/102：隐患排查与整改闭环（仅安环管理部） =================
+   业务口径：
+     · 隐患登记、查看、指派、整改待办、提交整改、验收均仅限安环管理部内部账号；
+     · 指派候选也仅包含身份表内所属部门为「安环管理部」的人员；
      · 数据落独立飞书表「H5隐患排查台账表」，与巡查主台账完全分离；
-     · 本期范围：隐患登记 + 我的隐患列表/详情（整改闭环后续迭代）；
      · 照片走 /api/mobile/upload → file_token，详情经 /api/mobile/photo 取图；
-   权限双保险：入口显隐（isHazardUser）+ showView 拦截 + 服务端角色门。
-   CF-WPS-96（自查整改）：
-     · 表单草稿落 localStorage（文字字段；照片一律重拍，不存 token）——
-       低端安卓调起相机时页面被系统回收 / 误刷新，长描述不再全丢；
-     · 提交响应识别服务端 deduplicated（弱网重试 / 连点两下），
-       明确告知「未重复提交」而不是含糊的成功。 */
-const HAZARD_VIEWS = ["hazard-list", "hazard-form", "hazard-detail", "hazard-assign", "hazard-review"];
-// CF-WPS-100：这两个屏对**任何登录账号**开放（被指派人就是全公司任选的结果），
-// 故不进 HAZARD_VIEWS 门禁；归属校验在服务端（rectify 只许整改人、detail 许三种人）。
-const HAZARD_TODO_VIEWS = ["hazard-todos", "hazard-rectify"];
+   权限双保险：入口显隐 + showView 拦截 + Worker 全路由部门门禁。
+   CF-WPS-96：文字表单草稿落 localStorage，照片重拍；重复提交识别服务端 deduplicated。 */
+const HAZARD_VIEWS = ["hazard-list", "hazard-form", "hazard-detail", "hazard-assign", "hazard-review", "hazard-todos", "hazard-rectify"];
 // 类别/级别**必须与服务端 index.js 同名单**（后端校验拒绝不在名单内的值）
 const HAZARD_CATEGORIES = ["设备设施","消防安全","用电安全","危化品","作业安全","高处作业","交通运输","公共设施","环境卫生","违规操作","其他"];
 const HAZARD_LEVELS = ["一般隐患","重大隐患"];
 const HAZARD_PHOTO_MAX = 3;
 
 function isHazardUser(){
-  return !!session && session.role === "公司管理"
-    && String(session.dept || "").trim() === "安环管理部";
+  return !!session && String(session.dept || "").trim() === "安环管理部";
 }
 // 首页入口卡显隐（enterHome 每次调；非安环账号永远看不到）
 function renderHazardEntry(){
@@ -6047,8 +6337,10 @@ function hazardClosureCardHtml(x){
     html += '<div class="field-label" style="margin-top:12px">整改后照片（' + x.rectifyPhotoTokens.length + '）</div>' +
       '<div class="hz-photos" id="hz-rectify-detail-photos" style="margin-top:8px"></div>';
   }
-  // 操作区（安环部）：待整改 → 指派；待验收 → 通过 / 打回。已闭环只读。
-  if(isHazardUser() && st === "待整改"){
+  // 操作区（安环部内部闭环）：待整改 → 指派（非本人整改时）／去提交（本人是整改人）；
+  //   待验收 → 通过 / 打回；已闭环只读。CF-WPS-102 起整改人本身也是安环管理部，
+  //   故不能再用「!isHazardUser()」区分整改人视角（那会让整改人永远看不到提交按钮）。
+  if(isHazardUser() && st === "待整改" && x.rectifierId !== (session && session.id)){
     html += '<button class="btn-primary btn-row" id="btn-hz-detail-assign" style="margin-top:12px">指派整改</button>';
   }
   if(isHazardUser() && st === "待验收"){
@@ -6059,8 +6351,8 @@ function hazardClosureCardHtml(x){
       '<textarea class="hz-input" id="hz-reject-comment" rows="2" maxlength="200" placeholder="打回原因（选填，整改人可见）" style="margin-top:8px;display:none"></textarea>' +
       '<button class="btn-ghost btn-row" id="btn-hz-reject-ok" style="margin-top:8px;display:none">确认打回</button>';
   }
-  // 整改人视角：待整改 → 去提交；待验收/已闭环 → 只读等待
-  if(x.rectifierId === (session && session.id) && st === "待整改" && !isHazardUser()){
+  // 整改人视角（CF-WPS-102：整改人即安环管理部本人）：待整改 → 去提交；待验收/已闭环 → 只读等待
+  if(x.rectifierId === (session && session.id) && st === "待整改"){
     html += '<button class="btn-primary btn-row" id="btn-hz-detail-go-rectify" style="margin-top:12px">去提交整改</button>';
   }
   return html + '</div>';
@@ -6107,7 +6399,7 @@ async function hzDoReview(x, action, comment){
 
 /* ================= CF-WPS-100：隐患整改闭环（待办 / 指派 / 提交 / 验收） ================= */
 
-/* ---- 派给我的隐患（整改人待办；任何账号，服务端只认 整改人ID == 我） ---- */
+/* ---- 派给我的隐患（仅安环部人员可进入，服务端只列本人整改任务） ---- */
 let hazardTodos = [], hazardTodosAt = 0;
 async function loadHazardTodos(force){
   if(!force && hazardTodos.length && Date.now() - hazardTodosAt < 30000) return hazardTodos;
@@ -6139,7 +6431,7 @@ async function renderHazardTodos(){
 async function refreshMeHazardEntry(){
   const card = $("#btn-me-hazard-todo");
   if(!card) return;
-  if(!session || !session.id){ card.style.display = "none"; return; }
+  if(!session || !session.id || !isHazardUser()) { card.style.display = "none"; return; }
   let items = [];
   try{ items = await loadHazardTodos(false); }catch(e){}
   const n = items.filter(x => (x.status || "待整改") === "待整改").length;
@@ -6148,7 +6440,7 @@ async function refreshMeHazardEntry(){
   if(hint) hint.textContent = n ? "安环管理部指派给你的隐患整改 · " + n + " 条待处理" : "安环管理部指派给你的隐患整改";
 }
 
-/* ---- 指派整改（安环部；全公司账号任选 + 期限） ---- */
+/* ---- 指派整改（安环管理部内部；身份表账号 + 期限） ---- */
 let hazardAssignTarget = null, hazardAssignSel = null, hzAssignTimer = 0;
 function hzDefaultDeadline(){
   const d = new Date(Date.now() + 7 * 86400000), p = n => String(n).padStart(2, "0");
