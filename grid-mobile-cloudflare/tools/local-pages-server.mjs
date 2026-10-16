@@ -16,6 +16,7 @@
  *      （PORT 默认 5899；WORKER_ORIGIN 可覆盖）
  */
 import http from 'node:http';
+import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -163,7 +164,15 @@ const server = http.createServer(async (req, res) => {
   res.end(buf);
 });
 
-server.listen(PORT, '127.0.0.1', () => {
-  console.log(`[local-pages] http://127.0.0.1:${PORT}  root=${ROOT}`);
+// 绑定地址：默认只绑回环（安全）；手机/局域网联调时 HOST=0.0.0.0 启动
+// （Windows 防火墙仍需放行该端口的入站，专用网络）。
+const HOST = process.env.HOST || '127.0.0.1';
+server.listen(PORT, HOST, () => {
+  const shown = HOST === '0.0.0.0' ? '0.0.0.0' : HOST;
+  console.log(`[local-pages] http://${shown}:${PORT}  root=${ROOT}`);
   console.log(`[local-pages] /api /wps → ${WORKER_ORIGIN}`);
+  if (HOST === '0.0.0.0') {
+    const ips = Object.values(os.networkInterfaces()).flat().filter((n) => n && n.family === 'IPv4' && !n.internal).map((n) => n.address);
+    console.log(`[local-pages] 局域网访问: ${ips.map((i) => 'http://' + i + ':' + PORT).join('  ')}`);
+  }
 });
