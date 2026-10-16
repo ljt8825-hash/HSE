@@ -7,7 +7,7 @@
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-10-16.99">
+<meta name="hse-build" content="2026-10-16.100">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -1168,8 +1168,8 @@ textarea.hz-input{height:auto;padding:10px var(--pad-card);line-height:1.6;resiz
      读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
    - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
    - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
-<script src="./config.js?v=2026-10-16.99"></script>
-<script src="./app.js?v=2026-10-16.99"></script>
+<script src="./config.js?v=2026-10-16.100"></script>
+<script src="./app.js?v=2026-10-16.100"></script>
 <script>
 /* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
 (function(){
@@ -6070,5 +6070,34 @@ window.__hseAppReady = true;
   </div>
 </div>
 <div id="offline-bar" class="hidden">离线模式 · 已用本机缓存进入，记录先存本机，联网后自动上传</div>
+<script>
+/* CF-WPS-99：版本自愈。SPA 的旧标签页会一直跑旧代码 —— 2026-10-16 实测：
+   用户在部署前打开的标签页里继续操作，照片修复不生效（刷新后才好）。
+   做法：运行时 hse-build meta 与 version.json 比对，不一致且本会话还没为这个
+   目标版本重载过 → 整页重载。触发点：载入后 3s + 切回标签页（visibilitychange，
+   「离开再回来看一眼」正好命中）。version.json 404/异常一律静默跳过（不影响使用）。 */
+(function(){
+  try{
+    var meta = document.querySelector('meta[name="hse-build"]');
+    var running = meta && meta.content;
+    if(!running) return;
+    var reloadedFor = null;
+    try{ reloadedFor = sessionStorage.getItem('hse_build_reloaded_for'); }catch(e){}
+    var check = function(){
+      fetch('./version.json?t=' + Date.now(), { cache: 'no-store' })
+        .then(function(r){ return r.ok ? r.json() : null; })
+        .then(function(j){
+          if(!j || !j.build || j.build === running) return;
+          if(reloadedFor === j.build) return;            // 已为这个版本重载过：绝不循环刷
+          try{ sessionStorage.setItem('hse_build_reloaded_for', j.build); }catch(e){}
+          location.reload();
+        })
+        .catch(function(){});
+    };
+    document.addEventListener('visibilitychange', function(){ if(!document.hidden) check(); });
+    setTimeout(check, 3000);
+  }catch(e){}
+})();
+</script>
 </body>
 </html>
