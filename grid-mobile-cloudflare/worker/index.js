@@ -3171,15 +3171,18 @@ async function handleHazardList(request, env) {
     const tableId = String((cfg && cfg.hazardSheetId) || '').trim();
     if (!tableId) return errRes('HAZARD_TARGET_NOT_CONFIGURED', '隐患排查表未配置', 503, corsHeaders(origin));
 
+    // ⚠️ 不用 searchRecords(filter)：飞书 filter search 走**索引**，新建记录有分钟级延迟
+    // （2026-10-16 实测：15:28 提交 → 15:31 查不到 → ~15:33 才可见）→「提交后回列表看不到
+    // 自己刚登记的隐患」，用户会以为丢了。隐患登记量极小（安环管理部数人），全量 scan +
+    // 本地按 排查人ID 过滤：一次往返、无索引延迟。detail 走 getRecord（O(1)，本就不受影响）。
     let rows;
     try {
-      rows = await adapter.searchRecords(env, cfg.fileId, tableId, {
-        field: '排查人ID', operator: 'is', value: String(payload.sub || ''), maxPages: 2,
-      });
+      rows = await adapter.scanRecords(env, cfg.fileId, tableId, 3);   // 500/页 × 3 = 1500 条上限
     } catch {
       return errRes('WPS_UPSTREAM_ERROR', '隐患列表暂不可用，请稍后再试', 502, corsHeaders(origin));
     }
-    const items = rows.map(mapHazardRecord)
+    const mine = rows.filter((r) => fieldText((r.fields || {})['排查人ID']).trim() === String(payload.sub || ''));
+    const items = mine.map(mapHazardRecord)
       .sort((a, b) => String(b.findTime).localeCompare(String(a.findTime)))
       .slice(0, HAZARD_LIST_LIMIT);
     return jsonRes({ success: true, code: 'OK', items, total: items.length }, 200, corsHeaders(origin));

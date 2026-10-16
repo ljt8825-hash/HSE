@@ -7,7 +7,7 @@
 <!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
      排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
      先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
-<meta name="hse-build" content="2026-10-16.98">
+<meta name="hse-build" content="2026-10-16.99">
 <!-- ================= 「添加到手机桌面」（PWA） =================
      让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
      · manifest.webmanifest 是规范入口，Chrome / Safari 都认
@@ -1168,8 +1168,8 @@ textarea.hz-input{height:auto;padding:10px var(--pad-card);line-height:1.6;resiz
      读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
    - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
    - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
-<script src="./config.js?v=2026-10-16.98"></script>
-<script src="./app.js?v=2026-10-16.98"></script>
+<script src="./config.js?v=2026-10-16.99"></script>
+<script src="./app.js?v=2026-10-16.99"></script>
 <script>
 /* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
 (function(){
@@ -5721,6 +5721,7 @@ async function renderHazardList(){
     return;
   }
   box.innerHTML = "";
+  resetThumbObserver();   // 整块重绘：清掉上一批卡片的观察/排队，别攒死节点
   items.forEach(x => {
     const d = document.createElement("div");
     d.className = "card";
@@ -5736,22 +5737,56 @@ async function renderHazardList(){
         '<span style="font-size:var(--fs-sub);color:var(--t3)">' + esc(x.findTime || "") + '</span>' +
       '</div>' +
       '<div style="font-size:var(--fs-body);margin-top:8px;line-height:1.5">' + esc(x.description || "") + '</div>' +
-      '<div style="display:flex;align-items:center;gap:8px;margin-top:8px">' +
-        (x.photoTokens && x.photoTokens.length
-          ? '<img alt="隐患照片" src="' + hzPhotoUrl(x.photoTokens[0]) + '" style="width:52px;height:52px;border-radius:var(--r-card);object-fit:cover;background:#E8E6E0">'
-          : '') +
+      '<div style="display:flex;align-items:center;gap:8px;margin-top:8px" class="hz-card-foot">' +
         '<div style="flex:1;font-size:var(--fs-sub);color:var(--t3)">' +
           (x.location ? esc(x.location) : "未填位置") +
           (x.photoTokens && x.photoTokens.length ? ' · ' + x.photoTokens.length + ' 张照片' : '') +
         '</div>' +
         '<span class="chip green"><span class="dot"></span>' + esc(x.status || "待整改") + '</span>' +
       '</div>';
+    // 照片缩略图：**不能**用 <img src="/api/mobile/photo?ft="> —— 该接口要登录态，
+    // 而 img 标签带不上 Authorization 头 → 401 裂图（2026-10-16 用户实测）。
+    // 走台账同一条懒加载队（全局并发 3 + 进视口才拉原图），失败整块摘掉不留破图。
+    if(x.photoTokens && x.photoTokens.length){
+      const img = document.createElement("img");
+      img.alt = "隐患照片";
+      img.dataset.ft = x.photoTokens[0];
+      img.style.cssText = "width:52px;height:52px;border-radius:var(--r-card);object-fit:cover;background:#E8E6E0;flex:0 0 auto";
+      img.onerror = () => img.remove();
+      const foot = d.querySelector(".hz-card-foot");
+      if(foot) foot.insertBefore(img, foot.firstChild);
+      const io = thumbObserver();
+      if(io) io.observe(img); else thumbQueue.push({ img: img, wrap: img, ft: x.photoTokens[0] });
+    }
     d.onclick = () => { showView("hazard-detail"); renderHazardDetail(x.recordId); };
     box.appendChild(d);
   });
+  if(!thumbObserver()) pumpThumbQueue();   // 老 WebView 兜底：没有 IO 就直接全部排队
 }
-// 隐患照片代理（与派发图同一条 /api/mobile/photo，file_token → 二进制）
-function hzPhotoUrl(ft){ return API_BASE + "/api/mobile/photo?ft=" + encodeURIComponent(ft); }
+// 隐患详情照片墙：与派发图同一条 /api/mobile/photo，**必须带登录态**取图
+// （<img src> 带不上 Authorization 头 → 401 裂图）。fetch+blob 回填，失败摘掉不残留破图。
+async function renderHazardPhotos(container, tokens){
+  if(!container) return;
+  const arr = Array.isArray(tokens) ? tokens : [];
+  if(!arr.length) return;
+  await Promise.all(arr.map(async (ft) => {
+    const url = await loadServerPhoto(ft);
+    if(!url) return;
+    const box = document.createElement("div");
+    box.className = "hz-photo";
+    box.style.width = "100%";
+    box.style.height = "auto";
+    box.style.aspectRatio = "4 / 3";
+    const img = document.createElement("img");
+    img.alt = "隐患照片"; img.src = url;
+    img.onerror = () => box.remove();
+    box.appendChild(img);
+    container.appendChild(box);
+  }));
+  if(!container.children.length){
+    container.innerHTML = '<div style="font-size:var(--fs-sub);color:var(--t4)">照片加载失败，请稍后重试</div>';
+  }
+}
 async function renderHazardDetail(recordId){
   const box = $("#hazard-detail");
   if(!box) return;
@@ -5784,11 +5819,11 @@ async function renderHazardDetail(recordId){
     '</div>';
   if(x.photoTokens && x.photoTokens.length){
     html += '<div class="card"><div class="field-label">现场照片（' + x.photoTokens.length + '）</div>' +
-      '<div class="hz-photos" style="margin-top:8px">' +
-      x.photoTokens.map(ft => '<div class="hz-photo" style="width:100%;height:auto;aspect-ratio:4/3"><img alt="隐患照片" src="' + hzPhotoUrl(ft) + '"></div>').join("") +
-      '</div></div>';
+      '<div class="hz-photos" id="hz-detail-photos" style="margin-top:8px"></div></div>';
   }
   box.innerHTML = html;
+  // 照片墙异步回填（带登录态取图，见 renderHazardPhotos）
+  if(x.photoTokens && x.photoTokens.length) renderHazardPhotos($("#hz-detail-photos"), x.photoTokens);
 }
 
 function openEntry(go){
