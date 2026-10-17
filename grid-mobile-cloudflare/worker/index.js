@@ -2891,6 +2891,7 @@ async function resolveViewScope(adapter, env, cfg, payload) {
 // ============================================================================
 
 const HAZARD_BODY_LIMIT = 16 * 1024;   // 提交体上限（不含照片二进制，照片走独立上传）
+const HAZARD_AI_BODY_LIMIT = 45 * 1024 * 1024;  // AI 识别体上限：body 内含整张 base64 照片（≤32MiB 图 → base64 ≤~42.6MB），故独立放宽
 const HAZARD_DESC_MAX = 500;           // 隐患描述长度上限
 const HAZARD_LOCATION_MAX = 100;       // 隐患位置长度上限
 const HAZARD_PHOTO_MAX = 3;            // 现场照片张数上限
@@ -2971,7 +2972,7 @@ const HAZARD_THREE_VIOLATION = ['是', '否'];
 const HAZARD_MAJOR = ['是', '否'];
 // 风险等级：国标 4 档（红橙黄蓝），用户 2026-10-16 确认
 const HAZARD_RISK_LEVELS = ['重大风险', '较大风险', '一般风险', '低风险'];
-const HAZARD_AI_TIMEOUT_MS = 15000;      // 单 provider 超时即跳过 / 降级
+const HAZARD_AI_TIMEOUT_MS = 25000;      // 单 provider 超时即跳过 / 降级（<30s 请求墙时限，给实验性视觉模型首推理留余量）
 const HAZARD_BASIS_MAX = 1000;          // 整改依据长度上限
 const HAZARD_SUGGESTION_MAX = 1000;      // 整改建议长度上限
 
@@ -3438,7 +3439,7 @@ async function handleHazardAiFill(request, env, ctx) {
     if (!session) return errRes('UNAUTHORIZED', '未认证或登录态失效', 401, corsHeaders(origin));
 
     const contentLen = Number(request.headers.get('content-length') || '0');
-    if (contentLen > HAZARD_BODY_LIMIT) return errRes('BODY_TOO_LARGE', `请求体超过上限（${HAZARD_BODY_LIMIT} 字节）`, 413, corsHeaders(origin));
+    if (contentLen > HAZARD_AI_BODY_LIMIT) return errRes('BODY_TOO_LARGE', `请求体超过上限（${HAZARD_AI_BODY_LIMIT} 字节）`, 413, corsHeaders(origin));
     let body;
     try { body = await request.json(); } catch { return errRes('BAD_REQUEST', '请求格式不正确', 400, corsHeaders(origin)); }
     const image = typeof body.image === 'string' ? body.image : '';
