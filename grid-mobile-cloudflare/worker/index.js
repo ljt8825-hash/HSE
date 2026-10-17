@@ -347,6 +347,8 @@ const FEISHU_FIELD_WHITELIST = new Set([
   // 全部用文本列（type=1）：值域自由、不依赖单选选项，避免选项漂移导致写入失败。
   '整改接收人ID', '整改接收人姓名', '整改责任单位', '整改状态',
   '指派人ID', '指派人姓名', '指派人单位', '指派时间', '整改完成时间', '整改说明',
+  // ── CF-WPS-103 AI 识别回填字段（文本列 + 服务端枚举强校验）─────────────────
+  '整改依据', '整改建议', '三违判定', '重大事故隐患判定', '风险等级', 'AI识别原始输出',
 ]);
 
 /* 整改待办列（CF-WPS-36）—— 与主台账同表存放：一条巡查记录最多一条待办，
@@ -2963,6 +2965,16 @@ const HAZARD_RECT_NOTE_MAX = 500;        // 整改说明长度上限
 const HAZARD_REVIEW_COMMENT_MAX = 200;   // 验收意见长度上限
 const HAZARD_TODO_LIMIT = 100;           // 「派给我的隐患」返回条数上限
 
+// CF-WPS-103 AI 识别回填：三违 / 重大事故隐患 / 风险等级 的**服务端权威枚举**
+// （前端硬编码同一份；与 category/level 同纪律，AI 输出不命中则丢弃，不污染统计）。
+const HAZARD_THREE_VIOLATION = ['是', '否'];
+const HAZARD_MAJOR = ['是', '否'];
+// 风险等级：国标 4 档（红橙黄蓝），用户 2026-10-16 确认
+const HAZARD_RISK_LEVELS = ['重大风险', '较大风险', '一般风险', '低风险'];
+const HAZARD_AI_TIMEOUT_MS = 15000;      // 单 provider 超时即跳过 / 降级
+const HAZARD_BASIS_MAX = 1000;          // 整改依据长度上限
+const HAZARD_SUGGESTION_MAX = 1000;      // 整改建议长度上限
+
 // 闭环字段列名。2026-10-16 已由 _scratch/hazard-fields-extend.mjs 在两个 base 幂等建好；
 // Worker 侧写前再走一遍 ensureHazardRectFields 兜底 —— 换 base / 手工删列后写入不会
 // 直接 1254045（列缺失时尽力补建，仍缺则上游报错转 502，绝不静默丢字段）。
@@ -2986,6 +2998,17 @@ const HAZARD_FIELDS = {
 // 「整改后照片」是附件列（type 17），其余均为文本列（type 1）
 const HAZARD_RECT_FIELD_TYPES = { [HAZARD_FIELDS.rectifyPhotos]: 17 };
 
+// CF-WPS-103 AI 识别回填字段（全部文本列 type=1，值域由服务端枚举强校验，避免单选选项漂移）
+const HAZARD_AI_FIELDS = {
+  basis: '整改依据',
+  suggestion: '整改建议',
+  threeViolation: '三违判定',
+  majorHazard: '重大事故隐患判定',
+  riskLevel: '风险等级',
+  aiRaw: 'AI识别原始输出',
+};
+const HAZARD_AI_FIELD_TYPES = {};   // 全部 type=1（默认），无需特殊类型
+
 // 幂等补建闭环列（与 ensureTodoFields 同口径：只查一次建一次并缓存，失败不抛）
 let hazardRectFieldsReady = null;
 async function ensureHazardRectFields(env, fileId, tableId) {
@@ -2993,9 +3016,11 @@ async function ensureHazardRectFields(env, fileId, tableId) {
   const adapter = getAdapter(env);
   try {
     const existing = new Set((await adapter.listFields(env, fileId, tableId)).map((f) => f.fieldName));
-    const missing = Object.values(HAZARD_FIELDS).filter((n) => !existing.has(n));
+    const needed = [...Object.values(HAZARD_FIELDS), ...Object.values(HAZARD_AI_FIELDS)];
+    const missing = needed.filter((n) => !existing.has(n));
     for (const n of missing) {
-      try { await adapter.ensureField(env, fileId, tableId, n, HAZARD_RECT_FIELD_TYPES[n] || 1); }
+      const t = HAZARD_RECT_FIELD_TYPES[n] || HAZARD_AI_FIELD_TYPES[n] || 1;
+      try { await adapter.ensureField(env, fileId, tableId, n, t); }
       catch (e) { console.warn('[hazard-rect] ensureField failed: ' + n + ' ' + (e && e.fsMsg)); }
     }
     hazardRectFieldsReady = { ok: true };
@@ -3145,6 +3170,13 @@ function mapHazardRecord(rec) {
     closedAt: fieldText(f[HAZARD_FIELDS.closedAt]).trim(),
     rejectCount: hazardCountNum(f[HAZARD_FIELDS.rejectCount]),
     overdue: hazardOverdue(status, deadline),
+    // ---- CF-WPS-103 AI 识别回填字段（只读展示）----
+    basis: fieldText(f[HAZARD_AI_FIELDS.basis]).trim(),
+    suggestion: fieldText(f[HAZARD_AI_FIELDS.suggestion]).trim(),
+    threeViolation: fieldText(f[HAZARD_AI_FIELDS.threeViolation]).trim(),
+    majorHazard: fieldText(f[HAZARD_AI_FIELDS.majorHazard]).trim(),
+    riskLevel: fieldText(f[HAZARD_AI_FIELDS.riskLevel]).trim(),
+    aiRaw: fieldText(f[HAZARD_AI_FIELDS.aiRaw]).trim(),
   };
 }
 
@@ -3216,6 +3248,17 @@ async function handleHazardSubmit(request, env, ctx) {
       photoTokens = [...new Set(body.photo_tokens)];
     }
 
+    // CF-WPS-103 AI 回填字段（可选，服务端再校验枚举，防前端绕过 / 模型乱填）
+    const aiBasis = patrolText(body.rectify_basis, HAZARD_BASIS_MAX);
+    const aiSuggestion = patrolText(body.rectify_suggestion, HAZARD_SUGGESTION_MAX);
+    const tv = patrolText(body.three_violation, 4);
+    const threeViolation = HAZARD_THREE_VIOLATION.includes(tv) ? tv : '';
+    const mj = patrolText(body.major_hazard, 4);
+    const majorHazard = HAZARD_MAJOR.includes(mj) ? mj : '';
+    const rl = patrolText(body.risk_level, 20);
+    const riskLevel = HAZARD_RISK_LEVELS.includes(rl) ? rl : '';
+    const aiRaw = patrolText(body.ai_raw, 4000);
+
     const cid = patrolText(body.client_request_id, 64);
     if (cid && !/^[A-Za-z0-9_-]{8,64}$/.test(cid)) {
       return errRes('HAZARD_FIELD_INVALID', 'client_request_id 不合法（8~64 位字母数字_-）', 400, corsHeaders(origin));
@@ -3249,6 +3292,9 @@ async function handleHazardSubmit(request, env, ctx) {
       }
     }
 
+    // 幂等兜底：确保闭环列 + AI 回填列都已存在（换 base / 手工删列后写入不会 1254045）
+    await ensureHazardRectFields(env, cfg.fileId, tableId);
+
     // record 全部服务端定值：身份一律取 Session，前端传入的一律忽略
     const record = {
       '隐患编号': newHazardNo(),
@@ -3267,6 +3313,13 @@ async function handleHazardSubmit(request, env, ctx) {
     if (lat) record['纬度'] = lat;
     if (lng) record['经度'] = lng;
     if (photoTokens.length) record['现场照片'] = photoTokens.map((t) => ({ file_token: t }));
+    // CF-WPS-103 AI 回填字段（已在上方校验枚举；空字符串不写，避免污染统计）
+    if (aiBasis) record['整改依据'] = aiBasis;
+    if (aiSuggestion) record['整改建议'] = aiSuggestion;
+    if (threeViolation) record['三违判定'] = threeViolation;
+    if (majorHazard) record['重大事故隐患判定'] = majorHazard;
+    if (riskLevel) record['风险等级'] = riskLevel;
+    if (aiRaw) record['AI识别原始输出'] = aiRaw;
 
     // 落库（有 cid 时登记在途表，供并发同 cid 请求共享结果）
     const runCreate = async () => {
@@ -3297,6 +3350,141 @@ async function handleHazardSubmit(request, env, ctx) {
     return hazardSubmitResponse(done, cid, false, origin);
   } catch {
     return errRes('INTERNAL_ERROR', '内部错误，请稍后再试', 500, corsHeaders(origin));
+  }
+}
+
+// ---- CF-WPS-103：动态 AI provider 配置表（可随时换不同 AI API，无需改代码）----
+// 配置来源：env.AI_PROVIDERS（JSON 数组，建议放 wrangler secret）。
+// 每个 provider：{ id, name, apiBase, model, apiKeySecret(指向 env 里的密钥名), format, enabled, priority, timeoutMs }
+// 兜底：若未配 AI_PROVIDERS 但配了 DEEPSEEK_API_KEY，则自动构造一个 DeepSeek Vision provider（向后兼容）。
+function loadAiProviders(env) {
+  let arr = [];
+  const raw = env && env.AI_PROVIDERS;
+  if (raw && typeof raw === 'string') {
+    try { arr = JSON.parse(raw); } catch { arr = []; }
+  }
+  if (!Array.isArray(arr) || !arr.length) {
+    if (env && env.DEEPSEEK_API_KEY) {
+      arr = [{
+        id: 'deepseek', name: 'DeepSeek Vision', apiBase: 'https://api.deepseek.com/v1',
+        model: 'deepseek-v4-flash-vision-exp', apiKeySecret: 'DEEPSEEK_API_KEY',
+        format: 'openai', enabled: true, priority: 10, timeoutMs: HAZARD_AI_TIMEOUT_MS,
+      }];
+    }
+  }
+  return (Array.isArray(arr) ? arr : [])
+    .filter((p) => p && p.enabled !== false && p.apiBase && p.model && p.apiKeySecret)
+    .sort((a, b) => (b.priority || 0) - (a.priority || 0));
+}
+
+// 调一个 provider 的多模态接口（OpenAI 兼容格式；DeepSeek 官方 api.deepseek.com 同格式、支持 base64 内联 + JSON Output）
+async function callAiVision(provider, imageDataUrl, prompt, env) {
+  const key = env[provider.apiKeySecret];
+  if (!key) throw new Error('provider key missing: ' + provider.apiKeySecret);
+  const timeoutMs = provider.timeoutMs || HAZARD_AI_TIMEOUT_MS;
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    const resp = await fetch(`${String(provider.apiBase).replace(/\/$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key },
+      signal: ac.signal,
+      body: JSON.stringify({
+        model: provider.model,
+        response_format: { type: 'json_object' },
+        messages: [{ role: 'user', content: [
+          { type: 'text', text: prompt },
+          { type: 'image_url', image_url: { url: imageDataUrl } },
+        ] }],
+      }),
+    });
+    if (!resp.ok) {
+      const txt = await resp.text().catch(() => '');
+      throw new Error('provider HTTP ' + resp.status + ' ' + txt.slice(0, 200));
+    }
+    const j = await resp.json();
+    const content = j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content;
+    if (!content) throw new Error('provider empty content');
+    let parsed;
+    try { parsed = JSON.parse(content); } catch { throw new Error('provider json parse fail'); }
+    return parsed;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// 强约束提示词：限定 JSON schema + 枚举候选，避免模型自由发挥污染统计
+function buildHazardAiPrompt() {
+  return `你是一名资深安全生产隐患排查专家。请识别这张现场照片，判断是否存在安全隐患，并严格只输出如下 JSON（不要输出 JSON 以外的任何文字）：
+{
+  "description": "隐患描述：具体说明隐患是什么、在哪里、可能造成什么后果（中文，≤200字）",
+  "basis": "整改依据：引用的法规/标准/制度依据，如《安全生产法》相关条款、行业规范等（中文，≤300字；无明确依据可写'现场管理要求'）",
+  "suggestion": "整改建议：具体、可操作的整改措施（中文，≤300字）",
+  "category": "隐患类别，必须从以下候选中精确选一个：${HAZARD_CATEGORIES.join(' / ')}；不确定则选'其他'",
+  "threeViolation": "三违判定：只能是'是'或'否'（三违=违章指挥/违章作业/违反劳动纪律）",
+  "majorHazard": "重大事故隐患判定：只能是'是'或'否'（指危害和整改难度大、需全部或局部停产停业方可整改的隐患）",
+  "riskLevel": "风险等级，只能是以下之一：${HAZARD_RISK_LEVELS.join(' / ')}"
+}
+若照片中未发现明确隐患，description 写'未发现明显隐患'，其余字段给空字符串。`;
+}
+
+// ---- POST /api/mobile/hazard/ai-fill：上传现场照 → 多模态模型回填隐患字段 ----
+async function handleHazardAiFill(request, env, ctx) {
+  const origin = corsOrigin(request, env);
+  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
+  try {
+    if (!env.WORKER_SESSION_SECRET) return errRes('SESSION_NOT_CONFIGURED', '会话密钥未配置', 503, corsHeaders(origin));
+    const session = await verifyWorkerSession(bearerToken(request), env.WORKER_SESSION_SECRET);
+    if (!session) return errRes('UNAUTHORIZED', '未认证或登录态失效', 401, corsHeaders(origin));
+
+    const contentLen = Number(request.headers.get('content-length') || '0');
+    if (contentLen > HAZARD_BODY_LIMIT) return errRes('BODY_TOO_LARGE', `请求体超过上限（${HAZARD_BODY_LIMIT} 字节）`, 413, corsHeaders(origin));
+    let body;
+    try { body = await request.json(); } catch { return errRes('BAD_REQUEST', '请求格式不正确', 400, corsHeaders(origin)); }
+    const image = typeof body.image === 'string' ? body.image : '';
+    // 仅接受 jpeg/png 的 base64 dataURL，且 base64 部分 ≤ 32 MiB（对齐 DeepSeek/OpenAI 内联上限）
+    const m = /^data:image\/(jpeg|png);base64,([A-Za-z0-9+/=]+)$/.exec(image);
+    if (!m) return errRes('BAD_REQUEST', 'image 必须为 jpeg/png 的 base64 dataURL', 400, corsHeaders(origin));
+    if (m[2].length > 32 * 1024 * 1024 * 4 / 3) return errRes('BAD_REQUEST', '图片过大（≤32MiB）', 400, corsHeaders(origin));
+
+    const providers = loadAiProviders(env);
+    if (!providers.length) {
+      return jsonRes({ ai_disabled: true, reason: 'AI_PROVIDER_NOT_CONFIGURED' }, 200, corsHeaders(origin));
+    }
+
+    const prompt = buildHazardAiPrompt();
+    let lastErr = '';
+    for (const pr of providers) {
+      try {
+        const parsed = await callAiVision(pr, image, prompt, env);
+        const out = { ai_disabled: false, provider: pr.id };
+        out.description = patrolText(parsed.description, HAZARD_DESC_MAX);
+        out.basis = patrolText(parsed.basis, HAZARD_BASIS_MAX);
+        out.suggestion = patrolText(parsed.suggestion, HAZARD_SUGGESTION_MAX);
+        const cat = patrolText(parsed.category, 20);
+        out.category = HAZARD_CATEGORIES.includes(cat) ? cat : '';        // 不命中枚举 → 丢弃，退回手选
+        const tv = patrolText(parsed.threeViolation, 4);
+        out.threeViolation = HAZARD_THREE_VIOLATION.includes(tv) ? tv : '';
+        const mj = patrolText(parsed.majorHazard, 4);
+        out.majorHazard = HAZARD_MAJOR.includes(mj) ? mj : '';
+        const rl = patrolText(parsed.riskLevel, 20);
+        out.riskLevel = HAZARD_RISK_LEVELS.includes(rl) ? rl : '';
+        out.raw = JSON.stringify(parsed).slice(0, 4000);   // 留痕审计（原始输出）
+        // 全空（模型没给出任何有效内容）→ 视为该 provider 失败，试下一个
+        if (!out.description && !out.basis && !out.suggestion && !out.category
+          && !out.threeViolation && !out.majorHazard && !out.riskLevel) {
+          lastErr = 'provider returned empty'; continue;
+        }
+        return jsonRes(out, 200, corsHeaders(origin));
+      } catch (e) {
+        lastErr = (e && e.message) || 'provider error';
+        continue;
+      }
+    }
+    // 所有 provider 都失败 / 无有效输出 → 静默降级为手填，绝不阻断提交
+    return jsonRes({ ai_disabled: true, reason: 'AI_FILL_FAILED', detail: String(lastErr || '').slice(0, 200) }, 200, corsHeaders(origin));
+  } catch {
+    return jsonRes({ ai_disabled: true, reason: 'INTERNAL' }, 200, corsHeaders(origin));
   }
 }
 
@@ -4572,6 +4760,7 @@ export default {
     if (p === '/api/mobile/patrol/records') return handlePatrolRecords(request, env);
     // CF-WPS-95/100/102：隐患登记与整改闭环（所属部门=安环管理部；部门门禁在 handler 内）
     if (p === '/api/mobile/hazard/submit') return handleHazardSubmit(request, env, ctx);
+    if (p === '/api/mobile/hazard/ai-fill') return handleHazardAiFill(request, env, ctx);
     if (p === '/api/mobile/hazard/list') return handleHazardList(request, env);
     if (p === '/api/mobile/hazard/detail') return handleHazardDetail(request, env);
     // CF-WPS-100/102：隐患整改闭环全部路由均在 handler 内经 hazardGate 限定安环管理部
@@ -4694,6 +4883,14 @@ export {
   hazardCidPut,
   HAZARD_CATEGORIES,
   HAZARD_LEVELS,
+  HAZARD_THREE_VIOLATION,
+  HAZARD_MAJOR,
+  HAZARD_RISK_LEVELS,
+  HAZARD_AI_FIELDS,
+  handleHazardAiFill,
+  loadAiProviders,
+  callAiVision,
+  buildHazardAiPrompt,
   // CF-WPS-100 隐患整改闭环
   handleHazardAssign,
   handleHazardAssignable,

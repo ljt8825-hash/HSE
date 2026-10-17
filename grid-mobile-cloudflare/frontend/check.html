@@ -1170,6 +1170,20 @@ textarea.hz-input{height:auto;padding:10px var(--pad-card);line-height:1.6;resiz
       <button class="btn-ghost btn-row" id="btn-hz-album">从相册上传</button>
       <button class="btn-ghost btn-row" id="btn-hz-clear">清空表单</button>
     </div>
+    <div class="field-label" style="margin-top:18px">AI 智能识别</div>
+    <div class="field-sub">拍好现场照后点此，自动识别隐患并填好下方字段（结果可修改）</div>
+    <button class="btn-ghost btn-row" id="btn-hz-ai" style="margin-top:8px">AI 识别照片</button>
+    <div id="hz-ai-badge" style="display:none;margin-top:8px;font-size:var(--fs-sub);color:var(--t3)"></div>
+    <div class="field-label" style="margin-top:18px">整改依据</div>
+    <textarea class="hz-input" id="hz-basis" rows="3" maxlength="1000" placeholder="AI 识别自动填入，可修改"></textarea>
+    <div class="field-label" style="margin-top:12px">整改建议</div>
+    <textarea class="hz-input" id="hz-suggestion" rows="3" maxlength="1000" placeholder="AI 识别自动填入，可修改"></textarea>
+    <div class="field-label" style="margin-top:12px">三违判定</div>
+    <div class="grid2" id="hz-tv-grid" style="margin-top:8px"></div>
+    <div class="field-label" style="margin-top:12px">重大事故隐患判定</div>
+    <div class="grid2" id="hz-mj-grid" style="margin-top:8px"></div>
+    <div class="field-label" style="margin-top:12px">风险等级</div>
+    <div class="grid2" id="hz-rl-grid" style="margin-top:8px"></div>
     <button class="btn-primary btn-row" id="btn-hz-submit" style="margin-top:18px">提交隐患</button>
     <input type="file" accept="image/*" capture="environment" class="file-ghost" id="hz-file-camera">
     <input type="file" accept="image/*" class="file-ghost" id="hz-file-album">
@@ -5947,6 +5961,10 @@ const HAZARD_VIEWS = ["hazard-list", "hazard-form", "hazard-detail", "hazard-ass
 // 类别/级别**必须与服务端 index.js 同名单**（后端校验拒绝不在名单内的值）
 const HAZARD_CATEGORIES = ["设备设施","消防安全","用电安全","危化品","作业安全","高处作业","交通运输","公共设施","环境卫生","违规操作","其他"];
 const HAZARD_LEVELS = ["一般隐患","重大隐患"];
+// CF-WPS-103 AI 识别回填：前端与服务端同一份权威枚举（不命中则退回手选）
+const HAZARD_THREE_VIOLATION = ["是","否"];
+const HAZARD_MAJOR = ["是","否"];
+const HAZARD_RISK_LEVELS = ["重大风险","较大风险","一般风险","低风险"];
 const HAZARD_PHOTO_MAX = 3;
 
 function isHazardUser(){
@@ -5963,7 +5981,7 @@ function renderHazardEntry(){
 }
 
 /* ---- 隐患类别/级别宫格（opt-card.selectable 体系） ---- */
-let hazardForm = { category: "", level: "", location: "", description: "", photos: [] };
+let hazardForm = { category: "", level: "", location: "", description: "", photos: [], basis: "", suggestion: "", threeViolation: "", majorHazard: "", riskLevel: "", aiRaw: "" };
 // CF-WPS-96：草稿断点续传（文字字段；照片不落盘 —— 现场照片必须重拍，
 // 存 file_token 会在 token 失效后变成「详情里裂图」，宁可让人重拍）。
 // 场景与巡查同源：低端安卓调起系统相机时页面被系统回收 / 用户误刷新，
@@ -5995,16 +6013,25 @@ function loadHazardDraft(){
 // 带着草稿回到表单（照片一律重拍）
 function applyHazardDraft(d){
   hazardForm = { category: d.category || "", level: d.level || "",
-                 location: d.location || "", description: d.description || "", photos: [] };
+                 location: d.location || "", description: d.description || "", photos: [],
+                 basis: d.basis || "", suggestion: d.suggestion || "",
+                 threeViolation: d.threeViolation || "", majorHazard: d.majorHazard || "",
+                 riskLevel: d.riskLevel || "", aiRaw: d.aiRaw || "" };
   $("#hz-location").value = hazardForm.location;
   $("#hz-desc").value = hazardForm.description;
+  $("#hz-basis").value = hazardForm.basis;
+  $("#hz-suggestion").value = hazardForm.suggestion;
   updateHzDescCount();
   renderHzCatGrid();
   renderHzLevelGrid();
   renderHzPhotos();
+  renderHzTvGrid();
+  renderHzMjGrid();
+  renderHzRlGrid();
 }
 // 打开登记表单：有草稿就续上（页面被回收 / 误刷新后回来），没有就清空重来
 function openHazardForm(){
+  wireHazardAi();
   const d = loadHazardDraft();
   if(d){
     applyHazardDraft(d);
@@ -6017,13 +6044,19 @@ function openHazardForm(){
 }
 function resetHazardForm(){
   clearHazardDraft();
-  hazardForm = { category: "", level: "", location: "", description: "", photos: [] };
+  hazardForm = { category: "", level: "", location: "", description: "", photos: [], basis: "", suggestion: "", threeViolation: "", majorHazard: "", riskLevel: "", aiRaw: "" };
   $("#hz-location").value = "";
   $("#hz-desc").value = "";
+  $("#hz-basis").value = "";
+  $("#hz-suggestion").value = "";
+  $("#hz-ai-badge").style.display = "none";
   updateHzDescCount();
   renderHzCatGrid();
   renderHzLevelGrid();
   renderHzPhotos();
+  renderHzTvGrid();
+  renderHzMjGrid();
+  renderHzRlGrid();
 }
 function hzOptCard(label, selected, sub){
   return '<div class="opt-card selectable' + (selected ? " selected" : "") + '">' +
@@ -6052,6 +6085,51 @@ function renderHzLevelGrid(){
     d.firstElementChild.onclick = () => { hazardForm.level = name; renderHzLevelGrid(); saveHazardDraft(); };
     g.appendChild(d.firstElementChild);
   });
+}
+function renderHzSelectGrid(gridId, values, formKey){
+  const g = $(gridId);
+  g.innerHTML = "";
+  values.forEach(name => {
+    const d = document.createElement("div");
+    d.innerHTML = hzOptCard(name, hazardForm[formKey] === name);
+    d.firstElementChild.onclick = () => { hazardForm[formKey] = name; renderHzSelectGrid(gridId, values, formKey); saveHazardDraft(); };
+    g.appendChild(d.firstElementChild);
+  });
+}
+function renderHzTvGrid(){ renderHzSelectGrid("#hz-tv-grid", HAZARD_THREE_VIOLATION, "threeViolation"); }
+function renderHzMjGrid(){ renderHzSelectGrid("#hz-mj-grid", HAZARD_MAJOR, "majorHazard"); }
+function renderHzRlGrid(){ renderHzSelectGrid("#hz-rl-grid", HAZARD_RISK_LEVELS, "riskLevel"); }
+// 将 AI 识别结果回填到表单（可编辑），并打「AI 生成·请核对」角标
+function applyHazardAiResult(b){
+  if(b.description){ hazardForm.description = b.description; $("#hz-desc").value = b.description; updateHzDescCount(); }
+  if(b.category && HAZARD_CATEGORIES.indexOf(b.category) >= 0){ hazardForm.category = b.category; renderHzCatGrid(); }
+  if(b.basis){ hazardForm.basis = b.basis; $("#hz-basis").value = b.basis; }
+  if(b.suggestion){ hazardForm.suggestion = b.suggestion; $("#hz-suggestion").value = b.suggestion; }
+  if(b.threeViolation){ hazardForm.threeViolation = b.threeViolation; renderHzTvGrid(); }
+  if(b.majorHazard){ hazardForm.majorHazard = b.majorHazard; renderHzMjGrid(); }
+  if(b.riskLevel){ hazardForm.riskLevel = b.riskLevel; renderHzRlGrid(); }
+  hazardForm.aiRaw = b.raw || "";
+  const badge = $("#hz-ai-badge");
+  badge.style.display = "block";
+  badge.innerHTML = 'AI 已生成建议内容（由 <b>' + esc(b.provider || "AI") + '</b> 识别），请人工核对后再提交。原始输出已留痕。';
+}
+// AI 识别按钮：把最新一张现场照发给 /api/mobile/hazard/ai-fill，回填后可改
+function wireHazardAi(){
+  const btn = $("#btn-hz-ai");
+  if(!btn) return;
+  btn.onclick = async () => {
+    if(!hazardForm.photos.length){ flashMsg("请先拍一张现场照再识别"); return; }
+    const old = btn.textContent;
+    btn.disabled = true; btn.textContent = "识别中…";
+    try{
+      const r = await mobileApi("/api/mobile/hazard/ai-fill", { image: hazardForm.photos[0] });
+      if(r && r.status === 200 && r.body){
+        if(r.body.ai_disabled){ flashMsg("AI 识别未启用或暂时不可用，请手动填写"); }
+        else { applyHazardAiResult(r.body); flashMsg("AI 识别完成，请核对并补充"); }
+      } else { flashMsg("AI 识别失败，请手动填写"); }
+    }catch(e){ flashMsg("AI 识别失败，请手动填写"); }
+    finally{ btn.disabled = false; btn.textContent = old; }
+  };
 }
 function updateHzDescCount(){
   $("#hz-desc-count").textContent = String(hazardForm.description || "").length + " / 500";
@@ -6126,6 +6204,13 @@ async function submitHazard(){
       find_time: nowLocalInspectTime(),
       client_request_id: newClientRequestId(),
     };
+    // CF-WPS-103 AI 回填字段（可空；空字段服务端不写，不污染统计）
+    if(hazardForm.basis) body.rectify_basis = hazardForm.basis;
+    if(hazardForm.suggestion) body.rectify_suggestion = hazardForm.suggestion;
+    if(hazardForm.threeViolation) body.three_violation = hazardForm.threeViolation;
+    if(hazardForm.majorHazard) body.major_hazard = hazardForm.majorHazard;
+    if(hazardForm.riskLevel) body.risk_level = hazardForm.riskLevel;
+    body.ai_raw = hazardForm.aiRaw || "";
     if(gps && Number.isFinite(gps.lat) && Number.isFinite(gps.lng)){
       body.latitude = String(gps.lat);
       body.longitude = String(gps.lng);
@@ -6286,6 +6371,16 @@ async function renderHazardDetail(recordId, from){
     '<div class="card"><div class="field-label">隐患描述</div>' +
       '<div class="info-line" style="margin-top:6px;line-height:1.7">' + esc(x.description || "") + '</div>' +
     '</div>';
+  // CF-WPS-103 AI 识别回填字段（只读展示）
+  if(x.basis || x.suggestion || x.threeViolation || x.majorHazard || x.riskLevel){
+    html += '<div class="card"><div class="field-label">AI 识别结果</div>' +
+      (x.threeViolation ? '<div class="info-line" style="margin-top:6px">三违判定：' + esc(x.threeViolation) + '</div>' : '') +
+      (x.majorHazard ? '<div class="info-line" style="margin-top:4px">重大事故隐患判定：' + esc(x.majorHazard) + '</div>' : '') +
+      (x.riskLevel ? '<div class="info-line" style="margin-top:4px">风险等级：' + esc(x.riskLevel) + '</div>' : '') +
+      (x.basis ? '<div class="info-line" style="margin-top:4px">整改依据：' + esc(x.basis) + '</div>' : '') +
+      (x.suggestion ? '<div class="info-line" style="margin-top:4px">整改建议：' + esc(x.suggestion) + '</div>' : '') +
+    '</div>';
+  }
   if(x.photoTokens && x.photoTokens.length){
     html += '<div class="card"><div class="field-label">现场照片（' + x.photoTokens.length + '）</div>' +
       '<div class="hz-photos" id="hz-detail-photos" style="margin-top:8px"></div></div>';
