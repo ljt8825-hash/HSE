@@ -608,6 +608,18 @@ function isResponseFormatRejected(result) {
   return /response_format|json_object|json mode|json_mode/i.test(JSON.stringify(result.body || ''));
 }
 
+/** 网关瞬时错误的 HTTP 状态（值得原样重发一次） */
+const TRANSIENT_GATEWAY_STATUS = new Set([408, 429, 502, 503, 504]);
+function isTransientGatewayError(result) {
+  return !!(result && TRANSIENT_GATEWAY_STATUS.has(result.status));
+}
+function visionRetryDelayMs() {
+  const n = Number(process.env.VISION_TRANSIENT_RETRY_DELAY_MS);
+  // 显式配 0 表示不等；非法/未配回落 2000ms
+  return Number.isFinite(n) && n >= 0 ? n : 2000;
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 /** OpenAI 兼容 /chat/completions（图片走 image_url dataURL） */
 async function requestOpenAi(provider, b64, prompt, filePath) {
   const url = openAiChatUrl(provider.baseUrl);
@@ -618,11 +630,27 @@ async function requestOpenAi(provider, b64, prompt, filePath) {
     headers['x-api-key'] = provider.apiKey;
   }
   const payload = buildOpenAiPayload(provider, b64, mimeOf(filePath), prompt);
-  let result = await postJsonUrl(url, payload, provider.timeoutMs, headers);
+  // 瞬时错误（502/503/504/408/429）或网络层错误自动重发一次，兜免费渠道/网关的抖动
+  const sendWithRetry = async () => {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        const result = await postJsonUrl(url, payload, provider.timeoutMs, headers);
+        if (attempt === 0 && isTransientGatewayError(result)) {
+          await sleep(visionRetryDelayMs());
+          continue;
+        }
+        return result;
+      } catch (e) {
+        if (attempt > 0) throw e;
+        await sleep(visionRetryDelayMs());
+      }
+    }
+  };
+  let result = await sendWithRetry();
   // jsonMode=auto：先按标准带 response_format，被拒就去掉再试一次（免费/自建网关常不支持）
   if (provider.jsonMode === 'auto' && payload.response_format && isResponseFormatRejected(result)) {
     delete payload.response_format;
-    result = await postJsonUrl(url, payload, provider.timeoutMs, headers);
+    result = await sendWithRetry();
   }
   return result;
 }
@@ -644,8 +672,11 @@ function assertVisionResponse(provider, result) {
     if (status === 404) {
       throw new Error(`视觉网关端点或模型不存在（HTTP 404）：请检查 VISION_OPENAI_BASE_URL=${provider.baseUrl} 与 VISION_OPENAI_MODEL=${provider.model}。${short}`);
     }
-    if (status === 429) {
-      throw new Error(`视觉网关限流（HTTP 429），请稍后重试或调大 VISION_OPENAI_TIMEOUT_MS。${short}`);
+    if (status === 408 || status === 429 || status === 502 || status === 503 || status === 504) {
+      const hint = provider.channel === 'dsh-vl'
+        ? '免费渠道上游波动/限流：请稍后重试，或在模型下拉框换一个免费模型；持续失败可关闭 DSH 开关改用本机 Ollama。'
+        : '请稍后重试，或调大 VISION_OPENAI_TIMEOUT_MS。';
+      throw new Error(`视觉网关瞬时错误（HTTP ${status}，已自动重试一次仍失败）：${short}。${hint}`);
     }
     if (status >= 400 && /image|vision|modal|multimodal|image_url/i.test(bodyText)) {
       throw new Error(`模型 ${provider.model} 不支持图像输入（HTTP ${status}）。${short}`);

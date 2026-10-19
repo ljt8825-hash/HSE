@@ -9,6 +9,8 @@
  *      A. OpenAI 通道 —— dataURL 拼装 → Bearer 鉴权 → JSON 解析 → response_format 重试
  *      B. Ollama 通道 —— 回归确认仍走 /api/chat + images 字段（默认行为未变）
  *      C. DSH 通道   —— 前端「DSH 识别」开关打开后走 /v1/chat/completions
+ *   5. 真链路：网关瞬时错误（502/503/504/408/429）与网络层错误自动重试一次
+ *      （CF-WPS-VISION-04，含与 response_format 被拒兜底的叠加场景）
  *
  * 运行：node services/ai/visionProvider.standalone.test.js
  */
@@ -72,6 +74,7 @@ const CLEAN = {
   VISION_OPENAI_API_KEY: undefined,
   VISION_OPENAI_TIMEOUT_MS: undefined,
   VISION_OPENAI_JSON_MODE: undefined,
+  VISION_TRANSIENT_RETRY_DELAY_MS: undefined,
   DSH_BASE_URL: undefined,
   DSH_MODEL: undefined,
   DSH_API_KEY: undefined,
@@ -533,10 +536,145 @@ async function e2eDsh() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// 真链路：网关瞬时错误（502/503/504/408/429）自动重试一次（CF-WPS-VISION-04）
+// ---------------------------------------------------------------------------
+const RETRY_FAST = { ...CLEAN, VISION_TRANSIENT_RETRY_DELAY_MS: '0' };
+
+async function e2eRetry() {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vision-retry-'));
+  const img = path.join(tmpDir, 'page.png');
+  fs.writeFileSync(img, PNG_1PX);
+
+  // 用例 A：首个请求 502，重试后成功
+  {
+    const seen = [];
+    const { server, port } = await startFakeGateway((req, res) => {
+      seen.push(req);
+      if (seen.length === 1) {
+        return jsonReply(res, { error: { message: 'Provider returned error' } }, 502);
+      }
+      return jsonReply(res, { choices: [{ message: { content: '{"rows":[{"name":"赵六"}]}' } }] });
+    });
+    try {
+      const r = await withEnv({
+        ...RETRY_FAST,
+        VISION_PROVIDER: 'openai',
+        VISION_OPENAI_BASE_URL: `http://127.0.0.1:${port}/v1`,
+        VISION_OPENAI_MODEL: 'vl-fake',
+        VISION_OPENAI_API_KEY: 'test-key',
+      }, () => recognizeLedgerImage({ filePath: img }));
+      t('502 后自动重发一次并识别成功（共 2 次请求）', () => {
+        assert.strictEqual(seen.length, 2);
+        assert.strictEqual(r.rows.length, 1);
+        assert.strictEqual(r.rows[0].name, '赵六');
+      });
+    } finally {
+      server.close();
+    }
+  }
+
+  // 用例 B：持续 502（dsh 通道）→ 文案含「已自动重试」+ 免费渠道可操作建议
+  {
+    const seen = [];
+    const { server, port } = await startFakeGateway((req, res) => {
+      seen.push(req);
+      jsonReply(res, { error: { message: 'Provider returned error' } }, 502);
+    });
+    try {
+      let err = null;
+      try {
+        await withEnv({
+          ...RETRY_FAST,
+          DSH_BASE_URL: `http://127.0.0.1:${port}/v1`,
+          DSH_API_KEY: 'dsh-key',
+        }, () => recognizeLedgerImage({ filePath: img, provider: 'dsh', model: 'my-vl-9' }));
+      } catch (e) {
+        err = e;
+      }
+      t('持续 502 只重试一次（共 2 次请求）', () => {
+        assert.strictEqual(seen.length, 2);
+      });
+      t('dsh 持续 502 → 文案含「已自动重试」与免费渠道建议', () => {
+        assert.ok(err, '应当抛错');
+        assert.ok(/已自动重试/.test(err.message), err.message);
+        assert.ok(/免费模型|Ollama/.test(err.message), err.message);
+      });
+    } finally {
+      server.close();
+    }
+  }
+
+  // 用例 C：502 重试又撞上 response_format 被拒（400）→ 去掉后成功（共 3 次请求）
+  {
+    const seen = [];
+    const { server, port } = await startFakeGateway((req, res) => {
+      seen.push(req);
+      if (seen.length === 1) {
+        return jsonReply(res, { error: { message: 'Provider returned error' } }, 502);
+      }
+      if (seen.length === 2 && req.body && req.body.response_format) {
+        return jsonReply(res, { error: { message: 'response_format is not supported by this model' } }, 400);
+      }
+      return jsonReply(res, { choices: [{ message: { content: '{"rows":[{"name":"周八"}]}' } }] });
+    });
+    try {
+      const r = await withEnv({
+        ...RETRY_FAST,
+        VISION_PROVIDER: 'openai',
+        VISION_OPENAI_BASE_URL: `http://127.0.0.1:${port}/v1`,
+        VISION_OPENAI_MODEL: 'vl-fake',
+        VISION_OPENAI_API_KEY: 'test-key',
+        VISION_OPENAI_JSON_MODE: 'auto',
+      }, () => recognizeLedgerImage({ filePath: img }));
+      t('502 重试撞 response_format 被拒 → 去掉再发成功（共 3 次请求）', () => {
+        assert.strictEqual(seen.length, 3);
+        assert.strictEqual(seen[2].body.response_format, undefined);
+        assert.strictEqual(r.rows.length, 1);
+        assert.strictEqual(r.rows[0].name, '周八');
+      });
+    } finally {
+      server.close();
+    }
+  }
+
+  // 用例 D：首个请求网络层错误（连接被重置）→ 自动重发成功
+  {
+    const seen = [];
+    const { server, port } = await startFakeGateway((req, res) => {
+      seen.push(req);
+      if (seen.length === 1) {
+        res.socket.destroy(); // 制造 ECONNRESET，验证 catch 分支也重试
+        return;
+      }
+      jsonReply(res, { choices: [{ message: { content: '{"rows":[{"name":"吴九"}]}' } }] });
+    });
+    try {
+      const r = await withEnv({
+        ...RETRY_FAST,
+        VISION_PROVIDER: 'openai',
+        VISION_OPENAI_BASE_URL: `http://127.0.0.1:${port}/v1`,
+        VISION_OPENAI_MODEL: 'vl-fake',
+        VISION_OPENAI_API_KEY: 'test-key',
+      }, () => recognizeLedgerImage({ filePath: img }));
+      t('网络层错误（ECONNRESET）后自动重发并成功（共 2 次请求）', () => {
+        assert.strictEqual(seen.length, 2);
+        assert.strictEqual(r.rows.length, 1);
+        assert.strictEqual(r.rows[0].name, '吴九');
+      });
+    } finally {
+      server.close();
+    }
+  }
+
+  try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (e) { /* 忽略 */ }
+}
+
 (async () => {
   await e2e();
   await e2eOllama();
   await e2eDsh();
+  await e2eRetry();
 })()
   .catch((e) => {
     fail += 1;
