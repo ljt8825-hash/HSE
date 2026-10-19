@@ -24,11 +24,16 @@ import {
 } from '#/api/import';
 import {
   aiRecognize,
+  aiRecognizeProgress,
+  getAiProviderStatus,
   ocrConfirm,
   ocrExportExcel,
   ocrRecognize,
   signinConfirm,
   signinRecognize,
+  type AiProviderStatusResult,
+  type AiRecognizeProgressResult,
+  type AiVisionProvider,
   type OcrRecognizeResult,
   type SigninRecognizeResult,
   type SigninUntrained,
@@ -114,6 +119,48 @@ function isOcrFile(name: string): boolean {
   return OCR_EXTS.some((e) => lower.endsWith(e));
 }
 
+// AI 识图进度轮询间隔；aiPollToken 用于废弃旧轮询（新一轮开始/卸载时 ++，旧 setTimeout 发现 token 变化即停止）
+const AI_POLL_INTERVAL_MS = 1500;
+let aiPollToken = 0;
+
+/** 轮询 AI 识图任务直到 done/error；进行中通过 onProgress 实时回传「已识别/总页数」。
+ *  token 变化（新一轮开始或卸载）时停止并返回 null。 */
+function waitForAiResult(
+  jobId: string,
+  pollToken: number,
+  onProgress: (ret: { done: number; total: number }) => void,
+): Promise<OcrRecognizeResult | null> {
+  return new Promise((resolve, reject) => {
+    const tick = async () => {
+      if (pollToken !== aiPollToken) {
+        resolve(null);
+        return;
+      }
+      let r: AiRecognizeProgressResult;
+      try {
+        r = await aiRecognizeProgress(jobId);
+      } catch (e: any) {
+        reject(new Error(e?.message || '识别进度查询失败'));
+        return;
+      }
+      if (pollToken !== aiPollToken) {
+        resolve(null);
+        return;
+      }
+      if (r.status === 'recognizing') {
+        onProgress({ done: r.donePages ?? 0, total: r.totalPages ?? 0 });
+        setTimeout(tick, AI_POLL_INTERVAL_MS);
+      } else if (r.status === 'error') {
+        reject(new Error(r.error || 'AI 识别失败'));
+      } else {
+        // done：后端把完整识别 payload 透传在进度响应里（sourceType 由 meta 侧补全，故需显式断言）
+        resolve(r as unknown as OcrRecognizeResult);
+      }
+    };
+    tick();
+  });
+}
+
 /**
  * 把后端返回的行级校验错误（errors: ImportRowError[]）拼成可读文案。
  * 形如：第3行：[司机姓名] 缺少必填字段，至少需要填写：姓名；第5行（Sheet1）：[罚款] 数值格式错误："200元万"…
@@ -168,10 +215,76 @@ export function useGenericImport(
   // OCR 识别中 / 识别后的引导建议（照片/超大归档等质量受限时提示改用 Excel 模板）
   const ocrLoading = ref(false);
   const ocrAdvice = ref<string | null>(null);
+  // AI 识图逐页进度：已识别 / 总页数（识别期间实时展示，避免长时间零反馈误以为卡死）
+  const ocrProgress = ref<{ done: number; total: number } | null>(null);
 
   // AI 识图模式状态（独立入口，仅 UI 区分；识别结果仍写入 ocr* 状态以复用预览/入库流）
   const aiActive = ref(false);
   const aiLoading = ref(false);
+
+  // ---- AI 识图视觉通道（CF-WPS-VISION-02）----
+  // local = 本机 Ollama（默认）；dsh = DSH 本地 OpenAI 网关。
+  // 选择落 localStorage，刷新后保持；状态灯由 GET /training-ocr/ai-provider 探测。
+  const AI_PROVIDER_STORAGE_KEY = 'hse.ai.vision.provider';
+  const aiProvider = ref<AiVisionProvider>(readAiProvider());
+  const aiProviderStatus = ref<AiProviderStatusResult | null>(null);
+  const aiProviderChecking = ref(false);
+
+  function readAiProvider(): AiVisionProvider {
+    try {
+      return localStorage.getItem(AI_PROVIDER_STORAGE_KEY) === 'dsh' ? 'dsh' : 'local';
+    } catch {
+      // 隐私模式 / 无 localStorage：退回默认
+      return 'local';
+    }
+  }
+
+  /** 切换通道并持久化 */
+  function setAiProvider(v: AiVisionProvider) {
+    aiProvider.value = v === 'dsh' ? 'dsh' : 'local';
+    try {
+      localStorage.setItem(AI_PROVIDER_STORAGE_KEY, aiProvider.value);
+    } catch {
+      /* 存不下不影响本次会话 */
+    }
+  }
+
+  /** 探测两条通道是否可用（失败不抛，只把状态置空） */
+  async function refreshAiProviderStatus() {
+    if (aiProviderChecking.value) return;
+    aiProviderChecking.value = true;
+    try {
+      aiProviderStatus.value = await getAiProviderStatus();
+    } catch {
+      aiProviderStatus.value = null;
+    } finally {
+      aiProviderChecking.value = false;
+    }
+  }
+
+  // 模型（仅 dsh）：持久化，避免每次进页面都要重选；空 = 用服务端默认（DSH_MODEL）
+  const AI_MODEL_STORAGE_KEY = 'hse.ai.vision.model';
+  const aiModel = ref<string>(readAiModel());
+  // 附加提示词：任务级参数，不持久化（每次识别需求不同，留着旧提示反而误事）
+  const aiPrompt = ref<string>('');
+
+  function readAiModel(): string {
+    try {
+      return localStorage.getItem(AI_MODEL_STORAGE_KEY) || '';
+    } catch {
+      return '';
+    }
+  }
+
+  function setAiModel(v: string) {
+    aiModel.value = String(v || '');
+    try {
+      if (aiModel.value) localStorage.setItem(AI_MODEL_STORAGE_KEY, aiModel.value);
+      else localStorage.removeItem(AI_MODEL_STORAGE_KEY);
+    } catch {
+      /* 忽略 */
+    }
+  }
 
   // AI 识图接受图片与 PDF（PDF 由后端渲染为页图后识别）
   const AI_FILE_EXTS = ['.pdf', '.png', '.jpg', '.jpeg', '.bmp', '.webp'];
@@ -201,8 +314,43 @@ export function useGenericImport(
 
   function onDownloadTemplate() {
     downloadImportTemplate(module)
-      .then((blob: Blob) => triggerDownload(blob, `${module}_template.xlsx`))
+      .then((blob: Blob) => triggerDownload(blob, templateFileName(module)))
       .catch(() => message.error('下载模板失败'));
+  }
+
+  // 模板下载文件名：全站统一中文（含培训记录页、培训系列及检查/考核等各类模块）。未登记的模块沿用 `{module}_template.xlsx`
+  const TEMPLATE_FILE_NAMES: Record<string, string> = {
+    'training-ledger': '培训台账导入模板',
+    ledger: '培训台账导入模板',
+    'training-requirements': '岗位培训要求导入模板',
+    'training-plans': '培训计划导入模板',
+    'training-new-employee': '新员工培训导入模板',
+    'training-driver': '驾驶员实操培训导入模板',
+    'training-records': '培训证书记录导入模板',
+    'emergency-drill': '应急演练导入模板',
+    'standard-clauses': '标准条款导入模板',
+    accidents: '事故导入模板',
+    assessment: '考核导入模板',
+    budget: '预算导入模板',
+    'driver-assessment': '驾驶员考核导入模板',
+    'driver-monthly': '驾驶员月度考核导入模板',
+    'driver-three-violation': '驾驶员三违导入模板',
+    'driver-violation': '驾驶员违章导入模板',
+    emergency: '应急预案导入模板',
+    'fire-facility': '消防设施导入模板',
+    grid: '网格管理导入模板',
+    hazards: '隐患导入模板',
+    other: '其他保险导入模板',
+    'over-age': '超龄员工导入模板',
+    personnel: '人员保险导入模板',
+    regulations: '制度导入模板',
+    'risk-control': '风险管控导入模板',
+    vehicle: '车辆保险导入模板',
+    violation: '违章导入模板',
+  };
+  function templateFileName(mod: string): string {
+    const base = TEMPLATE_FILE_NAMES[mod];
+    return base ? `${base}.xlsx` : `${mod}_template.xlsx`;
   }
 
   /** 组装 OCR 预览：中文列头 + 行值回填 */
@@ -322,6 +470,7 @@ export function useGenericImport(
   /**
    * AI 识图（独立入口）：把培训台账照片交给本地视觉大模型识别。
    * 结果复用 OCR 状态流（ocrActive/ocrRows/预览/入库/导出），与文本/PDF OCR 互不干扰。
+   * 识别为异步任务：提交拿 jobId → 轮询进度（实时刷新「已识别 X / 总 Y 页」）→ done 取结果。
    */
   async function onAiRecognize(file: File) {
     if (!file) return;
@@ -329,11 +478,16 @@ export function useGenericImport(
       message.error('AI 识图支持图片（PNG / JPG / BMP / WebP）和 PDF');
       return;
     }
+    const pollToken = ++aiPollToken;
+    const refreshProgress = (ret: { done: number; total: number }) => {
+      if (pollToken === aiPollToken) ocrProgress.value = ret;
+    };
     ocrActive.value = true;
     aiActive.value = true;
     aiLoading.value = true;
     ocrLoading.value = true;
     ocrAdvice.value = null;
+    ocrProgress.value = null;
     ocrRows.value = [];
     ocrColumns.value = [];
     ocrSourceName.value = file.name.replace(/\.[^.]+$/, '');
@@ -345,7 +499,17 @@ export function useGenericImport(
     signinPreview.value = null;
     signinUntrained.value = [];
     try {
-      const res = await aiRecognize(file);
+      const submitted = await aiRecognize(
+        file,
+        undefined,
+        aiProvider.value,
+        // 模型只在 dsh 通道有意义；本地 Ollama 用服务端配置的 qwen2.5vl
+        aiProvider.value === 'dsh' ? (aiModel.value || undefined) : undefined,
+        aiPrompt.value.trim() || undefined,
+      );
+      const res = await waitForAiResult(submitted.jobId, pollToken, refreshProgress);
+      // token 变化（新一轮开始/卸载）时返回 null，直接终止本次流程
+      if (!res) return;
       ocrRows.value = res.rows ?? [];
       ocrColumns.value = res.columns ?? [];
       buildOcrPreview(res);
@@ -360,8 +524,12 @@ export function useGenericImport(
     } catch (e: any) {
       ocrActive.value = false;
       aiActive.value = false;
-      importPreviewError.value = `AI 识图失败：${e?.message || '请检查 Ollama 视觉模型是否已安装（ollama pull qwen2.5vl）'}`;
+      const fallback = aiProvider.value === 'dsh'
+        ? '请确认 dsh 已开启「本地 OpenAI 网关」（默认 127.0.0.1:18899）'
+        : '请检查 Ollama 视觉模型是否已安装（ollama pull qwen2.5vl）';
+      importPreviewError.value = `AI 识图失败：${e?.message || fallback}`;
     } finally {
+      if (pollToken === aiPollToken) ocrProgress.value = null;
       aiLoading.value = false;
       ocrLoading.value = false;
     }
@@ -551,9 +719,19 @@ export function useGenericImport(
     ocrActive,
     ocrLoading,
     ocrAdvice,
+    ocrProgress,
     aiEnabled,
     aiActive,
     aiLoading,
+    // AI 识图通道（local / dsh）+ 模型 + 附加提示词
+    aiProvider,
+    aiProviderStatus,
+    aiProviderChecking,
+    setAiProvider,
+    refreshAiProviderStatus,
+    aiModel,
+    setAiModel,
+    aiPrompt,
     ocrRows,
     ocrColumns,
     ocrSourceName,

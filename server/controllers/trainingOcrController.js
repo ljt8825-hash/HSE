@@ -39,6 +39,12 @@ const recognize = (req, res) => run(req, res, () => service.recognize(req));
 // ---- 1.5 AI 识图（本地 Ollama 视觉模型识别培训台账照片，独立入口）----
 const aiRecognize = (req, res) => run(req, res, () => service.aiRecognize(req));
 
+// ---- 1.5b AI 识图进度轮询（GET /ai-recognize/progress/:jobId）----
+const aiRecognizeProgress = (req, res) => run(req, res, () => service.aiRecognizeProgress(req.params));
+
+// ---- 1.5c 视觉通道状态（本地 Ollama / DSH 网关是否可用；给前端开关做状态灯）----
+const aiProviderStatus = (req, res) => run(req, res, () => service.aiProviderStatus());
+
 // ---- 2. 导出 Excel（rows/columns 经 query 传入）→ 二进制附件 ----
 const exportExcel = async (req, res) => {
   try {
@@ -82,6 +88,6 @@ const exportSignin = async (req, res) => {
 };
 
 module.exports = {
-  recognize, aiRecognize, exportExcel, confirm, confirmSignin,
+  recognize, aiRecognize, aiRecognizeProgress, aiProviderStatus, exportExcel, confirm, confirmSignin,
   signinList, signinDetail, exportSignin,
 };

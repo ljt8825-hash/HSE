@@ -5,17 +5,24 @@
  *  A. recognizeLedgerImage  通用「培训台账表格」识别（逐行识别文字内容）
  *  B. recognizeSigninSheet  培训会议签到表「填写完整性检查」（只判断单元格填/空，不识字）
  *
- * 能力：把一张/一份图片交给本地 Ollama 视觉大模型（qwen2.5vl 系列），返回结构化结果。
+ * 能力：把一张/一份图片交给视觉大模型，返回结构化 JSON。
+ *
+ * 双传输（2026-10-19 新增，默认行为不变）：
+ *  A. ollama —— 原生 `POST /api/chat`，图片放 `messages[].images`（默认，qwen2.5vl 系列）
+ *  B. openai —— OpenAI 兼容 `POST /v1/chat/completions`，图片走 `image_url` dataURL
+ *     适配任意 OpenAI 兼容网关（本机 dsh「本地 OpenAI 网关」、云厂商 VL API 等）。
+ *     由 `VISION_PROVIDER=openai` 显式开启；只配了 `VISION_OPENAI_BASE_URL` 也视为开启。
  *
  * 定位：独立于「AI 统一 API」（generate/stream/analyze 走 aiGateway 的文本通道）。
- * 视觉识图需要把图片以 base64 塞进消息的多模态 images 字段，文本 Provider 不支持，
- * 故此处单独实现 Ollama /api/chat 多模态调用；不修改 .env（VL 模型可用环境变量进程级覆盖）。
+ * 视觉识图需要把图片内联进多模态消息，文本 Provider 不支持，故此处单独实现。
  *
  * 未接入 Provider 注册表（aiProviderRegistry）是刻意为之：
  *  - 不改变现有 Grok/Ollama/OpenAI 文本链路与能力声明（visionInput 仍如实标 false）
  *  - troubleshooting 最小化，仅服务“培训台账/签到表照片识图”这一业务点
  */
 const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const { resolveTeamCode } = require('./signinCodeMap');
 
 const VL_MODEL = process.env.OLLAMA_VL_MODEL || 'qwen2.5vl:7b';
@@ -28,6 +35,176 @@ const AI_SIGNIN_RETRY = (() => {
   if (!Number.isFinite(n) || n < 0) return 1;
   return Math.min(Math.floor(n), 3);
 })();
+
+// ---------------------------------------------------------------------------
+// 传输通道解析（ollama / openai 兼容）
+// 刻意做成**每次调用时**读 process.env 的函数：既能让测试在同一进程里切换两路，
+// 也避免「改了 .env 必须重启」之外的隐性状态（重启仍是最稳的生效方式）。
+// ---------------------------------------------------------------------------
+const OPENAI_KINDS = new Set(['openai', 'openai-compatible', 'gateway', 'relay']);
+
+// DSH（dsh-our-free-model 插件的「本地 OpenAI 网关」）默认值。
+// 网关默认只监听回环地址，端口由插件设置决定，默认 18899。
+const DSH_DEFAULT_BASE_URL = 'http://127.0.0.1:18899/v1';
+const DSH_DEFAULT_MODEL = 'nvidia/nemotron-3.5-super-vl:free';
+
+/**
+ * DSH 网关可选的「免费视觉模型」白名单（前端下拉框数据源）。
+ *
+ * 只有真正接受 image_url 的模型才能进这个列表 —— 其余会在识别时直接报
+ * 「No endpoints found that support image input」。
+ * 2026-10-19 在本机 127.0.0.1:18899 逐个实测：
+ *   ✅ nvidia/nemotron-3.5-super-vl:free（2.3s）
+ *   ✅ nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free（4.1s）
+ *   ✅ openrouter/free（4.3s）
+ *   ✅ kilo-auto/free（4.5s）
+ *   ❌ nvidia/nemotron-3.5-lightning:free —— 明确拒绝图像输入
+ *   ⚠️ 裸 id（xxx-free）属 EAC 渠道：本机 IP 被判「abusive traffic」时整批 403
+ * 需要加自己的模型：设 `DSH_VISION_MODELS=a,b,c`（逗号分隔）即可追加。
+ */
+const DSH_VISION_MODELS = [
+  { id: 'nvidia/nemotron-3.5-super-vl:free', label: 'Nemotron 3.5 Super VL（推荐）', channel: 'kilo', note: '' },
+  { id: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free', label: 'Nemotron 3 Nano Omni', channel: 'kilo', note: '' },
+  { id: 'openrouter/free', label: 'OpenRouter Free（自动路由）', channel: 'kilo', note: '' },
+  { id: 'kilo-auto/free', label: 'Kilo Auto Free（自动路由）', channel: 'kilo', note: '' },
+  { id: 'nemotron-3.5-super-vl-free', label: 'Nemotron 3.5 Super VL（EAC）', channel: 'eac', note: 'EAC 渠道，网络受限时不可用' },
+  { id: 'deepseek-v4.1-flash-free', label: 'DeepSeek V4.1 Flash（EAC）', channel: 'eac', note: 'EAC 渠道，网络受限时不可用' },
+  { id: 'glm-5.3-flash-free', label: 'GLM 5.3 Flash（EAC）', channel: 'eac', note: 'EAC 渠道，网络受限时不可用' },
+  { id: 'space-bunny-free', label: 'Space Bunny（EAC）', channel: 'eac', note: 'EAC 渠道，网络受限时不可用' },
+  { id: 'big-pickle', label: 'Big Pickle（EAC）', channel: 'eac', note: 'EAC 渠道，网络受限时不可用' },
+];
+
+/** 当前可选模型（白名单 + DSH_VISION_MODELS 追加项） */
+function listDshVisionModels() {
+  const list = DSH_VISION_MODELS.map((m) => ({ ...m }));
+  const extra = String(process.env.DSH_VISION_MODELS || '')
+    .split(/[,;\s]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  for (const id of extra) {
+    if (!list.some((m) => m.id === id)) {
+      list.push({ id, label: id, channel: 'custom', note: '自定义（DSH_VISION_MODELS）' });
+    }
+  }
+  return list;
+}
+
+/** 服务端校验：只接受白名单内的模型，避免前端传任意字符串打到网关 */
+function isDshVisionModel(id) {
+  const want = String(id || '').trim();
+  return !!want && listDshVisionModels().some((m) => m.id === want);
+}
+
+/** 读 dsh 插件的 availability.json（EAC 渠道的可用性），失败返回空对象 */
+function readDshAvailability() {
+  const home = String(process.env.DSH_HOME || '').trim() || path.join(os.homedir(), '.dsh');
+  try {
+    const j = JSON.parse(fs.readFileSync(path.join(home, 'our-free-model', 'availability.json'), 'utf8'));
+    return (j && j.results) || {};
+  } catch (e) {
+    return {};
+  }
+}
+
+/** Ollama 本地通道描述 */
+function ollamaProvider() {
+  return {
+    kind: 'ollama',
+    label: '本地 Ollama',
+    baseUrl: BASE_URL,
+    model: VL_MODEL,
+    apiKey: '',
+    timeoutMs: AI_TIMEOUT_MS,
+    jsonMode: 'on',
+    channel: 'ollama-vl',
+  };
+}
+
+/**
+ * 读 DSH 网关的 forward key。
+ * 优先 DSH_API_KEY；没配就去插件的 settings.json 取 `forwardKey`（零配置）。
+ * ⚠️ 不要用 `~/.dsh/openai-gateway/api-key` —— 那是 chan-relay 的 key，打 forward 网关必 401。
+ */
+function readDshForwardKey() {
+  const fromEnv = String(process.env.DSH_API_KEY || '').trim();
+  if (fromEnv) return fromEnv;
+  const home = String(process.env.DSH_HOME || '').trim() || path.join(os.homedir(), '.dsh');
+  const file = path.join(home, 'our-free-model', 'settings.json');
+  try {
+    const j = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return String((j && j.forwardKey) || '').trim();
+  } catch (e) {
+    return '';
+  }
+}
+
+/** DSH 通道描述（强制走 OpenAI 兼容协议）；modelOverride 来自前端下拉框 */
+function dshProvider(modelOverride) {
+  return {
+    kind: 'openai',
+    label: 'DSH 网关',
+    baseUrl: String(process.env.DSH_BASE_URL || '').trim() || DSH_DEFAULT_BASE_URL,
+    model: String(modelOverride || '').trim()
+      || String(process.env.DSH_MODEL || '').trim()
+      || DSH_DEFAULT_MODEL,
+    apiKey: readDshForwardKey(),
+    timeoutMs: Number(process.env.DSH_TIMEOUT_MS)
+      || Number(process.env.VISION_OPENAI_TIMEOUT_MS)
+      || AI_TIMEOUT_MS,
+    jsonMode: String(process.env.DSH_JSON_MODE || process.env.VISION_OPENAI_JSON_MODE || 'auto')
+      .trim()
+      .toLowerCase(),
+    channel: 'dsh-vl',
+  };
+}
+
+/**
+ * 解析视觉通道。
+ * @param {'local'|'dsh'|'ollama'|'openai'|''} [override]
+ *   - `local` / `ollama`：强制本地 Ollama（忽略 VISION_PROVIDER）
+ *   - `dsh`：强制 DSH 网关（忽略 VISION_PROVIDER）
+ *   - 空：沿用原有 env 逻辑（VISION_PROVIDER / VISION_OPENAI_* / 默认 Ollama）
+ * @param {{model?:string}} [opts] 仅 dsh 生效：前端下拉框选中的模型
+ * @returns {{kind:'ollama'|'openai', label:string, baseUrl:string, model:string,
+ *            apiKey:string, timeoutMs:number, jsonMode:string, channel:string}}
+ */
+function resolveVisionProvider(override, opts = {}) {
+  const want = String(override || '').trim().toLowerCase();
+  if (want === 'dsh') return dshProvider(opts && opts.model);
+  if (want === 'local' || want === 'ollama') return ollamaProvider();
+
+  const kindRaw = String(process.env.VISION_PROVIDER || '').trim().toLowerCase();
+  const openAiBase = String(process.env.VISION_OPENAI_BASE_URL || '').trim();
+  const openAiModel = String(process.env.VISION_OPENAI_MODEL || '').trim();
+  const wantOpenAi = OPENAI_KINDS.has(kindRaw) || (!kindRaw && !!openAiBase);
+
+  if (wantOpenAi) {
+    if (!openAiBase) {
+      throw new Error('VISION_PROVIDER=openai 时必须配置 VISION_OPENAI_BASE_URL（如 http://127.0.0.1:18899/v1）');
+    }
+    if (!openAiModel) {
+      throw new Error('VISION_PROVIDER=openai 时必须配置 VISION_OPENAI_MODEL（如 nvidia/nemotron-3.5-super-vl:free）');
+    }
+    return {
+      kind: 'openai',
+      label: 'OpenAI 兼容网关',
+      baseUrl: openAiBase,
+      model: openAiModel,
+      apiKey: String(process.env.VISION_OPENAI_API_KEY || '').trim(),
+      timeoutMs: Number(process.env.VISION_OPENAI_TIMEOUT_MS) || AI_TIMEOUT_MS,
+      jsonMode: String(process.env.VISION_OPENAI_JSON_MODE || 'auto').trim().toLowerCase(),
+      channel: 'openai-vl',
+    };
+  }
+
+  return ollamaProvider();
+}
+
+/** 供接口 meta / 排错页展示「当前用的是哪一路、哪个模型」 */
+function visionProviderMeta(override, opts) {
+  const p = resolveVisionProvider(override, opts);
+  return { model: p.model, channel: p.channel, provider: p.kind, baseUrl: p.baseUrl };
+}
 
 /** 字段说明（snake 口径，与 scripts/ocr_ledger.py 的 FORM_LABELS 一致；补 id_card/grid_level/frequency） */
 const FIELD_DESC = [
@@ -47,9 +224,26 @@ const FIELD_DESC = [
   'remark：备注（培训地点/参加人数等）',
 ].join('\n');
 
+/**
+ * 把用户自定义提示词追加到系统提示词尾部。
+ * 刻意**不替换**原提示词：JSON schema、枚举候选、字段口径这些硬约束必须保留，
+ * 否则模型自由发挥会让下游解析直接失败。用户要求只能作为「附加约束」。
+ */
+function appendUserPrompt(lines, extraPrompt) {
+  const extra = String(extraPrompt || '').trim();
+  if (extra) {
+    lines.push(
+      '',
+      '【用户附加要求（必须服从上面的 JSON 输出格式与字段口径；与本要求冲突时以 JSON 格式为准）】',
+      extra,
+    );
+  }
+  return lines.join('\n');
+}
+
 /** A. 通用台账提示词：固定输出“仅JSON对象”，避免模型加解释文本 */
-function buildLedgerPrompt() {
-  return [
+function buildLedgerPrompt(extraPrompt) {
+  return appendUserPrompt([
     '你是一名 HSE 培训台账识别助手。请仔细阅读图片中的培训记录/培训台账表格，',
     '把表格中的每一行识别为一条培训记录。',
     '',
@@ -57,7 +251,7 @@ function buildLedgerPrompt() {
     `每个元素的字段与含义如下：\n${FIELD_DESC}`,
     '无法从图上识别到的字段填空字符串，数字类字段填0。',
     '若图片中没有规整的培训记录表格，则返回 {"rows":[]}。',
-  ].join('\n');
+  ], extraPrompt);
 }
 
 // ---------------------------------------------------------------------------
@@ -78,9 +272,10 @@ const HEADER_CN = {
 /**
  * 组装签到表提示词
  * @param {string} rosterText 已格式化的「乡镇 → 经理姓名」名单（闭集选择，避免模型编造）
+ * @param {string} [extraPrompt] 用户附加要求（不改变「只判填/空」的硬约束）
  */
-function buildSigninPrompt(rosterText) {
-  return [
+function buildSigninPrompt(rosterText, extraPrompt) {
+  return appendUserPrompt([
     '你是一名 HSE「培训会议签到表」完整性检查助手。',
     '',
     '【最重要的约束】本任务**不要求识别汉字内容**，不要输出任何姓名/日期/地点文字。',
@@ -126,16 +321,16 @@ function buildSigninPrompt(rosterText) {
     '  "missing_signature_count": 1,',
     '  "newcomer_count": 0',
     '}]}',
-  ].join('\n');
+  ], extraPrompt);
 }
 
 // ---------------------------------------------------------------------------
 // Ollama 调用 / JSON 解析（两通道共用）
 // ---------------------------------------------------------------------------
 
-/** 通用 http/https POST 并返回 {status, body} */
-function postJson(pathname, payload, timeoutMs) {
-  const urlObj = new URL(`${BASE_URL.replace(/\/$/, '')}${pathname}`);
+/** 通用 http/https POST（绝对 URL），返回 {status, body} */
+function postJsonUrl(fullUrl, payload, timeoutMs, headers = {}) {
+  const urlObj = new URL(fullUrl);
   const isHttps = urlObj.protocol === 'https:';
   const lib = isHttps ? require('https') : require('http');
   const body = JSON.stringify(payload);
@@ -144,11 +339,12 @@ function postJson(pathname, payload, timeoutMs) {
       {
         hostname: urlObj.hostname,
         port: urlObj.port || (isHttps ? 443 : 80),
-        path: urlObj.pathname,
+        path: urlObj.pathname + urlObj.search,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Content-Length': Buffer.byteLength(body),
+          ...headers,
         },
         timeout: timeoutMs,
       },
@@ -162,19 +358,92 @@ function postJson(pathname, payload, timeoutMs) {
         });
       },
     );
-    req.on('timeout', () => { req.destroy(); reject(new Error('Ollama 视觉识别请求超时')); });
+    req.on('timeout', () => { req.destroy(); reject(new Error(`视觉识别请求超时（${timeoutMs}ms）`)); });
     req.on('error', (err) => reject(err));
     req.write(body);
     req.end();
   });
 }
 
-/** 从模型原始返回中抽取 message/response 文本 */
+/** Ollama 通道沿用原签名：相对路径拼接 OLLAMA_BASE_URL */
+function postJson(pathname, payload, timeoutMs) {
+  return postJsonUrl(`${BASE_URL.replace(/\/$/, '')}${pathname}`, payload, timeoutMs);
+}
+
+/** 由文件扩展名推断 dataURL 的 mime（OpenAI 通道必须显式带 mime） */
+function mimeOf(filePath) {
+  const ext = String(filePath || '').toLowerCase().match(/\.([a-z0-9]+)$/);
+  switch (ext && ext[1]) {
+    case 'png': return 'image/png';
+    case 'webp': return 'image/webp';
+    case 'gif': return 'image/gif';
+    case 'bmp': return 'image/bmp';
+    case 'jpg':
+    case 'jpeg':
+    default: return 'image/jpeg';
+  }
+}
+
+/**
+ * 把用户填的 base URL 归一成 chat/completions 完整地址。
+ * 已带版本段（/v1、/v1beta、/openai/v1 …）就只补路径；否则补 /v1。
+ * @param {string} baseUrl
+ */
+function openAiChatUrl(baseUrl) {
+  const base = String(baseUrl || '').trim().replace(/\/+$/, '');
+  if (!base) throw new Error('VISION_OPENAI_BASE_URL 不能为空');
+  if (/\/v\d+[a-z0-9]*$/i.test(base)) return `${base}/chat/completions`;
+  return `${base}/v1/chat/completions`;
+}
+
+/**
+ * 构造 OpenAI 兼容的多模态请求体。
+ * @param {{model:string, jsonMode:string}} provider
+ * @param {string} b64   图片 base64（不含前缀）
+ * @param {string} mime  image/jpeg 等
+ * @param {string} prompt
+ */
+function buildOpenAiPayload(provider, b64, mime, prompt) {
+  const payload = {
+    model: provider.model,
+    temperature: 0.1,
+    stream: false,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'text', text: prompt },
+        { type: 'image_url', image_url: { url: `data:${mime};base64,${b64}` } },
+      ],
+    }],
+  };
+  // jsonMode: on=必带 / off=不带 / auto=先带，被拒再去掉重试（见 callOpenAiVision）
+  if (provider.jsonMode !== 'off') payload.response_format = { type: 'json_object' };
+  return payload;
+}
+
+/** 从模型原始返回中抽取正文文本（兼容 OpenAI 与 Ollama 两种响应形状） */
 function extractText(modelBody) {
-  if (modelBody && modelBody.message && typeof modelBody.message.content === 'string') {
+  if (!modelBody || typeof modelBody !== 'object') return '';
+
+  // OpenAI 兼容：choices[0].message.content（字符串或 parts 数组）
+  const choice = Array.isArray(modelBody.choices) ? modelBody.choices[0] : null;
+  const oaMsg = choice && choice.message;
+  if (oaMsg) {
+    if (typeof oaMsg.content === 'string') return oaMsg.content;
+    if (Array.isArray(oaMsg.content)) {
+      return oaMsg.content
+        .map((p) => (typeof p === 'string' ? p : (p && typeof p.text === 'string' ? p.text : '')))
+        .join('');
+    }
+  }
+  // OpenAI 兼容（老版 completions / 少数网关）
+  if (choice && typeof choice.text === 'string') return choice.text;
+
+  // Ollama /api/chat 与 /api/generate
+  if (modelBody.message && typeof modelBody.message.content === 'string') {
     return modelBody.message.content;
   }
-  if (modelBody && typeof modelBody.response === 'string') {
+  if (typeof modelBody.response === 'string') {
     return modelBody.response;
   }
   return '';
@@ -275,7 +544,12 @@ function extractJson(text) {
 
   // 策略 1：整体直接 parse
   let parsed = tryParse(s);
-  if (parsed !== undefined) return { json: parsed, raw: s };
+  if (parsed !== undefined) {
+    // 裸数组（模型直接吐 [{...},{...}]）统一包成 {rows:[...]}，与策略 3 口径一致；
+    // 否则调用方读 json.rows 会拿到 undefined，整页识别结果被静默丢弃。
+    if (Array.isArray(parsed)) return { json: { rows: parsed }, raw: s };
+    return { json: parsed, raw: s };
+  }
 
   // 策略 2：在所有最外层平衡 {...} 中优先挑含 rows 字段的；
   //         模型常把解释 prose 中零散的 {} 放在前面，把最终答案放在末尾。
@@ -311,67 +585,140 @@ function extractJson(text) {
   return null;
 }
 
-/**
- * 发起一次 VL 识别并取回解析后的 JSON。
- * @param {Object} p
- * @param {string} p.filePath 本地图片绝对路径
- * @param {string} p.prompt   提示词
- * @param {string} [p.tag]    日志标记
- * @returns {Promise<Object>} 解析后的 JSON 对象
- */
-async function callVision({ filePath, prompt, tag = 'vision' }) {
-  if (!filePath || !fs.existsSync(filePath)) {
-    throw new Error('图片文件不存在');
-  }
-  const b64 = fs.readFileSync(filePath, { encoding: 'base64' });
+// ---------------------------------------------------------------------------
+// 两条传输通道的请求与错误翻译
+// ---------------------------------------------------------------------------
+
+/** Ollama 原生 /api/chat（默认通道，行为与改造前完全一致） */
+async function requestOllama(provider, b64, prompt) {
   const payload = {
-    model: VL_MODEL,
+    model: provider.model,
     messages: [{ role: 'user', content: prompt, images: [b64] }],
     format: 'json',
     stream: false,
     // num_ctx 需大于图片视觉 token（A4@2x 约 2.5k）+ 文本；qwen2.5vl 默认 4096 偏紧，扩到 8192
     options: { temperature: 0.1, num_ctx: Number(process.env.OLLAMA_VL_NUM_CTX) || 8192 },
   };
+  return postJson('/api/chat', payload, provider.timeoutMs);
+}
+
+/** 网关是否明确拒了 response_format / json_object（据此决定要不要去掉重试） */
+function isResponseFormatRejected(result) {
+  if (!result || !(result.status >= 400)) return false;
+  return /response_format|json_object|json mode|json_mode/i.test(JSON.stringify(result.body || ''));
+}
+
+/** OpenAI 兼容 /chat/completions（图片走 image_url dataURL） */
+async function requestOpenAi(provider, b64, prompt, filePath) {
+  const url = openAiChatUrl(provider.baseUrl);
+  const headers = {};
+  if (provider.apiKey) {
+    // dsh 本地网关两种都认；云厂商只认 Authorization。多带一个头无副作用。
+    headers.Authorization = `Bearer ${provider.apiKey}`;
+    headers['x-api-key'] = provider.apiKey;
+  }
+  const payload = buildOpenAiPayload(provider, b64, mimeOf(filePath), prompt);
+  let result = await postJsonUrl(url, payload, provider.timeoutMs, headers);
+  // jsonMode=auto：先按标准带 response_format，被拒就去掉再试一次（免费/自建网关常不支持）
+  if (provider.jsonMode === 'auto' && payload.response_format && isResponseFormatRejected(result)) {
+    delete payload.response_format;
+    result = await postJsonUrl(url, payload, provider.timeoutMs, headers);
+  }
+  return result;
+}
+
+/** 把上游的 HTTP 状态翻译成业务可读的错误（两条通道口径不同） */
+function assertVisionResponse(provider, result) {
+  const status = result && result.status;
+  const body = (result && result.body) || {};
+  const bodyText = typeof body === 'string' ? body : JSON.stringify(body || {});
+  const rawMsg = (body && body.error && (body.error.message || body.error.code))
+    ? String(body.error.message || body.error.code)
+    : bodyText;
+  const short = String(rawMsg || '').slice(0, 300);
+
+  if (provider.kind === 'openai') {
+    if (status === 401 || status === 403) {
+      throw new Error(`视觉网关鉴权失败（HTTP ${status}）：请检查 VISION_OPENAI_API_KEY 是否正确。${short}`);
+    }
+    if (status === 404) {
+      throw new Error(`视觉网关端点或模型不存在（HTTP 404）：请检查 VISION_OPENAI_BASE_URL=${provider.baseUrl} 与 VISION_OPENAI_MODEL=${provider.model}。${short}`);
+    }
+    if (status === 429) {
+      throw new Error(`视觉网关限流（HTTP 429），请稍后重试或调大 VISION_OPENAI_TIMEOUT_MS。${short}`);
+    }
+    if (status >= 400 && /image|vision|modal|multimodal|image_url/i.test(bodyText)) {
+      throw new Error(`模型 ${provider.model} 不支持图像输入（HTTP ${status}）。${short}`);
+    }
+    if (status >= 400) {
+      throw new Error(`视觉网关识别失败（HTTP ${status}）：${short}`);
+    }
+    if (body && body.error) {
+      throw new Error(`视觉网关识别失败：${short}`);
+    }
+    return;
+  }
+
+  // ---- Ollama：保留改造前的原文案，避免既有排错手册失效 ----
+  if (status === 404 && /model/i.test(bodyText)) {
+    throw new Error(`AI 视觉模型不可用：请先执行「ollama pull ${provider.model}」下载后重试`);
+  }
+  if (status === 404) {
+    throw new Error(`Ollama 视觉端点不可用（HTTP 404），请检查 OLLAMA_BASE_URL=${provider.baseUrl}`);
+  }
+  if (status === 500 && /model.*fallback|no.*vision|does not support/i.test(bodyText)) {
+    throw new Error(`模型 ${provider.model} 不支持图像输入`);
+  }
+  if (status >= 400) {
+    throw new Error(`Ollama 视觉识别失败（HTTP ${status}）：${short}`);
+  }
+  if (body && body.error) {
+    throw new Error(`Ollama 视觉识别失败：${String(body.error)}`);
+  }
+}
+
+/**
+ * 发起一次 VL 识别并取回解析后的 JSON。
+ * @param {Object} p
+ * @param {string} p.filePath 本地图片绝对路径
+ * @param {string} p.prompt   提示词
+ * @param {string} [p.tag]    日志标记
+ * @param {'local'|'dsh'|''} [p.provider] 本次调用的通道覆盖（缺省走 env 配置）
+ * @param {string} [p.model] 本次调用的模型覆盖（仅 dsh 通道生效）
+ * @returns {Promise<Object>} 解析后的 JSON 对象
+ */
+async function callVision({ filePath, prompt, tag = 'vision', provider: providerOverride = '', model = '' }) {
+  if (!filePath || !fs.existsSync(filePath)) {
+    throw new Error('图片文件不存在');
+  }
+  const provider = resolveVisionProvider(providerOverride, { model });
+  const b64 = fs.readFileSync(filePath, { encoding: 'base64' });
 
   let result;
   try {
-    result = await postJson('/api/chat', payload, AI_TIMEOUT_MS);
+    result = provider.kind === 'openai'
+      ? await requestOpenAi(provider, b64, prompt, filePath)
+      : await requestOllama(provider, b64, prompt);
   } catch (e) {
     throw new Error(`AI 视觉识别请求失败：${e.message}`);
   }
+  assertVisionResponse(provider, result);
 
-  const status = result && result.status;
-  const body = (result && result.body) || {};
-  if (status === 404 && /model/i.test(JSON.stringify(body))) {
-    throw new Error(`AI 视觉模型不可用：请先执行「ollama pull ${VL_MODEL}」下载后重试`);
-  }
-  if (status === 404) {
-    throw new Error(`Ollama 视觉端点不可用（HTTP 404），请检查 OLLAMA_BASE_URL=${BASE_URL}`);
-  }
-  if (status === 500 && /model.*fallback|no.*vision|does not support/i.test(JSON.stringify(body))) {
-    throw new Error(`模型 ${VL_MODEL} 不支持图像输入`);
-  }
-  if (status >= 400) {
-    const msg = (body && body.error) ? String(body.error).slice(0, 300) : JSON.stringify(body).slice(0, 300);
-    throw new Error(`Ollama 视觉识别失败（HTTP ${status}）：${msg}`);
-  }
-  if (body.error) {
-    throw new Error(`Ollama 视觉识别失败：${String(body.error)}`);
-  }
-
-  const extracted = extractJson(extractText(body));
+  const raw = extractText(result && result.body);
+  const extracted = extractJson(raw);
   if (!extracted || !extracted.json || typeof extracted.json !== 'object') {
-    const raw = extractText(body);
     // 服务端日志：把模型原始输出和截断预览落下来，便于排查
     console.error(`[visionService:${tag}] JSON 解析失败`, {
-      model: VL_MODEL,
+      provider: provider.kind,
+      channel: provider.channel,
+      model: provider.model,
       filePath,
       rawLen: raw.length,
       rawPreview: preview(raw, 300),
     });
     const empty = !raw || !raw.trim();
     const msg = empty
-      ? 'AI 视觉识别结果为空，请确认图片清晰可读、或更换其他模型（当前模型：' + VL_MODEL + '）后重试'
+      ? 'AI 视觉识别结果为空，请确认图片清晰可读、或更换其他模型（当前模型：' + provider.model + '）后重试'
       : `AI 视觉识别结果无法解析为 JSON，请更换清晰、规整的培训台账照片后重试。模型原始输出：${preview(raw, 160)}`;
     throw new Error(msg);
   }
@@ -591,17 +938,20 @@ function isWeakRow(row) {
  * @param {string} p.filePath   页图绝对路径
  * @param {string} [p.rosterText] 乡镇→经理名单（闭集）
  * @param {number} [p.pageNo]   页码（1 基）
+ * @param {'local'|'dsh'|''} [p.provider] 本次调用的通道覆盖
+ * @param {string} [p.model] 模型覆盖（仅 dsh）
+ * @param {string} [p.extraPrompt] 用户附加要求（追加到系统提示词，不改变 JSON 约束）
  * @returns {Promise<{ row: Object|null, skipped: boolean, reason: string, weak: boolean, attempts: number }>}
  */
-async function recognizeSigninSheet({ filePath, rosterText = '', pageNo = 0 }) {
-  const prompt = buildSigninPrompt(rosterText);
+async function recognizeSigninSheet({ filePath, rosterText = '', pageNo = 0, provider = '', model = '', extraPrompt = '' }) {
+  const prompt = buildSigninPrompt(rosterText, extraPrompt);
   const rosterIndex = buildRosterIndex(rosterText);
   let last = { row: null, skipped: true, reason: 'other', weak: true, attempts: 0 };
   const maxAttempts = AI_SIGNIN_RETRY + 1;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     // eslint-disable-next-line no-await-in-loop
-    const json = await callVision({ filePath, prompt, tag: 'signin' });
+    const json = await callVision({ filePath, prompt, tag: 'signin', provider, model });
     const rows = Array.isArray(json.rows) ? json.rows : [];
     const first = rows.find((x) => x && typeof x === 'object') || null;
 
@@ -628,13 +978,139 @@ async function recognizeSigninSheet({ filePath, rosterText = '', pageNo = 0 }) {
  * 识别图片中的培训台账（通用文字识别通道）
  * @param {Object} params
  * @param {string} params.filePath - 已上传到本机的图片文件绝对路径（png/jpg/jpeg/bmp/webp）
+ * @param {'local'|'dsh'|''} [params.provider] - 本次调用的通道覆盖
+ * @param {string} [params.model] - 模型覆盖（仅 dsh）
+ * @param {string} [params.extraPrompt] - 用户附加要求
  * @returns {Promise<{ rows: Object[] }>}
- * @throws 当 Ollama 不可达 / VL 模型缺失 / 输出无法解析时抛出带清晰提示的 Error
+ * @throws 当视觉通道不可达 / 模型缺失 / 输出无法解析时抛出带清晰提示的 Error
  */
-async function recognizeLedgerImage({ filePath }) {
-  const json = await callVision({ filePath, prompt: buildLedgerPrompt(), tag: 'ledger' });
+async function recognizeLedgerImage({ filePath, provider = '', model = '', extraPrompt = '' }) {
+  const json = await callVision({
+    filePath,
+    prompt: buildLedgerPrompt(extraPrompt),
+    tag: 'ledger',
+    provider,
+    model,
+  });
   const rows = Array.isArray(json.rows) ? json.rows : [];
   return { rows: normalizeRows(rows) };
+}
+
+// ---------------------------------------------------------------------------
+// 通道健康探测（给前端「DSH 识别」开关做状态灯，永不抛错）
+// ---------------------------------------------------------------------------
+
+/** 轻量 GET，返回 { ok, status, body } 或 { ok:false, detail } */
+function httpGetJson(fullUrl, headers = {}, timeoutMs = 2500) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (v) => { if (!settled) { settled = true; resolve(v); } };
+    let urlObj;
+    try {
+      urlObj = new URL(fullUrl);
+    } catch (e) {
+      return done({ ok: false, detail: 'URL 非法' });
+    }
+    const lib = urlObj.protocol === 'https:' ? require('https') : require('http');
+    const req = lib.request(
+      {
+        hostname: urlObj.hostname,
+        port: urlObj.port || (urlObj.protocol === 'https:' ? 443 : 80),
+        path: urlObj.pathname + urlObj.search,
+        method: 'GET',
+        headers,
+        timeout: timeoutMs,
+      },
+      (res) => {
+        let data = '';
+        res.on('data', (c) => { data += c; });
+        res.on('end', () => {
+          let body = data;
+          try { body = JSON.parse(data); } catch (e) { /* 保留原文 */ }
+          done({ ok: res.statusCode < 400, status: res.statusCode, body });
+        });
+      },
+    );
+    req.on('timeout', () => { req.destroy(); done({ ok: false, detail: `超时（${timeoutMs}ms）` }); });
+    req.on('error', (err) => done({ ok: false, detail: err.code || err.message }));
+    req.end();
+  });
+}
+
+let _probeCache = { at: 0, value: null };
+const PROBE_TTL_MS = 10 * 1000;
+
+/**
+ * 探测本地 Ollama 与 DSH 网关是否可用（结果缓存 10s）。
+ * @returns {Promise<{local:Object, dsh:Object}>}
+ */
+async function probeVisionProviders() {
+  if (_probeCache.value && Date.now() - _probeCache.at < PROBE_TTL_MS) return _probeCache.value;
+
+  const local = ollamaProvider();
+  const dsh = dshProvider();
+
+  const localUrl = `${local.baseUrl.replace(/\/+$/, '')}/api/tags`;
+  let dshModelsUrl = '';
+  try {
+    dshModelsUrl = openAiChatUrl(dsh.baseUrl).replace(/\/chat\/completions$/, '/models');
+  } catch (e) {
+    dshModelsUrl = '';
+  }
+  const dshHeaders = {};
+  if (dsh.apiKey) {
+    dshHeaders.Authorization = `Bearer ${dsh.apiKey}`;
+    dshHeaders['x-api-key'] = dsh.apiKey;
+  }
+
+  const [l, d] = await Promise.all([
+    httpGetJson(localUrl, {}),
+    dshModelsUrl ? httpGetJson(dshModelsUrl, dshHeaders) : Promise.resolve({ ok: false, detail: '地址非法' }),
+  ]);
+
+  const localModels = l.ok && l.body && Array.isArray(l.body.models)
+    ? l.body.models.map((m) => m && m.name).filter(Boolean)
+    : [];
+  const dshModels = d.ok && d.body && Array.isArray(d.body.data)
+    ? d.body.data.map((m) => m && m.id).filter(Boolean)
+    : [];
+  // EAC 渠道的可用性由插件自己记在 availability.json；kilo 渠道不在里面 → available=null（未知）
+  const availability = readDshAvailability();
+
+  const value = {
+    local: {
+      provider: 'local',
+      channel: local.channel,
+      model: local.model,
+      baseUrl: local.baseUrl,
+      ok: !!l.ok,
+      hasModel: l.ok ? localModels.includes(local.model) : false,
+      detail: l.ok ? '' : String(l.detail || `HTTP ${l.status || '?'}`),
+    },
+    dsh: {
+      provider: 'dsh',
+      channel: dsh.channel,
+      model: dsh.model,
+      baseUrl: dsh.baseUrl,
+      ok: !!d.ok,
+      hasModel: d.ok ? dshModels.includes(dsh.model) : false,
+      hasKey: !!dsh.apiKey,
+      detail: d.ok
+        ? ''
+        : (dsh.apiKey ? String(d.detail || `HTTP ${d.status || '?'}`) : '未找到 DSH 网关 key（检查 dsh 是否已开启本地网关）'),
+      /** 下拉框数据源：白名单模型 + 网关是否真的暴露 + EAC 可用性 */
+      models: listDshVisionModels().map((m) => {
+        const av = availability[m.id];
+        return {
+          ...m,
+          present: dshModels.includes(m.id),
+          available: av ? av.state === 'available' : null,
+        };
+      }),
+    },
+  };
+  _probeCache = { at: Date.now(), value };
+  return value;
 }
 
 module.exports = {
@@ -647,4 +1123,17 @@ module.exports = {
   buildSigninPrompt,
   VL_MODEL,
   normalizeRows,
+  // 传输通道（CF-WPS-VISION-01/02，2026-10-19）
+  resolveVisionProvider,
+  visionProviderMeta,
+  probeVisionProviders,
+  listDshVisionModels,
+  isDshVisionModel,
+  appendUserPrompt,
+  buildLedgerPrompt,
+  openAiChatUrl,
+  buildOpenAiPayload,
+  mimeOf,
+  extractText,
+  extractJson,
 };

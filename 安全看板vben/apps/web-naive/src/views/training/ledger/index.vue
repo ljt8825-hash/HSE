@@ -14,11 +14,12 @@
  *  - 导入：复用通用导入网关（Excel + OCR，training-ledger 模块）
  *  - 导出：导出当前月度汇总 CSV
  */
-import { computed, h, onMounted, reactive, ref } from 'vue';
-import type { DataTableColumns } from 'naive-ui';
+import { computed, nextTick, onActivated, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
+import type { VxeTableGridColumns } from '@vben/plugins/vxe-table';
 import {
   NButton,
-  NDataTable,
+  NCheckbox,
   NDrawer,
   NDrawerContent,
   NForm,
@@ -26,18 +27,19 @@ import {
   NInput,
   NModal,
   NPopconfirm,
-  NPopover,
-  NScrollbar,
   NSelect,
   NSpace,
   NSpin,
+  NSwitch,
   NTag,
   NText,
+  NTooltip,
 } from 'naive-ui';
 import { $t } from '#/locales';
 
 import {
   HseActionBar,
+  HseDataGrid,
   HseImportDialog,
   HsePageLayout,
   HseStatusTag,
@@ -57,7 +59,6 @@ import {
 } from '#/api/hse/training';
 import {
   getTrainingUntrained,
-  type SigninUntrained,
 } from '#/api/trainingOcr';
 import { useGenericImport } from '#/views/hse/_shared/useGenericImport';
 import { message } from '#/adapter/naive';
@@ -80,6 +81,55 @@ const months = ref<{ label: string; value: string }[]>(monthOptions());
 const currentMonth = months.value[0]?.value ?? '';
 const selectedMonth = ref(currentMonth);
 
+// 支持外部下钻：query 携带 month（YYYY-MM）时，加载后自动定位该月
+// （自动评分页「HSE教育培训」列扣分明细点击下钻使用；无 query 时行为与默认一致）
+const route = useRoute();
+const drillMonth = computed(() =>
+  typeof route.query.month === 'string' ? route.query.month : '',
+);
+
+// 支持外部定位：query 携带 emp（考核对象 employeeId）时，加载后高亮定位到该人汇总行
+const hlEmpId = ref<number | null>(null);
+let hlTimer: ReturnType<typeof setTimeout> | null = null;
+function ledgerRowClassName(params: { row: any }): string {
+  return hlEmpId.value != null && Number(params?.row?.employeeId) === hlEmpId.value
+    ? 'training-locate-row'
+    : '';
+}
+function scrollToHlRow() {
+  if (hlEmpId.value == null) return;
+  nextTick(() => {
+    setTimeout(() => {
+      document.querySelector<HTMLElement>('.vxe-body--row.training-locate-row')?.scrollIntoView({
+        block: 'center',
+        behavior: 'smooth',
+      });
+    }, 120);
+  });
+}
+function scheduleHlFadeOut() {
+  if (hlTimer) clearTimeout(hlTimer);
+  hlTimer = setTimeout(() => {
+    hlEmpId.value = null;
+  }, 3800);
+}
+onUnmounted(() => {
+  if (hlTimer) clearTimeout(hlTimer);
+});
+
+/** 外部定位轻量复现：query 携带 emp 时，基于当前已加载汇总高亮该人所在行并滚动聚焦 */
+function applyExternalLocate() {
+  const qEmp = typeof route.query.emp === 'string' ? Number(route.query.emp) : NaN;
+  if (!Number.isFinite(qEmp) || qEmp <= 0) return;
+  hlEmpId.value = qEmp;
+  scrollToHlRow();
+  scheduleHlFadeOut();
+}
+/** keep-alive：每次标签页被重新激活（再次从自动评分页下钻进入）时，基于当前数据重新高亮定位 */
+onActivated(() => {
+  applyExternalLocate();
+});
+
 // ===================== 汇总列表 =====================
 const loading = ref(false);
 const summaryRows = ref<TrainingPersonnelApi.SummaryItem[]>([]);
@@ -93,6 +143,13 @@ async function loadSummary() {
     summaryRows.value = res.list ?? [];
     summaryTotal.value = res.total ?? 0;
     checkedIds.value = [];
+    // 外部定位（自动评分页点击下钻）：按 query.emp 高亮该人汇总行，停留后自动淡出
+    const qEmp = typeof route.query.emp === 'string' ? Number(route.query.emp) : NaN;
+    if (Number.isFinite(qEmp) && qEmp > 0) {
+      hlEmpId.value = qEmp;
+      scrollToHlRow();
+      scheduleHlFadeOut();
+    }
   } catch {
     summaryRows.value = [];
     summaryTotal.value = 0;
@@ -139,8 +196,8 @@ async function loadDetail() {
   }
 }
 
-function onDetailPageChange(page: number) {
-  detailPage.value = page;
+function onDetailPageChange(payload: { currentPage: number; pageSize: number }) {
+  detailPage.value = payload.currentPage;
   loadDetail();
 }
 
@@ -306,8 +363,17 @@ const {
     ocrActive,
     ocrLoading,
     ocrAdvice,
+    ocrProgress,
     aiEnabled,
     aiLoading,
+    aiProvider,
+    aiProviderStatus,
+    aiProviderChecking,
+    setAiProvider,
+    refreshAiProviderStatus,
+    aiModel,
+    setAiModel,
+    aiPrompt,
     onAiRecognize: onImportAiRecognize,
     signinActive,
     signinPreview,
@@ -319,54 +385,75 @@ const {
     bindRefresh: bindImportRefresh,
   } = useGenericImport('training-ledger', { ocr: true, ai: true });
 bindImportRefresh(loadSummary);
+// 每次打开导入弹窗刷新一次通道状态（DSH 网关可能被开关过），并确保模型选择有效
+watch(importOpen, async (open) => {
+  if (!open) return;
+  await refreshAiProviderStatus();
+  if (aiProvider.value === 'dsh') ensureAiModelSelected();
+});
 
-// ----- 未培训名单悬浮菜单（点击缺少数） -----
-const untrainedLoading = ref(false);
-const untrainedList = ref<SigninUntrained[]>([]);
+// ===================== 数字明细弹窗（对齐「三违管理考核」扣分明细弹窗交互） =====================
+const breakdownOpen = ref(false);
+const breakdownLoading = ref(false);
+const breakdownTitle = ref('');
+const breakdownRows = ref<{ label: string; sub?: string; value: string }[]>([]);
+const breakdownTotal = ref(0);
 
-function showUntrained(row: TrainingPersonnelApi.SummaryItem) {
-  untrainedList.value = [];
-  untrainedLoading.value = true;
+/** 缺少人员数字 → 弹窗（在岗/已离职未培训名单 + 合计） */
+function openMissingBreakdown(row: TrainingPersonnelApi.SummaryItem) {
+  breakdownTitle.value = `${row.name || ''} · ${selectedMonth.value} 缺少人员明细`;
+  breakdownRows.value = [];
+  breakdownTotal.value = row.missingCount || 0;
+  breakdownOpen.value = true;
+  breakdownLoading.value = true;
   getTrainingUntrained(row.employeeId, selectedMonth.value)
     .then((r) => {
-      untrainedList.value = r.list ?? [];
+      const list = r.list ?? [];
+      breakdownRows.value = [
+        ...list
+          .filter((u) => u.status === 'inpost')
+          .map((u) => ({ label: u.name ?? '-', sub: '在岗未培训', value: '未培训' })),
+        ...list
+          .filter((u) => u.status === 'departed')
+          .map((u) => ({ label: u.name ?? '-', sub: '已离职未培训', value: '未培训' })),
+      ];
     })
     .catch(() => {
-      untrainedList.value = [];
+      breakdownRows.value = [];
     })
     .finally(() => {
-      untrainedLoading.value = false;
+      breakdownLoading.value = false;
     });
 }
 
-// 悬浮菜单内容：在岗未培训 / 已离职未培训 分组展示（规则5）
-function renderUntrainedPopover() {
-  const inpost = untrainedList.value.filter((u) => u.status === 'inpost');
-  const departed = untrainedList.value.filter((u) => u.status === 'departed');
-  const group = (title: string, list: SigninUntrained[], tagType: 'warning' | 'default') =>
-    list.length
-      ? h('div', { class: 'mb-2' }, [
-          h('div', { class: 'mb-1 text-xs font-medium text-muted-foreground' }, title),
-          h(
-            'div',
-            { class: 'flex flex-wrap gap-1' },
-            list.map((u) =>
-              h(NTag, { size: 'small', type: tagType, bordered: false }, () =>
-                `${u.name}${u.deptName ? `（${u.deptName}）` : ''}`,
-              ),
-            ),
-          ),
-        ])
-      : null;
-  return h(NSpin, { size: 'small', show: untrainedLoading.value }, () => [
-    h('div', { class: 'max-h-56 overflow-auto text-xs' }, [
-      group('在岗未培训', inpost, 'warning'),
-      group('已离职未培训', departed, 'default'),
-      untrainedList.value.length === 0 && !untrainedLoading.value
-        ? h('div', { class: 'text-muted-foreground' }, '暂无未培训登记')
-        : null,
-    ]),
-  ]);
+/** 培训考核分数数字 → 弹窗（缺少人员 + 资料不完整分项 + 合计） */
+function openScoreBreakdown(row: TrainingPersonnelApi.SummaryItem) {
+  const missing = row.missingCount || 0;
+  const incomplete = row.incompleteCount || 0;
+  breakdownTitle.value = `${row.name || ''} · ${selectedMonth.value} 培训考核分数明细`;
+  breakdownRows.value = [
+    { label: '缺少人员', value: `${missing} 人` },
+    { label: '资料不完整', value: `${incomplete} 人` },
+  ];
+  breakdownTotal.value = missing + incomplete;
+  breakdownLoading.value = false;
+  breakdownOpen.value = true;
+}
+
+/** 资料不完整数字 → 弹窗（计数说明：来自《月度考核结果》台账导入，无逐人明细） */
+function openIncompleteBreakdown(row: TrainingPersonnelApi.SummaryItem) {
+  const incomplete = row.incompleteCount || 0;
+  breakdownTitle.value = `${row.name || ''} · ${selectedMonth.value} 资料不完整明细`;
+  breakdownRows.value = [
+    {
+      label: '资料不完整计数',
+      value: `${incomplete} 人`,
+      sub: '该计数来自《月度考核结果》台账导入，当前无逐人明细',
+    },
+  ];
+  breakdownTotal.value = incomplete;
+  breakdownLoading.value = false;
+  breakdownOpen.value = true;
 }
 
 function triggerDownload(blob: Blob, filename: string) {
@@ -420,6 +507,56 @@ function handleAiImage(e: Event) {
   onImportAiRecognize(file);
 }
 
+// ---- AI 识图通道开关（CF-WPS-VISION-02）----
+// 开 = 走 DSH 本地网关的模型；关 = 走本机 Ollama。选择由 useGenericImport 落 localStorage。
+const aiProviderStatusItem = computed(() => aiProviderStatus.value?.[aiProvider.value] ?? null);
+const aiProviderName = computed(() => (aiProvider.value === 'dsh' ? 'DSH 网关' : '本地 Ollama'));
+const aiProviderDotClass = computed(() => {
+  const st = aiProviderStatusItem.value;
+  if (!st) return 'is-unknown';
+  return st.ok ? 'is-ok' : 'is-bad';
+});
+const aiProviderHint = computed(() => {
+  const st = aiProviderStatusItem.value;
+  if (!st) return `${aiProviderName.value}：状态未知，可再点一次开关刷新`;
+  if (!st.ok) return `${aiProviderName.value} 不可用：${st.detail || '连接失败'}`;
+  return `${aiProviderName.value} 可用：${st.model}${st.hasModel ? '' : '（模型不在可用清单中）'}`;
+});
+
+// DSH 模型下拉：只列网关真的暴露了的模型；EAC 渠道当前不可用的置灰但仍可见（说明原因）
+const dshModelOptions = computed(() => {
+  const list = aiProviderStatus.value?.dsh?.models ?? [];
+  return list
+    .filter((m) => m.present !== false)
+    .map((m) => ({
+      label: m.available === false ? `${m.label}（当前不可用）` : m.label,
+      value: m.id,
+      disabled: m.available === false,
+    }));
+});
+
+/** 当前选中的模型失效（或没选）时，自动落到第一个可用模型 */
+function ensureAiModelSelected() {
+  const usable = dshModelOptions.value.filter((o) => !o.disabled);
+  if (!usable.length) return;
+  if (!aiModel.value || !usable.some((o) => o.value === aiModel.value)) {
+    setAiModel(usable[0]!.value as string);
+  }
+}
+
+async function onAiProviderToggle(v: boolean) {
+  setAiProvider(v ? 'dsh' : 'local');
+  await refreshAiProviderStatus();
+  if (v) ensureAiModelSelected();
+  const st = aiProviderStatusItem.value;
+  if (!st) return;
+  if (!st.ok) {
+    message.warning(`${aiProviderName.value} 当前不可用：${st.detail || '连接失败'}`);
+  } else if (!st.hasModel) {
+    message.warning(`${aiProviderName.value} 已连通，但模型 ${st.model} 不在可用清单中`);
+  }
+}
+
 function onExportSummary() {
   if (!summaryRows.value.length) {
     message.warning('当前月份无数据可导出');
@@ -450,120 +587,108 @@ function onRefresh() {
 }
 
 // ===================== 表头 =====================
-const columns: DataTableColumns<TrainingPersonnelApi.SummaryItem> = [
-  { type: 'selection', fixed: 'left', width: 40 },
-  { title: '姓名', key: 'name', align: 'center', width: 90, fixed: 'left' },
-  { title: '部门', key: 'department', align: 'center', width: 140 },
-  { title: '培训日期', key: 'month', align: 'center', width: 100 },
-  { title: '应培训', key: 'expectedCount', align: 'center', width: 70 },
-  { title: '实际', key: 'actualCount', align: 'center', width: 60 },
+const columns: VxeTableGridColumns = [
+  { field: '__checkbox', title: '', width: 40, align: 'center', fixed: 'left', slots: { default: 'rowCheck', header: 'headerCheck' } },
+  { title: '姓名', field: 'name', align: 'center', width: 110, fixed: 'left' },
+  { title: '部门', field: 'department', align: 'center', minWidth: 160 },
+  { title: '培训日期', field: 'month', align: 'center', minWidth: 110 },
+  { title: '应培训', field: 'expectedCount', align: 'center', minWidth: 90 },
+  { title: '实际', field: 'actualCount', align: 'center', minWidth: 80 },
   {
-    title: '缺少',
-    key: 'missingCount',
+    title: '缺少人员',
+    field: 'missingCount',
     align: 'center',
-    width: 70,
-    render: (row) => {
-      const n = row.missingCount || 0;
-      const tagType = n > 0 ? 'error' : ('success' as const);
-      const tag = h(
-        NTag,
-        { type: tagType, bordered: false, size: 'small' },
-        () => String(n),
-      );
-      // 规则5：缺少数 >0 时可点击弹出未培训名单（在岗/已离职）
-      if (!(n > 0)) return tag;
-      return h(
-        NPopover,
-        { trigger: 'click', placement: 'bottom-start', width: 320 },
-        {
-          trigger: () =>
-            h(
-              'button',
-              {
-                type: 'button',
-                onClick: () => showUntrained(row),
-                class: 'cursor-pointer rounded px-1 transition-colors hover:bg-muted',
-              },
-              tag,
-            ),
-          default: () => renderUntrainedPopover(),
-        },
-      );
-    },
+    minWidth: 90,
+    slots: { default: 'missingCount' },
   },
   {
     title: '资料不完整',
-    key: 'incompleteCount',
+    field: 'incompleteCount',
     align: 'center',
-    width: 90,
-    render: (row) => {
-      const n = row.incompleteCount || 0;
-      const tagType = n > 0 ? 'warning' : ('success' as const);
-      return h(NTag, { type: tagType, bordered: false, size: 'small' }, () => String(n));
-    },
+    minWidth: 96,
+    slots: { default: 'incompleteCount' },
   },
   {
     title: '培训考核分数',
-    key: 'assessmentScore',
+    field: 'assessmentScore',
     align: 'center',
-    width: 100,
-    render: (row) => {
-      const n = (row.missingCount || 0) + (row.incompleteCount || 0);
-      const tagType = n > 0 ? 'warning' : ('success' as const);
-      return h(NTag, { type: tagType, bordered: false, size: 'small' }, () => String(n));
-    },
+    minWidth: 110,
+    slots: { default: 'assessmentScore' },
   },
   {
     title: '操作',
-    key: 'action',
+    field: 'action',
     align: 'center',
     width: 220,
     fixed: 'right',
-    render: (row) =>
-      h(NSpace, { justify: 'center', size: 4 }, () => [
-        h(
-          NButton,
-          { size: 'small', type: 'primary', quaternary: true, onClick: () => openPersonDetail(row) },
-          { default: () => '查看' },
-        ),
-        h(
-          NButton,
-          { size: 'small', type: 'primary', quaternary: true, onClick: () => openEdit(row) },
-          { default: () => '编辑' },
-        ),
-        h(
-          NPopconfirm,
-          { onPositiveClick: () => onDelete(row) },
-          {
-            trigger: () =>
-              h(NButton, { size: 'small', type: 'error', quaternary: true }, { default: () => '删除' }),
-            default: () => `确定删除「${row.name}」本月的培训记录吗？`,
-          },
-        ),
-      ]),
+    slots: { default: 'action' },
   },
 ];
 
-const detailColumns: DataTableColumns<TrainingPersonnelApi.PersonnelRecordItem> = [
-  { title: '培训日期', key: 'trainingDate', align: 'center', width: 110, render: (r) => (r.trainingDate ? String(r.trainingDate).slice(0, 10) : '-') },
-  { title: '受训人员', key: 'name', align: 'center', minWidth: 110 },
-  { title: '部门', key: 'department', align: 'center', minWidth: 140 },
-  { title: '岗位', key: 'position', align: 'center', minWidth: 120 },
-  { title: '培训类型', key: 'trainingType', align: 'center', minWidth: 120 },
+const detailColumns: VxeTableGridColumns = [
+  { title: '培训日期', field: 'trainingDate', align: 'center', width: 110, slots: { default: 'detailDate' } },
+  { title: '受训人员', field: 'name', align: 'center', minWidth: 110 },
+  { title: '部门', field: 'department', align: 'center', minWidth: 140 },
+  { title: '岗位', field: 'position', align: 'center', minWidth: 120 },
+  { title: '培训类型', field: 'trainingType', align: 'center', minWidth: 120 },
   {
     title: '结果',
-    key: 'result',
+    field: 'result',
     align: 'center',
     width: 100,
-    render: (r) => h(HseStatusTag, { type: 'neutral' }, { default: () => r.result || '-' }),
+    slots: { default: 'result' },
   },
 ];
+
+// —— 汇总表勾选（模板 NCheckbox 手动维护 checkedIds，替代 naive checked-row-keys） ——
+function toggleRowChecked(employeeId: number, checked: boolean) {
+  if (checked) {
+    if (!checkedIds.value.includes(employeeId)) checkedIds.value = [...checkedIds.value, employeeId];
+  } else {
+    checkedIds.value = checkedIds.value.filter((id) => id !== employeeId);
+  }
+}
+function allChecked() {
+  return summaryRows.value.length > 0 && summaryRows.value.every((r) => checkedIds.value.includes(r.employeeId));
+}
+function someChecked() {
+  return summaryRows.value.some((r) => checkedIds.value.includes(r.employeeId));
+}
+function toggleAll(checked: boolean) {
+  checkedIds.value = checked ? summaryRows.value.map((r) => r.employeeId) : [];
+}
 
 onMounted(async () => {
   await Promise.all([loadPlanOptions(), loadTrainingTypes()]);
   await loadLedgerMonths();
+  // 外部下钻（自动评分页点击下钻）：优先定位 query.month；不在月份下拉时补入
+  const dm = drillMonth.value;
+  if (dm) {
+    if (!months.value.some((o) => o.value === dm)) {
+      months.value.push({ label: dm, value: dm });
+      months.value.sort((a, b) => (a.value < b.value ? 1 : -1));
+    }
+    selectedMonth.value = dm;
+  }
   await loadSummary();
 });
+
+// Tabbar keep-alive：页面被缓存后 onMounted 不再触发。再次从自动评分页下钻进入
+// （query.month/emp 变化）时，重新定位月份并重载汇总，触发目标行高亮（loadSummary 内含高亮逻辑）。
+watch(
+  () => [route.query.month, route.query.emp],
+  () => {
+    const dm = drillMonth.value;
+    if (dm) {
+      if (!months.value.some((o) => o.value === dm)) {
+        months.value.push({ label: dm, value: dm });
+        months.value.sort((a, b) => (a.value < b.value ? 1 : -1));
+      }
+      selectedMonth.value = dm;
+    }
+    loadSummary();
+  },
+);
 
 // 合并「有台账数据的月份」到月份下拉，使早于最近12个月的月份（如 2025-08/09）可选
 async function loadLedgerMonths() {
@@ -630,38 +755,98 @@ async function loadLedgerMonths() {
     </template>
 
     <!-- 汇总表 -->
-    <NDataTable
+    <HseDataGrid
       :columns="columns"
       :data="summaryRows"
       :loading="loading"
-      :row-key="(row: TrainingPersonnelApi.SummaryItem) => row.employeeId"
-      :checked-row-keys="checkedIds"
-      @update:checked-row-keys="(keys: Array<number | string>) => (checkedIds = keys.map(Number))"
-      :pagination="{
-        pageSize: 20,
-        itemCount: summaryTotal,
-        showSizePicker: true,
-        pageSizes: [10, 20, 50],
-      }"
-      striped
-    />
+      row-key="employeeId"
+      :row-class-name="ledgerRowClassName"
+      :pager="{ pageSize: 20, pageSizes: [10, 20, 50] }"
+      :total="summaryTotal"
+    >
+      <template #headerCheck>
+        <NCheckbox
+          :checked="allChecked()"
+          :indeterminate="someChecked() && !allChecked()"
+          @update:checked="toggleAll"
+        />
+      </template>
+      <template #rowCheck="{ row }">
+        <NCheckbox
+          :checked="checkedIds.includes(row.employeeId)"
+          @update:checked="(v: boolean) => toggleRowChecked(row.employeeId, v)"
+        />
+      </template>
+      <template #missingCount="{ row }">
+        <NTag
+          v-if="row.missingCount > 0"
+          type="warning"
+          :bordered="false"
+          size="small"
+          class="deduc-click"
+          @click="openMissingBreakdown(row)"
+        >{{ row.missingCount }}</NTag>
+        <NTag v-else type="success" :bordered="false" size="small">{{ row.missingCount || 0 }}</NTag>
+      </template>
+      <template #incompleteCount="{ row }">
+        <NTag
+          v-if="row.incompleteCount > 0"
+          type="warning"
+          :bordered="false"
+          size="small"
+          class="deduc-click"
+          @click="openIncompleteBreakdown(row)"
+        >{{ row.incompleteCount }}</NTag>
+        <NTag v-else type="success" :bordered="false" size="small">{{ row.incompleteCount || 0 }}</NTag>
+      </template>
+      <template #assessmentScore="{ row }">
+        <NTag
+          v-if="(row.missingCount || 0) + (row.incompleteCount || 0) > 0"
+          type="error"
+          :bordered="false"
+          size="small"
+          class="deduc-click"
+          @click="openScoreBreakdown(row)"
+        >{{ (row.missingCount || 0) + (row.incompleteCount || 0) }}</NTag>
+        <NTag v-else type="success" :bordered="false" size="small">0</NTag>
+      </template>
+      <template #action="{ row }">
+        <NSpace justify="center" :size="4">
+          <NButton size="small" type="primary" quaternary @click="openPersonDetail(row)">
+            查看
+          </NButton>
+          <NButton size="small" type="primary" quaternary @click="openEdit(row)">
+            编辑
+          </NButton>
+          <NPopconfirm @positive-click="onDelete(row)">
+            <template #trigger>
+              <NButton size="small" type="error" quaternary>删除</NButton>
+            </template>
+            确定删除「{{ row.name }}」本月的培训记录吗？
+          </NPopconfirm>
+        </NSpace>
+      </template>
+    </HseDataGrid>
 
     <!-- 明细抽屉 -->
     <NDrawer v-model:show="detailOpen" :width="720">
       <NDrawerContent :title="`${detailPerson.name} · ${detailMonth} 培训明细`" closable>
-        <NDataTable
+        <HseDataGrid
           :columns="detailColumns"
           :data="detailRows"
           :loading="detailLoading"
-          :row-key="(r: TrainingPersonnelApi.PersonnelRecordItem) => r.id"
-          :pagination="{
-            page: detailPage,
-            pageSize: detailPageSize,
-            itemCount: detailTotal,
-            onChange: (p: number) => onDetailPageChange(p),
-          }"
-          striped
-        />
+          row-key="id"
+          :pager="{ pageSize: detailPageSize }"
+          :total="detailTotal"
+          :current-page="detailPage"
+          :height="560"
+          @page-change="onDetailPageChange"
+        >
+          <template #detailDate="{ row }">{{ row.trainingDate ? String(row.trainingDate).slice(0, 10) : '-' }}</template>
+          <template #result="{ row }">
+            <HseStatusTag type="neutral">{{ row.result || '-' }}</HseStatusTag>
+          </template>
+        </HseDataGrid>
       </NDrawerContent>
     </NDrawer>
 
@@ -732,6 +917,7 @@ async function loadLedgerMonths() {
       :ocr-enabled="ocrEnabled"
       :ocr-active="ocrActive"
       :ocr-loading="ocrLoading"
+      :ocr-progress="ocrProgress"
       :ocr-advice="ocrAdvice"
       :signin-active="signinActive"
       :signin-preview="signinPreview"
@@ -746,25 +932,74 @@ async function loadLedgerMonths() {
       @export-ocr="onImportExportOcr"
       @close="onImportDialogClose"
     >
-      <!-- AI 识图：独立入口（上传培训台账照片 → 本地视觉模型识别），结果复用下方预览/入库流 -->
+      <!-- AI 识图：独立入口（上传培训台账照片 → 视觉模型识别），结果复用下方预览/入库流 -->
       <template #header-extra>
         <div
           v-if="aiEnabled"
-          class="mb-3 flex items-center justify-between gap-3 rounded border border-primary/20 bg-primary/5 px-3 py-2"
+          class="mb-3 rounded border border-primary/20 bg-primary/5 px-3 py-2"
         >
-          <NText depth="2" class="text-xs">
-            AI 识图：上传培训台账照片或 PDF，由本地视觉大模型自动识别填写，无需手动逐行录入。
-          </NText>
-          <NButton
-            secondary
-            type="primary"
-            size="small"
-            :loading="aiLoading"
-            :disabled="importConfirming"
-            @click="aiImportInput?.click()"
-          >
-            AI 识图
-          </NButton>
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <NText depth="2" class="text-xs">
+              AI 识图：上传培训台账照片或 PDF，由视觉大模型自动识别填写，无需手动逐行录入。
+            </NText>
+            <div class="flex items-center gap-3">
+              <!-- CF-WPS-VISION-02：DSH 识别开关（开=DSH 本地网关的模型，关=本机 Ollama） -->
+              <NTooltip trigger="hover">
+                <template #trigger>
+                  <div class="flex items-center gap-2">
+                    <NText depth="3" class="text-xs">
+                      DSH 识别
+                    </NText>
+                    <NSwitch
+                      :value="aiProvider === 'dsh'"
+                      size="small"
+                      :loading="aiProviderChecking"
+                      @update:value="onAiProviderToggle"
+                    />
+                    <span class="ai-provider-dot" :class="aiProviderDotClass" />
+                  </div>
+                </template>
+                {{ aiProviderHint }}
+              </NTooltip>
+              <NButton
+                secondary
+                type="primary"
+                size="small"
+                :loading="aiLoading"
+                :disabled="importConfirming"
+                @click="aiImportInput?.click()"
+              >
+                AI 识图
+              </NButton>
+            </div>
+          </div>
+
+          <!-- CF-WPS-VISION-03：DSH 模型下拉 + 附加提示词 -->
+          <div class="mt-2 flex flex-wrap items-center gap-2">
+            <NSelect
+              v-if="aiProvider === 'dsh'"
+              :value="aiModel || null"
+              :options="dshModelOptions"
+              size="small"
+              class="ai-model-select"
+              placeholder="选择免费视觉模型"
+              :loading="aiProviderChecking"
+              :consistent-menu-width="false"
+              @update:value="setAiModel"
+            />
+            <NInput
+              v-model:value="aiPrompt"
+              type="textarea"
+              size="small"
+              class="ai-prompt-input"
+              :autosize="{ minRows: 1, maxRows: 3 }"
+              maxlength="300"
+              show-count
+              clearable
+              placeholder="可选：补充识别要求，例如「只识别 2026 年 8 月的记录」「姓名取第二列」"
+            />
+          </div>
+
           <input
             ref="aiImportInput"
             type="file"
@@ -775,5 +1010,139 @@ async function loadLedgerMonths() {
         </div>
       </template>
     </HseImportDialog>
+
+    <!-- 数字明细弹窗（对齐「三违管理考核」扣分明细弹窗样式） -->
+    <NModal
+      v-model:show="breakdownOpen"
+      preset="card"
+      :title="breakdownTitle"
+      style="width: 420px; max-width: 92vw"
+      :mask-closable="true"
+    >
+      <div class="training-breakdown">
+        <NSpin :show="breakdownLoading">
+          <div
+            v-for="(r, ri) in breakdownRows"
+            :key="ri"
+            class="training-breakdown-item"
+          >
+            <div class="training-breakdown-main">
+              <span class="training-breakdown-label">{{ r.label }}</span>
+              <span v-if="r.sub" class="training-breakdown-sub">{{ r.sub }}</span>
+            </div>
+            <span class="training-breakdown-val">{{ r.value }}</span>
+          </div>
+          <div v-if="!breakdownLoading && breakdownRows.length === 0" class="training-breakdown-empty">
+            暂无扣分明细
+          </div>
+          <div class="training-breakdown-total">
+            <span>合计</span>
+            <span>{{ breakdownTotal }} 人</span>
+          </div>
+        </NSpin>
+      </div>
+    </NModal>
   </HsePageLayout>
 </template>
+
+<style scoped>
+/* 可点击的数字（对齐「三违管理考核」扣分数字交互） */
+.deduc-click {
+  cursor: pointer;
+  transition: filter 0.15s;
+  &:hover {
+    filter: brightness(1.15);
+  }
+}
+
+/* AI 识图通道状态灯：绿=可用 / 红=不可用 / 灰=未知 */
+.ai-provider-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #c2c2c2;
+  transition: background 0.15s;
+
+  &.is-ok {
+    background: #18a058;
+  }
+
+  &.is-bad {
+    background: #d03050;
+  }
+}
+
+/* DSH 模型下拉 + 附加提示词 */
+.ai-model-select {
+  width: 280px;
+  max-width: 100%;
+}
+
+.ai-prompt-input {
+  flex: 1 1 320px;
+  min-width: 220px;
+}
+
+/* 数字明细弹窗 · 分项 + 合计样式 */
+.training-breakdown {
+  min-width: 240px;
+}
+.training-breakdown-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+.training-breakdown-item:hover {
+  background: rgba(245, 158, 11, 0.14);
+  color: #d97706;
+}
+.training-breakdown-main {
+  min-width: 0;
+  flex: 1;
+}
+.training-breakdown-label {
+  display: block;
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+.training-breakdown-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+  line-height: 1.4;
+}
+.training-breakdown-val {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.training-breakdown-total {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  border-top: 1px dashed #d0d5dd;
+  margin-top: 6px;
+  padding: 6px 6px 0;
+  font-weight: 600;
+}
+.training-breakdown-empty {
+  padding: 12px 6px;
+  text-align: center;
+  color: #8a919f;
+}
+
+/* 外部下钻定位到目标人汇总行：高亮该行（自动评分页 HSE教育培训 明细点击跳转），停留后自动淡出 */
+:deep(.vxe-body--row.training-locate-row) {
+  background: rgba(37, 99, 235, 0.14) !important;
+  transition: background-color 0.8s ease;
+}
+:deep(.vxe-body--row.training-locate-row .vxe-cell) {
+  color: #1d4ed8;
+  font-weight: 600;
+}
+</style>

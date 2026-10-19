@@ -46,6 +46,68 @@ export interface OcrConfirmResult {
   message?: string;
 }
 
+/** AI 识图任务提交返回（提交即返回 jobId，识别异步进行） */
+export interface AiRecognizeSubmitResult {
+  jobId: string;
+}
+
+/** AI 识图视觉通道：local=本机 Ollama，dsh=DSH 本地 OpenAI 网关 */
+export type AiVisionProvider = 'dsh' | 'local';
+
+/** DSH 网关可选视觉模型（后端白名单，只有真正接受图像输入的模型才会出现在这里） */
+export interface AiVisionModelOption {
+  id: string;
+  label: string;
+  /** kilo / eac / custom */
+  channel: string;
+  note: string;
+  /** 网关当前是否真的暴露了该模型 */
+  present: boolean;
+  /** EAC 渠道可用性；kilo 渠道未知，为 null */
+  available: boolean | null;
+}
+
+/** 单个通道的探测结果 */
+export interface AiProviderStatusItem {
+  provider: AiVisionProvider;
+  /** ollama-vl / dsh-vl / openai-vl */
+  channel: string;
+  model: string;
+  baseUrl: string;
+  /** 网关/服务是否可达 */
+  ok: boolean;
+  /** 配置的模型是否在该通道的可用清单里 */
+  hasModel: boolean;
+  /** 仅 dsh：是否找到网关 key */
+  hasKey?: boolean;
+  /** 仅 dsh：可选模型列表（下拉框数据源） */
+  models?: AiVisionModelOption[];
+  /** 不可达时的原因 */
+  detail: string;
+}
+
+export interface AiProviderStatusResult {
+  local: AiProviderStatusItem;
+  dsh: AiProviderStatusItem;
+}
+
+/** AI 识图进度轮询返回：recognizing（进行中）/ done（成功，透传识别结果）/ error（失败） */
+export interface AiRecognizeProgressResult {
+  status: 'recognizing' | 'done' | 'error';
+  /** 总页数 / 已识别页数（recognizing 时用于展示进度） */
+  totalPages?: number;
+  donePages?: number;
+  /** error 时的错误信息 */
+  error?: string;
+  // ---- done 时透传 OcrRecognizeResult 字段 ----
+  mode?: OcrRecognizeResult['mode'];
+  columns?: string[];
+  rows?: Record<string, any>[];
+  message?: string;
+  sourceName?: string;
+  meta?: OcrRecognizeResult['meta'];
+}
+
 /** 签到表识别校验返回 */
 export interface SigninRecognizeResult {
   month: string;
@@ -91,19 +153,47 @@ export async function ocrRecognize(file: File): Promise<OcrRecognizeResult> {
   return r;
 }
 
-/** AI 识图：把培训台账照片交给本地 Ollama 视觉大模型，识别为结构化行（多模态较慢，超时取 40 分钟）
- *  mode 缺省 auto：先按「培训会议签到表」做填写完整性检查，识别不到再回退通用台账识别。 */
+/** AI 识图：上传文件提交识别任务，立即返回 jobId（识别异步进行），
+ *  再经 aiRecognizeProgress 轮询进度与结果。
+ *  mode 缺省 auto：先按「培训会议签到表」做填写完整性检查，识别不到再回退通用台账识别。
+ *  provider 缺省 local：使用本机 Ollama；传 dsh 则走 DSH 本地网关的模型。
+ *  model 仅 dsh 生效（下拉框选中的免费视觉模型）。
+ *  prompt 为用户附加要求，服务端追加到系统提示词尾部（不替换 JSON 约束）。 */
 export async function aiRecognize(
   file: File,
   mode?: 'auto' | 'signin' | 'ledger',
-): Promise<OcrRecognizeResult> {
+  provider?: AiVisionProvider,
+  model?: string,
+  prompt?: string,
+): Promise<AiRecognizeSubmitResult> {
   const formData = new FormData();
   formData.append('file', file);
   if (mode) formData.append('mode', mode);
-  const r = await requestClient.post<OcrRecognizeResult>(`${BASE}/ai-recognize`, formData, {
+  if (provider) formData.append('provider', provider);
+  if (model) formData.append('model', model);
+  if (prompt) formData.append('prompt', prompt);
+  const r = await requestClient.post<AiRecognizeSubmitResult>(`${BASE}/ai-recognize`, formData, {
     headers: { 'Content-Type': undefined as any },
     timeout: OCR_TIME_OUT,
   });
+  return r;
+}
+
+/** 视觉通道状态：本地 Ollama 与 DSH 网关是否可达（给「DSH 识别」开关做状态灯） */
+export async function getAiProviderStatus(): Promise<AiProviderStatusResult> {
+  return requestClient.get<AiProviderStatusResult>(`${BASE}/ai-provider`, {
+    timeout: 15_000,
+  });
+}
+
+/** AI 识图进度轮询：recognizing（返回总页数/已识别页数）→ done（返回识别结果）/ error（失败） */
+export async function aiRecognizeProgress(
+  jobId: string,
+): Promise<AiRecognizeProgressResult> {
+  const r = await requestClient.get<AiRecognizeProgressResult>(
+    `${BASE}/ai-recognize/progress/${encodeURIComponent(jobId)}`,
+    { timeout: OCR_TIME_OUT },
+  );
   return r;
 }
 

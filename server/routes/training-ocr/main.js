@@ -34,6 +34,12 @@ router.post('/recognize', GUARD, uploadGuard, ctl.recognize);
 // ---- 1.5 AI 识图（本地 Ollama 视觉模型，独立入口；复用同一 multer 上传中间件） ----
 router.post('/ai-recognize', GUARD, uploadGuard, ctl.aiRecognize);
 
+// ---- 1.5b AI 识图进度轮询 ----
+router.get('/ai-recognize/progress/:jobId', GUARD, ctl.aiRecognizeProgress);
+
+// ---- 1.5c 视觉通道状态（本地 Ollama / DSH 网关可达性；前端「DSH 识别」开关用） ----
+router.get('/ai-provider', GUARD, ctl.aiProviderStatus);
+
 // ---- 2. 导出 Excel（GET，rows/columns 经 query base64 传入） ----
 router.get('/export', GUARD, ctl.exportExcel);
 

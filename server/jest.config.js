@@ -34,6 +34,11 @@ module.exports = {
     // hse-employee.standalone.test.js 是独立执行脚本（node 直接运行，使用自定义
     // assert + supertest 连库验证），并非 Jest 用例。精确排除，避免被误收集。
     '/__tests__/hse-employee.standalone.test.js',
+    // 同理：这两份视觉识图脚本用自定义 assert + t() 直接 node 运行，
+    // 不含 describe/test/it，被 Jest 收集会报「must contain at least one test」
+    // 并把整个 npm test 判红（2026-10-19 修正）。
+    '/services/ai/signinSheet.unit.test.js',
+    '/services/ai/visionProvider.standalone.test.js',
   ],
   setupFiles: ['<rootDir>/test/setup.js'],
   testTimeout: 10000,

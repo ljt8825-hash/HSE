@@ -23,11 +23,24 @@ const {
 } = require('./trainingShared');
 const { SigninAttribution } = require('./signinAttribution');
 const {
-  recognizeLedgerImage, recognizeSigninSheet, reconcileBatchManagers, VL_MODEL,
+  recognizeLedgerImage, recognizeSigninSheet, reconcileBatchManagers,
+  visionProviderMeta, probeVisionProviders, isDshVisionModel,
 } = require('./ai/visionService');
 
 const ok = (payload, message) => ({ __t: 'json', payload, message });
 const err = (code, message) => ({ __t: 'json', error: { code, message } });
+
+/**
+ * 视觉通道选择（前端「DSH 识别」开关）。
+ *  local = 本机 Ollama（默认）| dsh = DSH 本地 OpenAI 网关
+ *  空值/未知值 → ''，表示沿用 .env 里的 VISION_* 配置（保持既有部署行为不变）
+ */
+function normalizeAiProvider(v) {
+  const s = String(v || '').trim().toLowerCase();
+  if (s === 'dsh') return 'dsh';
+  if (s === 'local' || s === 'ollama') return 'local';
+  return '';
+}
 
 // ---------- Python 解释器解析 ----------
 function resolvePythonPath() {
@@ -428,16 +441,81 @@ async function renderPdfPages(pdfPath) {
   );
 }
 
+// ---------- AI 识图进度：内存任务注册表 + TTL 清理 ----------
+// 长任务（多页 PDF 逐页识别可达数分钟）由「单次阻塞请求」改为「提交即返回 jobId + 前端轮询进度」，
+// 让用户实时看到「已识别 X / 总 Y 页」，避免长时间零反馈误以为卡死。
+// 结果存内存，TTL 内可查询；超时/进程重启即失效（前端提示重传）。
+const AI_JOB_TTL_MS = 60 * 60 * 1000; // 完成/失败后保留 60min
+const AI_JOB_MAX = 20;                // 内存上限，超过丢弃最旧，防膨胀
+const jobs = new Map(); // jobId -> { status, totalPages, donePages, result, message, error, createdAt }
+
+function genJobId() {
+  return `ai-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function sweepJobs(now = Date.now()) {
+  for (const [id, j] of jobs) {
+    if (j.status !== 'recognizing' && now - j.createdAt > AI_JOB_TTL_MS) {
+      jobs.delete(id);
+    }
+  }
+  if (jobs.size > AI_JOB_MAX) {
+    const sorted = [...jobs.entries()].sort((a, b) => a[1].createdAt - b[1].createdAt);
+    sorted.slice(0, sorted.length - AI_JOB_MAX).forEach(([id]) => jobs.delete(id));
+  }
+}
+
+/** AI 识图任务提交：立即返回 jobId，实际识别异步进行，进度经 aiRecognizeProgress 轮询 */
 async function aiRecognize(req) {
   const tmp = req.file ? path.join(_tmpDir, req.file.filename) : null;
-  let pdfDir = null;
   try {
     if (!req.file) return err(-2, '未接收到文件');
+    if (!tmp || !isSupported(tmp)) {
+      if (tmp && fs.existsSync(tmp)) {
+        try { fs.unlinkSync(tmp); } catch (e) { /* 忽略 */ }
+      }
+      return err(-3, '仅支持 PDF / PNG / JPG / BMP / WebP 文件');
+    }
     const originalName = (req.file.originalname || '').replace(/\.[^.]+$/, '');
     const ext = path.extname(tmp).toLowerCase();
     // mode: auto(默认，先按签到表试，识别不到再回退通用台账) | signin(强制签到表) | ledger(强制通用台账)
     const mode = String((req.body && req.body.mode) || 'auto').toLowerCase();
+    // provider: local(本地 Ollama，默认) | dsh(DSH 本地网关)。空值 → 沿用 .env 的 VISION_* 配置
+    const provider = normalizeAiProvider(req.body && req.body.provider);
+    // model: 仅 dsh 生效；只接受白名单内的免费视觉模型，避免前端传任意串打到网关
+    const model = String((req.body && req.body.model) || '').trim().slice(0, 120);
+    if (provider === 'dsh' && model && !isDshVisionModel(model)) {
+      return err(-8, `不支持的视觉模型：${model}`);
+    }
+    // prompt: 用户附加要求，追加到系统提示词尾部（不替换 JSON schema 约束）
+    const promptExtra = String((req.body && req.body.prompt) || '').trim().slice(0, 500);
 
+    sweepJobs();
+    const jobId = genJobId();
+    jobs.set(jobId, { status: 'recognizing', totalPages: 0, donePages: 0, result: null, message: null, error: null, createdAt: Date.now() });
+
+    // 后台异步执行（不阻塞响应），每完成一页更新 donePages；tmp/页图由任务自身清理
+    runAiJob(jobId, { tmp, originalName, ext, mode, provider, model, promptExtra }).catch((e) => {
+      const job = jobs.get(jobId);
+      if (job && job.status === 'recognizing') {
+        job.status = 'error';
+        job.error = `AI 识图任务异常: ${e.message}`;
+      }
+    });
+    return ok({ jobId }, '识别任务已提交，请稍候');
+  } catch (e) {
+    return err(-6, `AI 识图失败: ${e.message}`);
+  }
+}
+
+/** 后台执行 AI 逐页识别，写入 job 进度（每页完成即 donePages+1） */
+async function runAiJob(jobId, ctx) {
+  const { tmp, originalName, ext, mode, provider = '', model = '', promptExtra = '' } = ctx;
+  let pdfDir = null;
+  const job = jobs.get(jobId);
+  const setDone = (v) => { if (job) job.donePages = v; };
+  const setTotal = (v) => { if (job) job.totalPages = v; };
+  try {
     // 统一成「页图 + 页码」列表
     let images = [];
     let totalPages = 0;
@@ -446,39 +524,43 @@ async function aiRecognize(req) {
       pdfDir = outDir;
       totalPages = pages.length;
       images = pages.slice(0, AI_PDF_MAX_PAGES).map((p, i) => ({ path: p, pageNo: i + 1 }));
-    } else if (AI_IMG_EXTS.includes(ext)) {
+    } else {
       totalPages = 1;
       images = [{ path: tmp, pageNo: 1 }];
-    } else {
-      return err(-5, 'AI 识图仅支持图片文件（PNG / JPG / BMP / WebP）或 PDF');
     }
+    setTotal(totalPages);
 
     let rows = [];
     let usedMode = 'ledger';
     let skipped = 0;
     const skipReasons = { photo: 0, blank: 0, other: 0 };
+    let weakPages = [];
 
     // ---- 通道 B：签到表「填写完整性检查」 ----
     if (mode === 'auto' || mode === 'signin') {
+      setDone(0);
       const rosterText = formatRoster(await loadTownManagers());
       const signinRows = [];
-      const weakPages = [];
       for (const img of images) {
         // eslint-disable-next-line no-await-in-loop
         const r = await recognizeSigninSheet({
           filePath: img.path,
           rosterText,
           pageNo: img.pageNo,
+          provider,
+          model,
+          extraPrompt: promptExtra,
         });
         if (r.skipped) {
           skipped += 1;
           if (Object.prototype.hasOwnProperty.call(skipReasons, r.reason)) skipReasons[r.reason] += 1;
           else skipReasons.other += 1;
-          continue;
+        } else {
+          // 重跑后仍为空的页：保留行但标记为待人工核对
+          if (r.weak) weakPages.push(Number(img.pageNo) || 0);
+          signinRows.push(r.row);
         }
-        // 重跑后仍为空的页：保留行但标记为待人工核对
-        if (r.weak) weakPages.push(Number(img.pageNo) || 0);
-        signinRows.push(r.row);
+        setDone(job ? job.donePages + 1 : 1);
       }
       // 批次级补全：同乡镇只出现一位有效经理时，补上其余页的空缺经理
       reconcileBatchManagers(signinRows);
@@ -490,10 +572,17 @@ async function aiRecognize(req) {
 
     // ---- 通道 A：通用培训台账文字识别（auto 模式下签到表未命中才回退） ----
     if (usedMode !== 'signin') {
+      setDone(0);
       for (const img of images) {
         // eslint-disable-next-line no-await-in-loop
-        const r = await recognizeLedgerImage({ filePath: img.path });
+        const r = await recognizeLedgerImage({
+          filePath: img.path,
+          provider,
+          model,
+          extraPrompt: promptExtra,
+        });
         rows.push(...(r.rows || []));
+        setDone(job ? job.donePages + 1 : 1);
       }
     }
 
@@ -505,37 +594,38 @@ async function aiRecognize(req) {
     ].filter(Boolean).join('、');
     const weakDesc = weakPages.length ? `第 ${weakPages.join('、')} 页未读出内容，请人工核对` : '';
 
+    // 当前生效的视觉通道（ollama-vl / openai-vl / dsh-vl），供前端「AI 识图」标注与排错
+    const vpMeta = visionProviderMeta(provider, { model });
+    let payload;
+    let message;
     if (usedMode === 'signin') {
-      return ok(
-        {
-          sourceType: 'ai_image',
-          mode: 'ai_signin',
-          columns: buildSigninColumns(rows),
-          rows,
-          message: rows.length
-            ? `AI 识别到 ${rows.length} 张签到表${skipped ? `（跳过 ${skipDesc}）` : ''}${weakDesc ? `；${weakDesc}` : ''}`
-            : `AI 未识别到签到表${skipped ? `（跳过 ${skipDesc}）` : ''}`,
-          sourceName: originalName,
-          meta: {
-            model: VL_MODEL,
-            channel: 'ollama-vl',
-            mode: 'signin',
-            totalPages,
-            scannedPages: images.length,
-            skippedPages: skipped,
-            skipReasons,
-            weakPages,
-            tailPages,
-          },
+      payload = {
+        sourceType: 'ai_image',
+        mode: 'ai_signin',
+        columns: buildSigninColumns(rows),
+        rows,
+        message: rows.length
+          ? `AI 识别到 ${rows.length} 张签到表${skipped ? `（跳过 ${skipDesc}）` : ''}${weakDesc ? `；${weakDesc}` : ''}`
+          : `AI 未识别到签到表${skipped ? `（跳过 ${skipDesc}）` : ''}`,
+        sourceName: originalName,
+        meta: {
+          model: vpMeta.model,
+          channel: vpMeta.channel,
+          provider: vpMeta.provider,
+          mode: 'signin',
+          totalPages,
+          scannedPages: images.length,
+          skippedPages: skipped,
+          skipReasons,
+          weakPages,
+          tailPages,
         },
-        rows.length
-          ? (weakDesc ? `AI 识别成功，但${weakDesc}` : 'AI 识别成功，请核对「缺少签字人数 / 资料不完整」')
-          : 'AI 识图完成，但未识别到签到表',
-      );
-    }
-
-    return ok(
-      {
+      };
+      message = rows.length
+        ? (weakDesc ? `AI 识别成功，但${weakDesc}` : 'AI 识别成功，请核对「缺少签字人数 / 资料不完整」')
+        : 'AI 识图完成，但未识别到签到表';
+    } else {
+      payload = {
         sourceType: 'ai_image',
         mode: 'record',
         columns: buildAiColumns(rows),
@@ -544,12 +634,21 @@ async function aiRecognize(req) {
           ? `AI 识别到 ${rows.length} 行${tailPages ? `（仅处理前 ${AI_PDF_MAX_PAGES} 页，跳过 ${tailPages} 页）` : ''}`
           : 'AI 未能识别到有效培训记录',
         sourceName: originalName,
-        meta: { model: VL_MODEL, channel: 'ollama-vl', mode: 'ledger', totalPages, tailPages },
-      },
-      rows.length ? 'AI 识别成功，请核对预览' : 'AI 识图完成，但未识别到有效培训记录',
-    );
+        meta: {
+          model: vpMeta.model,
+          channel: vpMeta.channel,
+          provider: vpMeta.provider,
+          mode: 'ledger',
+          totalPages,
+          tailPages,
+        },
+      };
+      message = rows.length ? 'AI 识别成功，请核对预览' : 'AI 识图完成，但未识别到有效培训记录';
+    }
+
+    if (job) { job.status = 'done'; job.result = payload; job.message = message; }
   } catch (e) {
-    return err(-6, `AI 识图失败: ${e.message}`);
+    if (job) { job.status = 'error'; job.error = `AI 识图失败: ${e.message}`; }
   } finally {
     if (tmp && fs.existsSync(tmp)) {
       try { fs.unlinkSync(tmp); } catch (e) { /* 忽略 */ }
@@ -557,6 +656,36 @@ async function aiRecognize(req) {
     if (pdfDir && fs.existsSync(pdfDir)) {
       try { fs.rmSync(pdfDir, { recursive: true, force: true }); } catch (e) { /* 忽略 */ }
     }
+  }
+}
+
+/** AI 识图进度查询：recognizing（进行中）/ done（成功含结果）/ error（失败） */
+function aiRecognizeProgress(params) {
+  sweepJobs();
+  const jobId = params && params.jobId;
+  const job = jobId ? jobs.get(String(jobId)) : null;
+  if (!job) return err(-404, '识别任务不存在或已过期，请重新上传');
+  if (job.status === 'recognizing') {
+    return ok({ status: 'recognizing', totalPages: job.totalPages, donePages: job.donePages });
+  }
+  if (job.status === 'error') {
+    return ok({ status: 'error', error: job.error, totalPages: job.totalPages, donePages: job.donePages });
+  }
+  // done：透传完整识别 payload（mode/columns/rows/message/sourceName/meta 等），前端原样消费
+  return ok({ status: 'done', ...(job.result || {}) });
+}
+
+/**
+ * 视觉通道健康状态（前端「DSH 识别」开关的状态灯）。
+ * 返回 { local:{ok,model,baseUrl,hasModel,detail}, dsh:{ok,model,baseUrl,hasModel,hasKey,detail} }
+ * 探测失败不影响识别本身，只用于给用户提示。
+ */
+async function aiProviderStatus() {
+  try {
+    const s = await probeVisionProviders();
+    return ok(s);
+  } catch (e) {
+    return err(-7, `通道状态探测失败: ${e.message}`);
   }
 }
 
@@ -1068,6 +1197,8 @@ module.exports = {
   upload,               // 路由层负责 upload.single('file') 中间件
   recognize,
   aiRecognize,
+  aiRecognizeProgress,
+  aiProviderStatus,
   exportExcel,
   confirm,
   confirmSignin,
