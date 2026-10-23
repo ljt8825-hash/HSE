@@ -17,8 +17,11 @@ export namespace CostApi {
     status: string;
     budgetAmount: number;
     committed: number;
+    pendingCommitted: number;
     actual: number;
     balance: number;
+    availableUncommitted: number;
+    commitmentRate: number;
     executionRate: number;
   }
 
@@ -32,8 +35,35 @@ export namespace CostApi {
 
   export interface CostStats {
     totalActual: number;
+    allocatedTotal: number;
+    unattributedActual: number;
     byDomain: Array<{ bizDomain: string; amount: number }>;
     byCategory: Array<{ investCategory: string; amount: number }>;
+  }
+
+  /** 预算导入预览：单行结果 */
+  export interface BudgetImportPreviewRow {
+    rowIndex: number;
+    data: Record<string, any>;
+    errors: string[];
+    duplicate: boolean;
+    status: 'ok' | 'error' | 'duplicate';
+  }
+
+  export interface BudgetImportPreviewResult {
+    total: number;
+    errorCount: number;
+    duplicateCount: number;
+    rows: BudgetImportPreviewRow[];
+  }
+
+  export interface BudgetImportConfirmResult {
+    batchNo: string;
+    total: number;
+    inserted: number;
+    updated: number;
+    skipped: number;
+    failed: number;
   }
 
   export interface CostRequestItem {
@@ -124,4 +154,22 @@ export function getOpTypes(bizDomainId?: number) {
 
 export function getInvestCategories() {
   return requestClient.get<CostApi.ReferenceOption[]>('/cost/reference/invest-categories');
+}
+
+/** 预算 Excel 导入：预览（上传文件→识别字段/总数/错误/重复） */
+export function previewBudgetImport(file: File) {
+  const formData = new FormData();
+  formData.append('file', file);
+  return requestClient.post<CostApi.BudgetImportPreviewResult>('/cost/budgets/import-preview', formData, {
+    headers: { 'Content-Type': undefined as any },
+  });
+}
+
+/** 预算 Excel 导入：确认（再次上传同一文件→正式写入，返回新增/跳过/失败） */
+export function confirmBudgetImport(file: File) {
+  const formData = new FormData();
+  formData.append('file', file);
+  return requestClient.post<CostApi.BudgetImportConfirmResult>('/cost/budgets/import', formData, {
+    headers: { 'Content-Type': undefined as any },
+  });
 }

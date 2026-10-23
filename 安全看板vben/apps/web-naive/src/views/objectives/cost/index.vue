@@ -1,17 +1,19 @@
 <script setup lang="ts">
 /**
- * 安全生产费用业务域（P2）—— 预算概览（计算财务状态）+ 费用申请（含成本归因）
+ * 安全生产费用业务域（P2）—— 预算概览（计算财务状态）+ 费用申请（含成本归因）+ 预算 Excel 导入
  * 复用既有 Naive UI 组件；不引入 Ant Design Vue。
  */
 import { h, onMounted, reactive, ref } from 'vue';
-import { NButton, NTag, useMessage } from 'naive-ui';
-import type { DataTableColumns } from 'naive-ui';
+import { NButton, NTag, NUpload, useMessage } from 'naive-ui';
+import type { DataTableColumns, UploadFileInfo } from 'naive-ui';
 import {
   getBudgetOverview,
   getCostStats,
   getCostRequests,
   createCostRequest,
   deleteCostRequest,
+  previewBudgetImport,
+  confirmBudgetImport,
   getBizDomains,
   getOpTypes,
   getInvestCategories,
@@ -24,7 +26,7 @@ const budgets = ref<CostApi.BudgetOverviewItem[]>([]);
 const budgetsTotal = ref(0);
 const requests = ref<CostApi.CostRequestItem[]>([]);
 const requestsTotal = ref(0);
-const stats = ref<CostApi.CostStats>({ totalActual: 0, byDomain: [], byCategory: [] });
+const stats = ref<CostApi.CostStats>({ totalActual: 0, allocatedTotal: 0, unattributedActual: 0, byDomain: [], byCategory: [] });
 
 const bizDomains = ref<{ label: string; value: number }[]>([]);
 const opTypes = ref<{ label: string; value: number }[]>([]);
@@ -75,6 +77,15 @@ const form = reactive<CostApi.CostRequestCreate & { bizDomainId?: number | null;
   eventId: null,
   amount: 0,
 });
+
+// ===================== 预算 Excel 导入状态 =====================
+const showImportModal = ref(false);
+const importFile = ref<File | null>(null);
+const importPreview = ref<CostApi.BudgetImportPreviewResult | null>(null);
+const importResult = ref<CostApi.BudgetImportConfirmResult | null>(null);
+const previewing = ref(false);
+const confirming = ref(false);
+const importError = ref('');
 
 async function loadAll() {
   loading.value = true;
@@ -164,7 +175,7 @@ async function submitCreate() {
     showModal.value = false;
     await loadAll();
   } catch (e) {
-    message.error('创建失败');
+    // 拦截器已弹提示，这里不重复 toast
   } finally {
     submitting.value = false;
   }
@@ -175,8 +186,74 @@ async function removeRequest(id: number) {
     await deleteCostRequest(id);
     message.success('已删除');
     await loadAll();
+  } catch (e) { /* 拦截器已提示 */ }
+}
+
+// ===================== 预算导入交互 =====================
+function openImport() {
+  showImportModal.value = true;
+  resetImport();
+}
+
+function resetImport() {
+  importFile.value = null;
+  importPreview.value = null;
+  importResult.value = null;
+  importError.value = '';
+  previewing.value = false;
+  confirming.value = false;
+}
+
+function extractErr(e: any, fallback: string): string {
+  const status = e?.response?.status;
+  const serverMsg = e?.response?.data?.message ?? e?.response?.data?.error ?? e?.message;
+  if (status === 403) return '权限不足：仅管理员/安全主管可导入预算';
+  if (status === 401) return '登录已失效，请重新登录';
+  if (serverMsg) return String(serverMsg);
+  return fallback;
+}
+
+async function handleImportFileChange(data: { file: UploadFileInfo }) {
+  const raw = data?.file?.file;
+  if (!raw) return;
+  importFile.value = raw;
+  importResult.value = null;
+  importError.value = '';
+  await runPreview();
+}
+
+async function runPreview() {
+  if (!importFile.value) { message.warning('请先选择 Excel 文件'); return; }
+  previewing.value = true;
+  importError.value = '';
+  try {
+    const r = await previewBudgetImport(importFile.value);
+    importPreview.value = r;
+    const parts = [`共 ${r.total} 行`];
+    if (r.duplicateCount) parts.push(`重复 ${r.duplicateCount} 行（将跳过）`);
+    if (r.errorCount) parts.push(`错误 ${r.errorCount} 行（将跳过）`);
+    message.success(`预览完成：${parts.join('，')}`);
   } catch (e) {
-    message.error('删除失败');
+    importPreview.value = null;
+    importError.value = extractErr(e, '预览失败：文件可能不是有效的 Excel，或网络异常');
+  } finally {
+    previewing.value = false;
+  }
+}
+
+async function runConfirm() {
+  if (!importFile.value) { message.warning('请先选择 Excel 文件'); return; }
+  confirming.value = true;
+  importError.value = '';
+  try {
+    const r = await confirmBudgetImport(importFile.value);
+    importResult.value = r;
+    message.success(`导入完成：新增 ${r.inserted}，跳过 ${r.skipped}，失败 ${r.failed}`);
+    await loadAll();
+  } catch (e) {
+    importError.value = extractErr(e, '导入失败：网络异常或服务端错误，未写入任何数据');
+  } finally {
+    confirming.value = false;
   }
 }
 
@@ -194,16 +271,21 @@ function statusTag(status: string) {
 const budgetRowKey = (r: CostApi.BudgetOverviewItem) => r.budgetId;
 const requestRowKey = (r: CostApi.CostRequestItem) => r.id;
 
+const yen = (v: number | null | undefined) => `¥${(v ?? 0).toLocaleString()}`;
+
 const budgetColumns: DataTableColumns<CostApi.BudgetOverviewItem> = [
-  { title: '年度', key: 'budgetYear', width: 80 },
+  { title: '年度', key: 'budgetYear', width: 70 },
   { title: '项目', key: 'projectName' },
   { title: '事项', key: 'itemName' },
-  { title: '预算金额', key: 'budgetAmount', render: (r) => `¥${r.budgetAmount?.toLocaleString()}` },
-  { title: '已承诺', key: 'committed', render: (r) => `¥${r.committed?.toLocaleString()}` },
-  { title: '实际支出', key: 'actual', render: (r) => `¥${r.actual?.toLocaleString()}` },
-  { title: '余额', key: 'balance', render: (r) => `¥${r.balance?.toLocaleString()}` },
-  { title: '执行率', key: 'executionRate', render: (r) => `${r.executionRate}%` },
-  { title: '状态', key: 'status', render: (r) => h(NTag, null, { default: () => r.status }) },
+  { title: '预算金额', key: 'budgetAmount', width: 110, render: (r) => yen(r.budgetAmount) },
+  { title: '已承诺', key: 'committed', width: 110, render: (r) => yen(r.committed) },
+  { title: '待执行承诺', key: 'pendingCommitted', width: 120, render: (r) => yen(r.pendingCommitted) },
+  { title: '实际净支出', key: 'actual', width: 120, render: (r) => yen(r.actual) },
+  { title: '未支出余额', key: 'balance', width: 120, render: (r) => yen(r.balance) },
+  { title: '未承诺可用', key: 'availableUncommitted', width: 120, render: (r) => yen(r.availableUncommitted) },
+  { title: '承诺率', key: 'commitmentRate', width: 90, render: (r) => `${r.commitmentRate}%` },
+  { title: '执行率', key: 'executionRate', width: 90, render: (r) => `${r.executionRate}%` },
+  { title: '状态', key: 'status', width: 80, render: (r) => h(NTag, null, { default: () => r.status }) },
 ];
 
 const requestColumns: DataTableColumns<CostApi.CostRequestItem> = [
@@ -211,7 +293,7 @@ const requestColumns: DataTableColumns<CostApi.CostRequestItem> = [
   { title: '标题', key: 'title' },
   { title: '来源', key: 'sourceType' },
   { title: '申请人', key: 'applicantName' },
-  { title: '申请金额', key: 'applyAmount', render: (r) => `¥${r.applyAmount?.toLocaleString()}` },
+  { title: '申请金额', key: 'applyAmount', render: (r) => yen(r.applyAmount) },
   {
     title: '状态',
     key: 'status',
@@ -229,6 +311,23 @@ const requestColumns: DataTableColumns<CostApi.CostRequestItem> = [
   },
 ];
 
+const previewRowKey = (r: CostApi.BudgetImportPreviewRow) => r.rowIndex;
+const previewStatusTag = (s: string) => (s === 'error' ? 'error' : s === 'duplicate' ? 'warning' : 'success');
+const previewColumns: DataTableColumns<CostApi.BudgetImportPreviewRow> = [
+  { title: '行号', key: 'rowIndex', width: 60 },
+  { title: '年度', key: 'budget_year', width: 70, render: (r) => String(r.data?.budget_year ?? '') },
+  { title: '项目', key: 'project_name', render: (r) => String(r.data?.project_name ?? '') },
+  { title: '事项', key: 'item_name', render: (r) => String(r.data?.item_name ?? '') },
+  { title: '金额', key: 'budget_amount', width: 110, render: (r) => yen(Number(r.data?.budget_amount ?? 0)) },
+  {
+    title: '状态',
+    key: 'status',
+    width: 90,
+    render: (r) => h(NTag, { type: previewStatusTag(r.status) }, { default: () => (r.status === 'error' ? '错误' : r.status === 'duplicate' ? '重复' : '可导入') }),
+  },
+  { title: '错误/原因', key: 'errors', render: (r) => (r.errors?.length ? r.errors.join('；') : (r.duplicate ? '预算编码已存在或文件内重复' : '')) },
+];
+
 onMounted(() => {
   loadAll();
   loadRefs();
@@ -241,7 +340,9 @@ onMounted(() => {
 
     <n-card title="费用统计（按实际支出归集）" :bordered="false" class="mb">
       <n-space>
-        <n-statistic label="实际支出合计" :value="stats.totalActual" />
+        <n-statistic label="实际净支出合计" :value="stats.totalActual" />
+        <n-statistic label="已归集分摊" :value="stats.allocatedTotal" />
+        <n-statistic label="待归因（无分摊）" :value="stats.unattributedActual" />
         <n-statistic
           v-for="d in stats.byDomain"
           :key="d.bizDomain"
@@ -257,7 +358,10 @@ onMounted(() => {
       </n-space>
     </n-card>
 
-    <n-card title="预算概览（余额/执行率由交易表计算）" :bordered="false" class="mb">
+    <n-card title="预算概览（余额/可用/执行率由交易表计算）" :bordered="false" class="mb">
+      <template #header-extra>
+        <n-button type="primary" @click="openImport">导入预算</n-button>
+      </template>
       <n-data-table
         :columns="budgetColumns"
         :data="budgets"
@@ -335,10 +439,69 @@ onMounted(() => {
         </n-space>
       </template>
     </n-modal>
+
+    <n-modal v-model:show="showImportModal" title="导入预算（Excel）" preset="card" style="width: 760px">
+      <n-space vertical :size="12">
+        <n-alert type="info" :bordered="false">
+          选择 .xlsx/.xls/.csv 预算文件 → 自动预览（识别字段、总数、错误与重复）→ 确认后正式写入。重复编码自动跳过，不覆盖既有预算。
+        </n-alert>
+
+        <n-upload
+          :max="1"
+          accept=".xlsx,.xls,.xlsm,.csv"
+          :default-upload="false"
+          :show-file-list="true"
+          @change="handleImportFileChange"
+        >
+          <n-button>选择 Excel 文件</n-button>
+        </n-upload>
+
+        <div v-if="previewing" class="muted">正在解析与预览…</div>
+
+        <n-alert v-if="importError" type="error" :bordered="false">{{ importError }}</n-alert>
+
+        <template v-if="importPreview">
+          <n-space>
+            <n-tag>共 {{ importPreview.total }} 行</n-tag>
+            <n-tag type="success">可导入 {{ importPreview.total - importPreview.errorCount - importPreview.duplicateCount }}</n-tag>
+            <n-tag v-if="importPreview.duplicateCount" type="warning">重复 {{ importPreview.duplicateCount }} 行</n-tag>
+            <n-tag v-if="importPreview.errorCount" type="error">错误 {{ importPreview.errorCount }} 行</n-tag>
+          </n-space>
+          <n-data-table
+            :columns="previewColumns"
+            :data="importPreview.rows"
+            :row-key="previewRowKey"
+            :max-height="260"
+            size="small"
+            :pagination="{ pageSize: 8 }"
+          />
+        </template>
+
+        <n-alert v-if="importResult" type="success" :bordered="false">
+          导入完成（批次 {{ importResult.batchNo }}）：新增 {{ importResult.inserted }}，跳过 {{ importResult.skipped }}，失败 {{ importResult.failed }}，共 {{ importResult.total }} 行。
+        </n-alert>
+      </n-space>
+
+      <template #footer>
+        <n-space justify="end">
+          <n-button :disabled="previewing || confirming" @click="resetImport">重置</n-button>
+          <n-button :disabled="!importFile || previewing" :loading="previewing" @click="runPreview">重新预览</n-button>
+          <n-button
+            type="primary"
+            :disabled="!importPreview || importPreview.total - importPreview.errorCount - importPreview.duplicateCount <= 0"
+            :loading="confirming"
+            @click="runConfirm"
+          >
+            确认导入
+          </n-button>
+        </n-space>
+      </template>
+    </n-modal>
   </div>
 </template>
 
 <style scoped>
 .cost-page { padding: 16px; }
 .mb { margin-bottom: 16px; }
+.muted { color: #999; }
 </style>

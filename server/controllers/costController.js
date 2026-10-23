@@ -56,9 +56,16 @@ const actualCreate = (req, res) => run(req, res, null, () => service.actualCreat
 const allocationList = (req, res) => run(req, res, null, () => service.allocationList(req.query));
 const allocationCreate = (req, res) => run(req, res, null, () => service.allocationCreate(req.body));
 
-// 导入（解析→预览 / 确认）
+// 修正4：审计既有重复有效承诺（只读、只报不删）
+const auditDuplicateCommitments = (req, res) => run(req, res, null, () => service.auditDuplicateCommitments());
+
+// 导入（解析→预览 / 确认）。操作人一律取自服务端认证身份 req.user，绝不信任 req.body 传入的 operator（防伪造）。
 const budgetImportPreview = (req, res) => run(req, res, null, () => service.budgetImportPreview(req.file && req.file.path));
-const budgetImportConfirm = (req, res) => run(req, res, null, () => service.budgetImportConfirm(req.file && req.file.path, { operatorId: req.body && req.body.operatorId, operatorName: req.body && req.body.operatorName, fileName: req.file && req.file.originalname }));
+const budgetImportConfirm = (req, res) => run(req, res, null, () => service.budgetImportConfirm(req.file && req.file.path, {
+  operatorId: req.user && req.user.id,
+  operatorName: req.user && (req.user.realName || req.user.username),
+  fileName: req.file && req.file.originalname,
+}));
 
 module.exports = {
   respond, run,
@@ -67,5 +74,6 @@ module.exports = {
   budgetItemList, budgetItemDetail, budgetItemCreate, budgetItemUpdate, budgetItemDelete,
   requestList, requestDetail, requestCreate, requestUpdate, requestDelete,
   commitmentList, commitmentCreate, actualList, actualCreate, allocationList, allocationCreate,
+  auditDuplicateCommitments,
   budgetImportPreview, budgetImportConfirm,
 };
