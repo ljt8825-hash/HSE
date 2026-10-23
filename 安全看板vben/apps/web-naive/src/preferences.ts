@@ -11,8 +11,8 @@ export const overridesPreferences = defineOverridesPreferences({
   // overrides
   app: {
     name: import.meta.env.VITE_APP_TITLE,
-    // HSE 入口：默认落地「安全总览」占位页
-    defaultHomePath: '/hse/overview',
+    // HSE 入口：登录后默认落地「领导看板」
+    defaultHomePath: '/overview/leader-dashboard',
   },
   // 快捷键：全局禁用（避免误触搜索/偏好面板等）
   shortcutKeys: {

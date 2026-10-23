@@ -11,17 +11,21 @@
  * 自动列扣分来源（hse_assessment_deduction 已落库生效值，只读）：
  *   网格长巡查考核 = kind grid_unchecked_monthly；三违巡查 = kind violation_event；三违信息填报 = kind violation_unrectified。
  */
-import { computed, onMounted, ref } from 'vue';
+import { computed, nextTick, onActivated, onMounted, onUnmounted, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import type { VxeTableGridColumns } from '#/adapter/vxe-table';
 
-import { NButton, NDropdown, NInputNumber, NSelect, NSpace, NTag } from 'naive-ui';
+import { NButton, NDropdown, NInputNumber, NModal, NSelect, NSpace, NSpin, NTag } from 'naive-ui';
 import { IconifyIcon } from '@vben/icons';
 
 import { HseDataGrid, HsePageLayout } from '#/components/hse';
 import type { ViolationAssessmentApi } from '#/api/hse/violation-assessment';
 import {
+  getDriverDeductions,
   getViolationAssessmentConfig,
+  getViolationAssessmentDeductions,
   getViolationAssessmentList,
+  getUnrectifiedDeductions,
   saveViolationAssessmentConfig,
 } from '#/api/hse/violation-assessment';
 import { getAssessmentCycleList } from '#/api/hse/assessment-monthly';
@@ -44,7 +48,7 @@ async function loadCycles() {
     const list = res?.list ?? [];
     cycleOptions.value = list.map((c) => ({
       label: `${c.assessmentYear}-${String(c.assessmentMonth).padStart(2, '0')}（${c.cycleCode}）`,
-      value: c.id,
+      value: Number(c.id), // 周期主键为 bigint，后端返回字符串；统一转数字以匹配 applyDrillQuery 的 Number(violCycle)
     }));
     if (!cycleOptions.value.some((o) => o.value === selectedCycleId.value)) {
       selectedCycleId.value = cycleOptions.value[0]?.value ?? null;
@@ -157,6 +161,7 @@ function autoValue(row: ViolationAssessmentApi.ListRow, key: string): number {
   if (key === 'grid') return row.gridDeduct ?? 0;
   if (key === 'violation') return row.violationDeduct ?? 0;
   if (key === 'unrectified') return row.unrectifiedDeduct ?? 0;
+  if (key === 'manual_rectify') return row.rectifiedDeduct ?? 0;
   if (key === 'driver') return row.driverDeduct ?? 0;
   return 0;
 }
@@ -168,12 +173,14 @@ function setManualCell(row: ViolationAssessmentApi.ListRow, colKey: string, v: n
   cells.value[ek] = cells.value[ek] ?? {};
   cells.value[ek]![colKey] = v == null ? 0 : v;
 }
-/** 考核分数 = 当前展示的自动列扣分 + 当前展示的人工列数值（即「所属乡镇/作业中心」列至「考核分数」列之间分数的和） */
+/** 考核分数 = 当前展示的自动列扣分 + 当前展示的人工列数值 + 公司查处扣分（即「所属乡镇/作业中心」列至「考核分数」列之间分数的和） */
 function totalScore(row: ViolationAssessmentApi.ListRow): number {
   let s = 0;
   for (const c of shownCols.value) {
     s += c.kind === 'auto' ? autoValue(row, c.key) : (manualCell(row, c.key) || 0);
   }
+  // 公司查处扣分为固定列（不入列池增删），需单独计入考核分数
+  s += row.companyDeduct?.score ?? 0;
   return Math.round(s * 100) / 100;
 }
 
@@ -184,6 +191,247 @@ function formatScore(v: number | null | undefined): string {
 }
 function deptText(row: ViolationAssessmentApi.ListRow): string {
   return row.township || row.department || '-';
+}
+
+// ===================== 扣分数字 → 二级悬浮明细（哪天/什么原因） =====================
+/** 「未按时整改」明细缓存用虚拟 kind（非 hse_assessment_deduction 的真实 kind） */
+const UNRECTIFIED_LEDGER_KEY = 'unrectified_ledger';
+/** 「驾驶员三违」明细缓存用虚拟 kind（非 hse_assessment_deduction 的真实 kind，数据源 driver_monthly） */
+const DRIVER_LEDGER_KEY = 'driver_ledger';
+/** 自动列 key → 对应 hse_assessment_deduction.source_detail.kind（用于取明细） */
+const DEDUC_KINDS: Record<string, string[]> = {
+  grid: ['grid_unchecked_monthly'],
+  violation: ['violation_event'],
+  unrectified: ['violation_unrectified'],
+  // 未按时整改：值来自台账实时推导（无落库扣分记录），明细走独立接口，虚拟 key 仅用于缓存索引与弹窗渲染
+  manual_rectify: [UNRECTIFIED_LEDGER_KEY],
+};
+/** 自动列 key → 明细 kind 列表（不存在返回空数组） */
+function deducKindsFor(colKey: string): string[] {
+  return DEDUC_KINDS[colKey] ?? [];
+}
+
+/** 明细缓存：`${targetId}::${kindsKey}` -> 明细数组 | null（null=未加载） */
+const deductionMap = ref<Record<string, ViolationAssessmentApi.DeductionDetail[] | null>>({});
+const deductionLoading = ref<Record<string, boolean>>({});
+
+function deducKey(row: ViolationAssessmentApi.ListRow, kindsKey: string): string {
+  return `${String(row.targetId)}::${kindsKey}`;
+}
+
+async function loadDeductions(row: ViolationAssessmentApi.ListRow, kinds: string[]) {
+  if (!selectedCycleId.value) return;
+  const kindsKey = kinds.join(',');
+  const key = deducKey(row, kindsKey);
+  if (deductionMap.value[key] || deductionLoading.value[key]) return;
+  deductionLoading.value[key] = true;
+  try {
+    const res = await getViolationAssessmentDeductions({
+      cycleId: selectedCycleId.value,
+      targetId: row.targetId,
+      kinds,
+    });
+    deductionMap.value[key] = res?.list ?? [];
+  } catch {
+    deductionMap.value[key] = [];
+  } finally {
+    deductionLoading.value[key] = false;
+  }
+}
+
+/** 「未按时整改」：从台账按乡镇逐条拉取真三违未整改明细（无落库扣分记录，走独立接口） */
+async function loadUnrectifiedDeduct(row: ViolationAssessmentApi.ListRow) {
+  if (!selectedCycleId.value) return;
+  const key = deducKey(row, UNRECTIFIED_LEDGER_KEY);
+  if (deductionMap.value[key] || deductionLoading.value[key]) return;
+  deductionLoading.value[key] = true;
+  try {
+    const res = await getUnrectifiedDeductions({ cycleId: selectedCycleId.value, targetId: row.targetId });
+    deductionMap.value[key] = res?.list ?? [];
+  } catch {
+    deductionMap.value[key] = [];
+  } finally {
+    deductionLoading.value[key] = false;
+  }
+}
+
+/** 「驾驶员三违」：从 driver_monthly 按乡镇拉取当日驾驶员考核分（无落库扣分记录，走独立接口） */
+async function loadDriverDeduct(row: ViolationAssessmentApi.ListRow) {
+  if (!selectedCycleId.value) return;
+  const key = deducKey(row, DRIVER_LEDGER_KEY);
+  if (deductionMap.value[key] || deductionLoading.value[key]) return;
+  deductionLoading.value[key] = true;
+  try {
+    const res = await getDriverDeductions({ cycleId: selectedCycleId.value, targetId: row.targetId });
+    deductionMap.value[key] = (res?.list ?? []) as unknown as ViolationAssessmentApi.DeductionDetail[];
+  } catch {
+    deductionMap.value[key] = [];
+  } finally {
+    deductionLoading.value[key] = false;
+  }
+}
+
+// ===================== 扣分明细弹窗（统一为「目标职责·自动评分」的分项+合计样式） =====================
+const deductModalShow = ref(false);
+/** 当前弹窗列：grid / violation / unrectified / company（company 数据在行内，无需接口） */
+const deductColKey = ref<string>('');
+const deductRow = ref<ViolationAssessmentApi.ListRow | null>(null);
+
+function openAutoDeduct(row: ViolationAssessmentApi.ListRow, colKey: string) {
+  deductRow.value = row;
+  deductColKey.value = colKey;
+  deductModalShow.value = true;
+  if (colKey === 'manual_rectify') loadUnrectifiedDeduct(row);
+  else if (colKey === 'driver') loadDriverDeduct(row);
+  else loadDeductions(row, deducKindsFor(colKey));
+}
+function openCompanyDeduct(row: ViolationAssessmentApi.ListRow) {
+  deductRow.value = row;
+  deductColKey.value = 'company';
+  deductModalShow.value = true;
+}
+function deductTitle(): string {
+  if (deductColKey.value === 'company') return '公司查处扣分 · 扣分明细';
+  const col = poolCols.value.find((c) => c.key === deductColKey.value);
+  return `${(col && col.title) || deductColKey.value} · 扣分明细`;
+}
+const deductLoading = computed(() => {
+  if (deductColKey.value === 'company') return false;
+  if (!deductRow.value) return false;
+  const kkey = deducKey(
+    deductRow.value as any,
+    deductColKey.value === 'driver' ? DRIVER_LEDGER_KEY : deducKindsFor(deductColKey.value).join(','),
+  );
+  return !!deductionLoading.value[kkey];
+});
+/** 网格缺巡：每条记录把缺巡日期展开为一行；无日期（历史数据）回退聚合说明 */
+function gridRows(
+  list: ViolationAssessmentApi.DeductionDetail[],
+): { label: string; sub?: string; value: string }[] {
+  const rows: { label: string; sub?: string; value: string }[] = [];
+  for (const d of list) {
+    const md = d.detail && d.detail.missedDates;
+    const u = d.detail ? d.detail.unit : null;
+    const unit = Number(u) > 0 ? Number(u) : 1;
+    if (Array.isArray(md) && md.length) {
+      // 逐日展开不得超过本次实扣分次数（2天1次/3天1次等非整日频率
+      // 每日应巡为小数，逐日列表会多于缺次，故按实扣（score/unit）截取最早日期，保证与合计一致）
+      const paid = Math.max(1, Math.ceil(Number(d.score || 0) / unit));
+      for (let i = 0; i < md.length && i < paid; i++) {
+        rows.push({ label: `${md[i]} 未巡查`, value: `-${formatScore(unit)} 分` });
+      }
+    } else if (d.detail && d.detail.summary) {
+      rows.push({ label: d.detail.summary, value: `-${formatScore(d.score)} 分` });
+    }
+  }
+  return rows;
+}
+/** 弹窗明细行：可定位行带 loc 目标（grid=网格长巡查台账 / driver=驾驶员月度考核） */
+interface DeductRow {
+  label: string;
+  sub?: string;
+  value: string;
+  recordId?: string | number;
+  month?: string;
+  driver?: string;
+  loc?: '' | 'grid' | 'driver';
+}
+/** 当前弹窗的分项行 */
+const deductRows = computed<DeductRow[]>(() => {
+  const row = deductRow.value;
+  if (!row) return [];
+  if (deductColKey.value === 'company') {
+    const cd = row.companyDeduct;
+    return (cd && cd.details ? cd.details : []).map((d) => ({
+      label: `${d.date} ${d.violatorName} ${d.behavior}`,
+      value: `-${formatScore(d.score)} 分`,
+      recordId: d.recordId != null ? d.recordId : undefined,
+      month: /^\d{4}-\d{2}/.test(d.date || '') ? String(d.date).slice(0, 7) : undefined,
+      loc: d.recordId != null ? ('grid' as const) : '',
+    }));
+  }
+  if (deductColKey.value === 'driver') {
+    const list =
+      (deductionMap.value[deducKey(row, DRIVER_LEDGER_KEY)] as unknown as import('#/api/hse/violation-assessment').DriverDeductDetail[]) ?? [];
+    return list.map((d) => ({
+      label: `${d.name}${d.department ? `（${d.department}）` : ''}`,
+      sub: d.month ? `当月考核分 · ${d.month}` : undefined,
+      value: `-${formatScore(d.score)} 分`,
+      month: d.month,
+      driver: d.name,
+      loc: ('driver' as const),
+    }));
+  }
+  const kkey = deducKindsFor(deductColKey.value).join(',');
+  const list = deductionMap.value[deducKey(row, kkey)] ?? [];
+  if (deductColKey.value === 'grid') return gridRows(list);
+  return list.map((d) => {
+    const dateStr = deducDateLabel(d);
+    // 三违信息填报等从网格台账溯源：source_table=grid_inspection_records 时按 source_id 定位到网格台账原始记录
+    const gridRecId = d.recordId != null ? d.recordId : d.sourceTable === 'grid_inspection_records' ? d.sourceId : undefined;
+    return {
+      label: `${dateStr !== '—' ? `${dateStr} ` : ''}${d.item || ''}`,
+      sub: deducSub(d) || undefined,
+      value: `-${formatScore(d.score)} 分`,
+      recordId: gridRecId != null ? gridRecId : undefined,
+      month: /^\d{4}-\d{2}/.test(dateStr) ? dateStr.slice(0, 7) : undefined,
+      loc: gridRecId != null ? ('grid' as const) : '',
+    };
+  });
+});
+
+/** 点击可定位明细行：grid → 网格长巡查台账；driver → 驾驶员月度考核 */
+const router = useRouter();
+function locate(r?: DeductRow) {
+  if (!r) return;
+  deductModalShow.value = false;
+  if (r.loc === 'driver') {
+    void router.push({
+      path: '/site/driver/monthly',
+      query: { month: r.month || '', driver: r.driver || '' },
+    });
+    return;
+  }
+  if (r.loc === 'grid' && r.recordId != null) {
+    void router.push({
+      path: '/site/grid/ledger',
+      query: {
+        recordId: String(r.recordId),
+        ...(r.month ? { month: r.month } : {}),
+      },
+    });
+  }
+}
+const deductTotal = computed(() => {
+  const row = deductRow.value;
+  if (!row) return 0;
+  if (deductColKey.value === 'company') return row.companyDeduct?.score ?? 0;
+  if (deductColKey.value === 'driver') return row.driverDeduct ?? 0;
+  const kkey = deducKindsFor(deductColKey.value).join(',');
+  return (deductionMap.value[deducKey(row, kkey)] ?? []).reduce((a, d) => a + Number(d.score || 0), 0);
+});
+
+/** 明细日期显示：优先 violation_date；月度聚合类（如网格缺巡）无单日时回退到「年月」周期 */
+function deducDateLabel(d: ViolationAssessmentApi.DeductionDetail): string {
+  if (d.date) return d.date;
+  const dt = d.detail;
+  if (dt && dt.year && dt.month) return `${dt.year}-${String(dt.month).padStart(2, '0')}`;
+  return '—';
+}
+
+/** 明细附加上下文（情况说明/行为/特殊项目/来源/扣至/备注）拼接，无则空串 */
+function deducSub(d: ViolationAssessmentApi.DeductionDetail): string {
+  const parts: string[] = [];
+  const dt = d.detail;
+  if (dt) {
+    if (dt.summary) parts.push(String(dt.summary));
+    if (dt.violationBehavior) parts.push(`行为：${dt.violationBehavior}`);
+    if (dt.specialItem) parts.push(`特殊项目：${dt.specialItem}`);
+    if (dt.checkSourceText) parts.push(`来源：${dt.checkSourceText}`);
+    if (dt.deductPosition) parts.push(`扣至：${dt.deductPosition}`);
+  }
+  if (d.remark) parts.push(d.remark);
+  return parts.join('；');
 }
 
 // ===================== 列 =====================
@@ -221,13 +469,23 @@ const allColumns = computed<VxeTableGridColumns>(() =>
     ...baseColumns,
     ...shownCols.value.map(buildColumn),
     {
+      title: '公司查处扣分',
+      field: 'companyDeduct',
+      minWidth: 110,
+      align: 'center',
+      slots: { default: 'companyDeduct' },
+      titleHelp: {
+        content: '来源：公司管理（总网格长+一级网格长：黄殿兴/刘金涛/张康/刘菲/韩晓亮/黄元同）当月查处三违的扣分；违章行为含「头盔/安全帽」每起→5 分，其他三违每起→1 分。管理员tab 按被查处人直接上级（班长/片区长）归属本人直接下属；乡镇作业中心经理 tab 按全镇累计。与二级菜单「三违分析」的公司查处扣分同口径同来源。',
+      },
+    },
+    {
       title: '考核分数',
       field: 'scoreTotal',
       minWidth: 110,
       align: 'center',
       slots: { default: 'scoreTotal' },
       titleHelp: {
-        content: '考核分数 = 当前展示的（网格长巡查考核 + 三违巡查 + 三违信息填报 + 各人工列）之和，即“所属乡镇/作业中心”列至本列之间展示分数的和。',
+        content: '考核分数 = 当前展示的（网格长巡查考核 + 三违巡查 + 三违信息填报 + 各人工列 + 公司查处扣分）之和，即“所属乡镇/作业中心”列至本列之间展示分数的和。',
       },
     },
   ] as VxeTableGridColumns,
@@ -259,9 +517,93 @@ async function onPositionChange() {
   await loadAll();
 }
 
-onMounted(async () => {
+// 支持外部下钻：query 携带 violCycle（考核周期 id）/ violPos（岗位名）时，加载后自动定位
+// （自动评分页「三违管理」列扣分明细点击下钻使用；无 query 时行为与默认一致）
+const route = useRoute();
+
+// 支持外部定位：query 携带 violTarget（目标 targetId）时，加载后高亮定位到该人所在行。
+// 高亮停留 HIGHLIGHT_HOLD_MS 后自动淡出（fading 触发 CSS 过渡），间隔至全部清除，避免常驻高亮。
+const HIGHLIGHT_HOLD_MS = 3000;
+const HIGHLIGHT_FADE_MS = 800;
+const hlTargetId = ref<number | null>(null);
+const hlFading = ref(false);
+let hlTimer: ReturnType<typeof setTimeout> | null = null;
+function locateRowClassName(params: { row: any }): string {
+  if (hlTargetId.value == null || String(params?.row?.targetId) !== String(hlTargetId.value)) {
+    return '';
+  }
+  return hlFading.value ? 'viol-locate-row viol-locate-fading' : 'viol-locate-row';
+}
+function clearHlTimer() {
+  if (hlTimer) {
+    clearTimeout(hlTimer);
+    hlTimer = null;
+  }
+}
+function scrollToHlRow() {
+  if (hlTargetId.value == null) return;
+  // 等 VXE 渲染目标行后再滚动聚焦到该行
+  nextTick(() => {
+    setTimeout(() => {
+      const el = document.querySelector<HTMLElement>(
+        `.vxe-body--row[data-row-key="${hlTargetId.value}"]`,
+      );
+      el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      // 定位触发后：先停留，再淡出，最后清除
+      clearHlTimer();
+      hlFading.value = false;
+      hlTimer = setTimeout(() => {
+        hlFading.value = true;
+        hlTimer = setTimeout(() => {
+          hlTargetId.value = null;
+          hlFading.value = false;
+        }, HIGHLIGHT_FADE_MS);
+      }, HIGHLIGHT_HOLD_MS);
+    }, 120);
+  });
+}
+onUnmounted(() => {
+  clearHlTimer();
+});
+
+/** 从路由 query 应用外部下钻参数（岗位/周期/目标行），并加载后定位高亮目标行 */
+async function applyDrillQuery() {
+  const qPos = route.query.violPos;
+  if (qPos && POSITIONS.includes(qPos as any)) activePosition.value = qPos as string;
+  const qCycle = route.query.violCycle;
+  if (qCycle) {
+    const id = Number(qCycle);
+    if (Number.isFinite(id) && id > 0) selectedCycleId.value = id;
+  }
+  const qTarget = route.query.violTarget;
+  if (qTarget) {
+    const t = Number(qTarget);
+    if (Number.isFinite(t) && t > 0) hlTargetId.value = t;
+  }
   await loadCycles();
-  if (selectedCycleId.value) await loadAll();
+  if (selectedCycleId.value) {
+    await loadAll();
+    scrollToHlRow();
+  }
+}
+
+onMounted(() => {
+  applyDrillQuery();
+});
+
+// Tabbar keep-alive：页面被缓存后 onMounted 不再触发。再次从自动评分页三违列下钻进入
+// （query.violCycle/violPos/violTarget 变化）时，重新加载并定位高亮目标行。
+watch(
+  () => [route.query.violCycle, route.query.violPos, route.query.violTarget],
+  () => {
+    applyDrillQuery();
+  },
+);
+// keep-alive：每次标签页被重新激活（再次下钻进入）时，仅当携带 violTarget 才重新定位高亮，
+// 避免普通切换标签页时重复重载整页数据。
+onActivated(() => {
+  const t = Number(route.query.violTarget);
+  if (Number.isFinite(t) && t > 0) applyDrillQuery();
 });
 </script>
 
@@ -333,7 +675,7 @@ onMounted(async () => {
     </div>
 
     <!-- 列表 -->
-    <HseDataGrid :columns="allColumns" :data="rows" :loading="loading || loadingConfig" :pager="false" row-key="targetId">
+    <HseDataGrid :columns="allColumns" :data="rows" :loading="loading || loadingConfig" :pager="false" row-key="targetId" :row-class-name="locateRowClassName">
       <template #dept="{ row }">
         <span>{{ deptText(row) }}</span>
       </template>
@@ -348,18 +690,78 @@ onMounted(async () => {
             @update:value="(v) => setManualCell(row as any, String(column?.field), v as any)"
           />
         </template>
-        <NTag v-else-if="autoValue(row as any, String(column?.field)) > 0" :bordered="false" size="small" type="error">
+        <template v-else-if="column?.field && (DEDUC_KINDS[String(column.field)] || String(column.field) === 'driver') && autoValue(row as any, String(column.field)) > 0">
+          <NTag
+            :bordered="false"
+            size="small"
+            type="warning"
+            class="deduc-click"
+            @click="openAutoDeduct(row as any, String(column.field))"
+          >
+            {{ formatScore(autoValue(row as any, String(column.field))) }}
+          </NTag>
+        </template>
+        <NTag v-else-if="autoValue(row as any, String(column?.field)) > 0" :bordered="false" size="small" type="warning">
           {{ formatScore(autoValue(row as any, String(column?.field))) }}
         </NTag>
-        <span v-else>{{ formatScore(autoValue(row as any, String(column?.field))) }}</span>
+        <NTag v-else :bordered="false" size="small" type="success">{{ formatScore(autoValue(row as any, String(column?.field))) }}</NTag>
+      </template>
+      <template #companyDeduct="{ row }">
+        <NTag
+          v-if="(row.companyDeduct?.score ?? 0) > 0"
+          :bordered="false"
+          size="small"
+          type="warning"
+          class="deduc-click"
+          @click="openCompanyDeduct(row as any)"
+        >
+          {{ formatScore(row.companyDeduct?.score) }}
+        </NTag>
+        <NTag v-else :bordered="false" size="small" type="success">
+          {{ formatScore(row.companyDeduct?.score ?? 0) }}
+        </NTag>
       </template>
       <template #scoreTotal="{ row }">
-        <NTag v-if="totalScore(row) > 0" :bordered="false" size="small" type="warning">
+        <NTag v-if="totalScore(row) > 0" :bordered="false" size="small" type="error">
           {{ formatScore(totalScore(row)) }}
         </NTag>
-        <span v-else>{{ formatScore(totalScore(row)) }}</span>
+        <NTag v-else :bordered="false" size="small" type="success">{{ formatScore(totalScore(row)) }}</NTag>
       </template>
     </HseDataGrid>
+
+    <!-- 扣分明细：统一「目标职责·自动评分」的分项+合计弹窗样式 -->
+    <NModal
+      v-model:show="deductModalShow"
+      preset="card"
+      :title="deductTitle()"
+      style="width: 420px; max-width: 92vw"
+      :mask-closable="true"
+    >
+      <div class="sanwei-breakdown">
+        <NSpin :show="deductLoading">
+          <div
+            v-for="(r, ri) in deductRows"
+            :key="ri"
+            class="sanwei-breakdown-item"
+            :class="{ 'locate-link': !!r.loc }"
+            @click="r.loc && locate(r)"
+          >
+            <div class="sanwei-breakdown-main">
+              <span class="sanwei-breakdown-label">{{ r.label }}</span>
+              <span v-if="r.sub" class="sanwei-breakdown-sub">{{ r.sub }}</span>
+            </div>
+            <span class="sanwei-breakdown-val">{{ r.value }}</span>
+          </div>
+          <div v-if="!deductLoading && deductRows.length === 0" class="sanwei-breakdown-empty">
+            暂无扣分明细
+          </div>
+          <div class="sanwei-breakdown-total">
+            <span>合计</span>
+            <span>{{ formatScore(deductTotal) }} 分</span>
+          </div>
+        </NSpin>
+      </div>
+    </NModal>
   </HsePageLayout>
 </template>
 
@@ -369,5 +771,96 @@ onMounted(async () => {
   :deep(.n-input__input-el) {
     text-align: center;
   }
+}
+
+/* 可点击的扣分数字 */
+.deduc-click {
+  cursor: pointer;
+  transition: filter 0.15s;
+  &:hover {
+    filter: brightness(1.15);
+  }
+}
+
+/* 扣分明细弹窗 · 统一「目标职责·自动评分」的分项+合计样式 */
+.sanwei-breakdown {
+  min-width: 240px;
+}
+.sanwei-breakdown-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 5px 6px;
+  border-radius: 4px;
+}
+.sanwei-breakdown-item:hover {
+  background: rgba(245, 158, 11, 0.14);
+}
+/* 可定位行：hover 强调 + 表意点击（未按时整改明细 → 跳转网格台账原始记录） */
+.sanwei-breakdown-item.locate-link {
+  cursor: pointer;
+}
+.sanwei-breakdown-item.locate-link:hover {
+  background: rgba(37, 99, 235, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.35);
+}
+.sanwei-breakdown-main {
+  min-width: 0;
+  flex: 1;
+}
+.sanwei-breakdown-label {
+  display: block;
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+.sanwei-breakdown-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--v-ben-muted-foreground, #6b7280);
+  line-height: 1.4;
+}
+.sanwei-breakdown-val {
+  flex-shrink: 0;
+  font-weight: 600;
+  color: #d97706;
+  font-variant-numeric: tabular-nums;
+}
+.sanwei-breakdown-total {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  border-top: 1px dashed #d0d5dd;
+  margin-top: 6px;
+  padding: 6px 6px 0;
+  font-weight: 600;
+}
+.sanwei-breakdown-empty {
+  padding: 12px 6px;
+  text-align: center;
+  color: #8a919f;
+  font-size: 13px;
+}
+
+/* 外部下钻定位到目标人所在行：高亮该行（自动评分页三违明细点击跳转）。
+   停留后加 .viol-locate-fading 触发背景/文字色过渡淡出，再被置空彻底取消高亮 */
+:deep(.vxe-body--row.viol-locate-row) {
+  background: rgba(37, 99, 235, 0.14) !important;
+  transition:
+    background-color 0.8s ease,
+    color 0.8s ease;
+}
+:deep(.vxe-body--row.viol-locate-row.viol-locate-fading) {
+  background: rgba(37, 99, 235, 0) !important;
+}
+:deep(.vxe-body--row.viol-locate-row.viol-locate-fading .vxe-cell) {
+  color: inherit;
+  font-weight: 400;
+}
+:deep(.vxe-body--row.viol-locate-row .vxe-cell) {
+  color: #1d4ed8;
+  font-weight: 600;
 }
 </style>

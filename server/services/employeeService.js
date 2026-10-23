@@ -90,18 +90,19 @@ async function listEmployees(query) {
       conditions.push(`e.employment_relation IN ('正式员工','辞职','死亡')`);
     }
   } else if (status) {
-    conditions.push(`ev.assignment_status = $${paramIdx}`);
-    params.push(status);
-    paramIdx++;
+    // 状态筛选：在职/离职以花名册用工关系为权威（与统计卡一致）；待岗/退休/返聘按任职状态
+    if (status === 'active') {
+      conditions.push(`e.employment_relation = '正式员工'`);
+    } else if (status === 'left') {
+      conditions.push(`e.employment_relation IN ('辞职','死亡')`);
+    } else {
+      conditions.push(`ev.assignment_status = $${paramIdx}`);
+      params.push(status);
+      paramIdx++;
+    }
   } else {
-    // 默认（未选状态）仅显示当前在职：须存在一条当前主岗任职
-    conditions.push(`EXISTS (
-      SELECT 1 FROM employee_assignment _cur
-      WHERE _cur.employee_id = e.id
-        AND _cur.is_current = true
-        AND _cur.is_primary = true
-        AND _cur.is_deleted = false
-    )`);
+    // 默认（未选状态）仅显示花名册在职：用工关系状态 = 正式员工
+    conditions.push(`e.employment_relation = '正式员工'`);
   }
 
   const whereClause = conditions.join(' AND ');

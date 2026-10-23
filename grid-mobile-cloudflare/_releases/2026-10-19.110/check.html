@@ -1,0 +1,1527 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>网格巡查 · 现场巡查</title>
+<!-- 构建版本：用于**识别浏览器是否在跑旧缓存页**。
+     排查线上问题时先看这里 —— 若与最新发布不一致，说明用户拿到的是缓存旧版，
+     先让用户强刷（而非误判成后端缺陷）。改前端请同步更新此值。 -->
+<meta name="hse-build" content="2026-10-19.110">
+<!-- ================= 「添加到手机桌面」（PWA） =================
+     让现场人员点图标直接进系统（登录态在本机 localStorage，通常免登录）。
+     · manifest.webmanifest 是规范入口，Chrome / Safari 都认
+     · apple-touch-icon 是 iOS 唯一识别途径（不读 manifest）
+     · theme-color 影响 Android 状态栏与 Chrome 顶栏
+     · mobile-web-app-capable 让 iOS 全屏，去掉 Safari UI —— 桌面图标体验就靠它
+     路径用绝对 URL（/...）而不是相对：start_url 是站点根，加桌面后从站点根开，
+     相对路径会把图标拉成 ./check.html 而不是 ./。 -->
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="网格巡查">
+<meta name="theme-color" content="#1D4ED8">
+<!-- ================= 致命故障兜底（CF-WPS-33） =================
+     背景：曾因主脚本出现一个多余的 `)` 导致整段 JS 无法解析 —— 页面不报错、
+     不跳转、永远停在「正在验证登录状态…」，现场只看到「卡在登录界面」。
+     这段脚本是独立的 script 块、不依赖主脚本（语法与主脚本互不影响），
+     8 秒内若主脚本没有把自己标记为已就绪（window.__hseAppReady），
+     判定为「脚本未执行/解析失败」，直接给出可点自救入口，而不是干等。 -->
+<script>
+(function(){
+  var SHOWN = false;
+  // CF-WPS-106/.109：启动失败自报——主脚本抛错时把具体错误+行号记下来，fatal 页显示，
+  // 用户截图即可区分「传输截断(SyntaxError)」还是「内核过旧(xxx is not defined)」，不再盲猜
+  window.__hseFatalErr = "";
+  window.onerror = function(msg, src, line){
+    var m = String(msg || "");
+    if(m.length > 140) m = m.slice(0, 140) + "…";
+    window.__hseFatalErr = m + (line ? "（脚本第 " + line + " 行）" : "");
+  };
+  if(window.addEventListener){
+    window.addEventListener("unhandledrejection", function(e){
+      try{
+        if(window.__hseFatalErr) return;
+        var r = e && e.reason;
+        window.__hseFatalErr = "异步错误：" + String((r && r.message) || r || "未知").slice(0, 140);
+      }catch(x){}
+    });
+  }
+  function fatal(){
+    if(SHOWN || window.__hseAppReady) return;
+    SHOWN = true;
+    var box = document.createElement('div');
+    box.style.cssText = 'position:fixed;inset:0;z-index:100000;background:#fff;display:flex;flex-direction:column;' +
+      'align-items:center;justify-content:center;padding:32px 24px;text-align:center;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
+    var errHtml = window.__hseFatalErr
+      ? '<div style="font-size:12px;line-height:1.7;color:#DC2626;background:#FEF2F2;border:1px solid #FECACA;border-radius:10px;padding:10px 12px;margin-bottom:16px;word-break:break-all">启动脚本出错：' +
+        String(window.__hseFatalErr).replace(/</g, '&lt;') + '</div>'
+      : window.__hseScriptFail
+      ? '<div style="font-size:12px;line-height:1.7;color:#DC2626;background:#FEF2F2;border:1px solid #FECACA;border-radius:10px;padding:10px 12px;margin-bottom:16px;word-break:break-all">脚本文件下载失败：当前网络中断了页面脚本的传输（页面本体已到达，仅脚本没下来）。<br>请切换网络（WiFi/流量互切）后点下方按钮重试。</div>'
+      : '<div style="font-size:14px;line-height:1.9;color:#6B7280;margin-bottom:24px">' +
+        '通常是手机还留着旧版本的缓存，或当前网络不稳定导致页面加载不完整。<br>若反复出现，请切换网络（WiFi/流量）或换 Chrome 浏览器重试。' +
+      '</div>';
+    box.innerHTML =
+      '<div style="font-size:20px;font-weight:700;color:#1A1A1A;margin-bottom:12px">页面没能正常启动</div>' +
+      errHtml +
+      '<button id="hse-fatal-reload" style="width:100%;max-width:320px;padding:15px;border:none;border-radius:14px;' +
+        'background:#1D4ED8;color:#fff;font-size:16px;font-weight:600">清空缓存并重新加载</button>' +
+      '<div style="margin-top:14px;font-size:12px;color:#9CA3AF">版本 ' +
+        ((document.querySelector('meta[name="hse-build"]') || {}).content || '未知') + '</div>';
+    (document.body || document.documentElement).appendChild(box);
+    document.getElementById('hse-fatal-reload').onclick = function(){
+      var btn = this; btn.disabled = true; btn.textContent = '正在清理…';
+      var done = function(){ location.replace(location.pathname + '?_cb=' + Date.now()); };
+      try{
+        if(window.caches && caches.keys){ caches.keys().then(function(ks){ return Promise.all(ks.map(function(k){ return caches.delete(k); })); }).then(done, done); }
+        else if(navigator.serviceWorker && navigator.serviceWorker.getRegistrations){
+          navigator.serviceWorker.getRegistrations().then(function(rs){ return Promise.all(rs.map(function(r){ return r.unregister(); })); }).then(done, done);
+        } else done();
+      }catch(e){ done(); }
+    };
+  }
+  setTimeout(fatal, 8000);
+  window.__hseFatalNow = fatal;
+})();
+</script>
+<style>
+:root{
+  --bg:#F5F4F1; --card:#FFFFFF; --line:#E5E7EB;
+  --primary:#1D4ED8; --primary-soft:#EEF2FF; --primary-light:#BFDBFE;
+  --danger:#DC2626; --danger-soft:#FEE2E2;
+  --success:#16A34A; --success-soft:#DCFCE7; --success-tint:#F0FDF4;
+  --warn:#D97706; --warn-soft:#FEF3C7; --warn-tint:#FFFBEB;
+  --t1:#1A1A1A; --t2:#374151; --t3:#6B7280; --t4:#9CA3AF;
+  --tabbar-h:calc(64px + 24px + env(safe-area-inset-bottom));
+  /* ==========================================================================
+     统一尺寸令牌（2026-09-17 收敛）
+     --------------------------------------------------------------------------
+     背景：改版前同类组件各写各的数值 —— 高度出现 72/60/56/64 四种、
+           圆角出现 16/18/20/22/24/26/28/40/48 九种，同功能控件尺寸不一致。
+     纪律：**所有组件尺寸必须从这里取，不要在组件里写死 px**。
+           新增组件若确有新尺寸需求，先在此加令牌并说明理由，再引用。
+     ========================================================================== */
+  --r-card:16px;      /* 卡片 / 面板 / 宫格 / 列表行 —— 全局唯一圆角基准 */
+  --r-pill:999px;     /* 胶囊（标签 / 徽章）—— 完全圆头 */
+  --r-btn:16px;       /* 按钮 —— 与卡片同值，视觉上同一套 */
+  --h-btn:64px;       /* 主/次按钮高度（原 72，与搜索框统一到 64） */
+  --h-btn-sm:52px;    /* 次级小按钮（如「去登录」这类页内操作） */
+  --h-input:64px;     /* 输入类（搜索框）—— 与 --h-btn 同高，横排时对齐 */
+  --h-cell:88px;      /* 宫格单元（三违行为）—— 触摸目标 ≥ 44px 的两倍 */
+  --h-entry:78px;     /* 首页统计卡 / 入口卡 —— 两个同类卡片统一同高（原 78/76 混用） */
+  --h-tabbar:64px;    /* 底部导航栏 */
+  --h-navbar:56px;    /* 顶部标题栏 */
+  --pad-card:16px;    /* 卡片内边距 —— 全局唯一 */
+  --pad-opt:20px;     /* 主操作卡（「是三违/不是三违」这类大选择块）内边距 */
+  --pad-row:16px;     /* 列表行内边距 —— 与卡片同值，同类同尺寸 */
+  --gap:12px;         /* 组件间距 —— 全局唯一（原 12/14/18 混用） */
+  /* ---- 字号：6 级制 ----------------------------------------------------------
+     改版前实际散落着 30/26/24/22/21/20/19/18/17/16/15/14/13/12/11 共 15 种字号，
+     且同类语义各写一份 —— 例：区块小标题有 18 和 17 两个值；正文有 16/15/14 三个值；
+     列表行主标题有 21/20/19/17 四个值。用户看到的「同功能大小不一致」正源于此。
+     现按视觉层级收敛为 6 级，**组件只准引用这 6 个变量**。
+     映射规则：同类语义 → 取原值中出现频次最高的那个作为定值。
+     ---- 屏幕自适应（2026-10-16）------------------------------------------------
+     定值 px 在不同宽度的手机上观感不一：320px 窄屏偏大、430px 宽屏偏小。
+     现改为 clamp(下限, vw, 上限) 流式取值：以 390px 视口为设计基准（vw 恰好等于原 px），
+     320px 触底不再缩小、≥390px 封顶保持原设计值 —— 组件引用方式不变，全局生效。
+     注意：这只解决「屏幕宽度」差异；系统大字体缩放由 tab 栏 / 高度令牌的弹性改造兜底。
+     -------------------------------------------------------------------------- */
+  --fs-hero:clamp(24px, 7.7vw, 30px);  /* 主视觉（首页姓名、HSE 看板标题）—— 全站仅 2 处 */
+  --fs-h1:clamp(21px, 6.7vw, 26px);    /* 大数字 / 页面级标题（统计数、分组标签、完成页大标题） */
+  --fs-h2:clamp(19px, 6.2vw, 24px);    /* 区块标题（选择块、大按钮 CTA、记录卡标题） */
+  --fs-btn:clamp(18px, 5.65vw, 22px);  /* 按钮文字 / 次要标题 */
+  --fs-title:clamp(16px, 5.15vw, 20px);/* 列表行主标题（乡镇名 / 人名）/ 输入框文字 ← 原 21/20/19/17 合并 */
+  --fs-body:clamp(12px, 3.85vw, 15px); /* 正文、菜单项、次级信息 ← 原 16/15/14 合并（14 出现最多） */
+  --fs-sub:clamp(11px, 3.35vw, 13px);  /* 副标题 / 说明 / 徽章 */
+  --fs-cap:clamp(9px, 2.85vw, 11px);   /* 最小字号（底部导航标签） */
+  --h-cta:190px;      /* 主操作大按钮（拍现场照片 / 拍整改后照片 / 开始检查）—— 三个同类按钮统一同高
+                         （改版前：首页 190 / 现场拍照 150 / 整改后拍照 140，同类三值） */
+  --h-photo:180px;    /* 照片预览区空框高度 —— 拍现场 / 拍整改后两处统一
+                         （改版前：通用 180 / 现场照片 200 / 整改后照片 170） */
+  --h-topbar:48px;    /* 首页顶栏 */
+  --icon-btn:40px;    /* 圆形图标按钮（返回 / 头像位） */
+  --icon-avatar:56px; /* 列表头像圆底（列表行 / 人员行统一） */
+  --icon-avatar-sm:44px; /* 小头像圆底（首页顶栏 / 记录卡内联） */
+  --icon-thumb:72px;  /* 缩略图（已拍照片预览） */
+  --icon-badge:22px;  /* 角标（未读计数）—— 高度；宽度随内容 */
+  --icon-mark:26px;   /* 勾选标记圆底（可选中卡片的对勾） */
+  --icon-logo:64px;   /* 登录页品牌图标底 */
+  --icon-glyph:20px;  /* 内联图标字形（底部导航 tab 图标等）—— 与 20px 文字同高 */
+  --icon-cta:44px;    /* 主操作大按钮内的大图标（相机）—— 同类三处统一（原 44/40 混用） */
+  --icon-state:96px;  /* 状态页大图标圆底（完成页 / 无权限页）—— 同类同尺寸（原 96/80 混用） */
+  /* ---- 行高型按钮（「从相册上传」「提交」这类单行按钮）----------------------
+     与 .card 参照行（如「未完成  null · 吕孟辉」那一行）保持**同一套尺寸**：
+       .card = padding 16px×2 + 内容 31px（.chip 高） = 65px
+     故按钮不再用固定高度，改用**同样的 padding 驱动**，这样：
+       · 高度自动与参照行一致（撑出来就是 65px），参照行改 padding 按钮自动跟随
+       · 不再多一个「按钮高」常量需要单独维护
+     ---- */
+  --pad-btn-row:var(--pad-card); /* 行高型按钮上下内边距 —— 与卡片同值：同一套尺寸 */
+  --fs-btn-row:var(--fs-body);   /* 行高型按钮字号 —— 与卡片内文字同值：同一套尺寸 */
+  --h-btn-row:65px;  /* 行高型按钮**总高** = .card 参照行高度（padding 16×2 + 内容 31 + 边框 1×2 ≈ 65）。
+                        直接锁总高而不是锁内容高：按钮内容有「带图标(22px)」与「纯文字(15px)」两种，
+                        用同样的 padding 会撑出不同高度（56 vs 47）。锁总高才能保证**同类等高**。 */
+  --icon-btn-row:22px; /* 行高型按钮内的图标（相册图标）—— 居中显示，不参与撑高 */
+  --icon-cell:28px;   /* 三违行为宫格单元内的图标 —— 每个行为一个语义图标，
+                         与 20px 单元格文字形成「图标 + 标签」的固定节奏。
+                         取 28px：大于文字行高（约 27px）确保图标是视觉主语，又不挤压 88px 单元高。 */
+  --cta-icon-gap:var(--pad-card); /* 主操作大按钮「图标下沿 → 标题上沿」间距。
+                        直接取 .card 的内边距令牌（16px）—— 与「未完成  null · 吕孟辉」
+                        那一行给内容块的垂直留白**同一个值、同一个令牌**，视觉节奏才一致。
+                        （改版前用 --gap:12px，比参照行窄 4px；实测参照行留白 17px
+                          = 1px 边框 + 16px padding，故真实设计值就是 16px。） */
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+/* 三段式布局（微信式，2026-09-18）：顶部状态栏+导航固定、底部导航固定，仅中间 .page 滚动。
+   做法：html,body 与 #app 锁定可视高度并 hidden 溢出；每个 view 是 flex 纵列，
+   其 .statusbar/.navbar 为 flex:none（固定），.page 为 flex:1 + overflow-y:auto（滚动）；
+   底部 .tabbar-wrap 作为 #app 末尾 flex 行天然贴底，不再随内容滚走。 */
+html,body{height:100%;overflow:hidden}
+body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;background:#DDD;color:var(--t1);-webkit-text-size-adjust:100%}
+/* #app 锁定为可视高度：内部 flex 纵列，活跃 view 吃掉剩余空间，顶部/底部固定 */
+#app{max-width:480px;margin:0 auto;height:100dvh;overflow:hidden;background:var(--bg);position:relative;display:flex;flex-direction:column}
+.view{display:none;flex-direction:column;min-height:0;overflow:hidden}
+.view.active{display:flex;flex:1 1 0%;min-height:0}
+.view.has-tab .page{padding-bottom:var(--pad-card)}
+.statusbar{height:calc(28px + env(safe-area-inset-top));padding-top:env(safe-area-inset-top);background:transparent;flex:none}
+.navbar{height:var(--h-navbar);display:flex;align-items:center;justify-content:space-between;padding:0 16px;flex:none}
+.navbar .nav-title{font-size:var(--fs-title);font-weight:600}
+.icon-btn{width:var(--icon-btn);height:var(--icon-btn);border-radius:var(--r-pill);background:var(--card);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;cursor:pointer}
+/* 圆形图标按钮内的字形尺寸 —— 用令牌锁定，不再依赖 HTML 的内联 width/height。
+   改版前完全靠 svg 内联属性（各写 20/18/14），漏写一个就会按 viewBox 比例撑满 40px 圆底。 */
+.icon-btn svg{width:var(--icon-glyph);height:var(--icon-glyph);flex:0 0 auto}
+.page{display:flex;flex-direction:column;padding:var(--pad-card);gap:var(--gap);
+  flex:1 1 0%;min-height:0;overflow-y:auto;overflow-x:hidden;
+  overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+/* .page 直接子元素强制 100% 宽：避免 button 类（.big-cta / .btn-row）作为 inline-flex
+   在 flex column 里不被 align-items:stretch 撑满，导致整改页等在桌面浏览器下
+   内容偏左、大片留白（CF-WPS-34c）。box-sizing 让 padding 不挤掉宽度。 */
+.page > *{width:100%;box-sizing:border-box}
+/* .page 里嵌套容器（#rf-pre / #rf-post / .btn-stack 等）内的按钮也得撑满：
+   `.page > *` 只匹配直接子，间接子里的 button 还得再补一刀（同样原因：button + display:flex
+   = inline-flex 不被 stretch 撑满）。 */
+.page button{width:100%;box-sizing:border-box}
+/* 桌面端隐藏中间 .page 的内部滚动条（移动端触摸滚动本就不显示） */
+.page::-webkit-scrollbar{display:none}
+.page{scrollbar-width:none;-ms-overflow-style:none}
+.page.center{align-items:stretch}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r-card);padding:var(--pad-card)}
+.btn-primary{display:flex;align-items:center;justify-content:center;height:var(--h-btn);border-radius:var(--r-btn);background:var(--primary);color:#fff;font-size:var(--fs-btn);font-weight:600;border:none;cursor:pointer;gap:var(--gap);box-shadow:0 6px 16px -2px rgba(29,78,216,.25)}
+.btn-primary:active{transform:scale(.98)}
+.btn-primary:disabled{background:#B6C4E8;box-shadow:none;cursor:not-allowed}
+.btn-ghost{display:flex;align-items:center;justify-content:center;height:var(--h-btn);border-radius:var(--r-btn);background:var(--card);border:1px solid var(--line);font-size:var(--fs-btn);font-weight:600;color:var(--t1);cursor:pointer;gap:var(--gap)}
+.btn-ghost:active{transform:scale(.98)}
+/* 行高型按钮（.btn-row）：高度由 padding 驱动，与 .card 参照行同一套尺寸。
+   用在「从相册上传」「提交」这类单行按钮上 —— 用户要求它们与
+   「未完成  null · 吕孟辉」那一行大小一致（高度 / 字号 / 圆角 / 内边距全对齐）。
+   ⚠️ 必须写在 .btn-primary / .btn-ghost **之后**并带双类选择器：
+      否则同为单类选择器时后定义者胜出，.btn-ghost 的 font-size/height 会盖掉这里。 */
+.btn-primary.btn-row,.btn-ghost.btn-row{height:var(--h-btn-row);min-height:0;padding:0 var(--pad-card);
+  font-size:var(--fs-btn-row);gap:var(--gap);line-height:1}
+/* 按钮内图标：固定 --icon-btn-row，居中，不参与撑高（高度已被 --h-btn-row 锁定）。
+   ⚠️ 必须限定在按钮内，绝不能写成裸 `svg` 或跨组件后代选择器 ——
+      否则会命中导航栏返回箭头等无关 svg（第十二轮回归即由此类越界命中埋下隐患）。 */
+.btn-row svg{width:var(--icon-btn-row);height:var(--icon-btn-row);flex:0 0 auto}
+/* 按钮组容器：必须显式声明为 flex column。
+   ⚠️ 这是第十二轮缺陷根因：`#photo-actions` 原先是个**无任何 CSS 的裸 div**，
+      它是 block 容器 → 里面 <button> 是 inline-block → **收缩到内容宽度**，
+      而非像 .page 直接子元素那样被 flex 拉满 358px。
+      结果是「拍现场照片」大按钮被压成一条窄柱、文字换行、图标显得异常巨大。
+      凡「多个按钮叠放」处一律走这个容器，保证与 .page 同一套 gap / 拉伸行为。 */
+.btn-stack{display:flex;flex-direction:column;gap:var(--gap)}
+/* CF-WPS-58：本月派发明细页的「未完成 / 已完成」分段 —— **两个按钮一行并排**。
+   ⚠️ 与 .btn-stack（纵向）相反，这里必须是 flex row + 子项 flex:1 等分；
+      同样不能包在裸 div 里（block 容器会让 button 收缩到内容宽度，详见 .btn-stack 注释）。 */
+.sd-seg{display:flex;flex-direction:row;gap:var(--gap);width:100%}
+.sd-seg button{flex:1 1 0;min-width:0;display:flex;align-items:center;justify-content:center;gap:6px;
+  height:var(--h-btn-row);padding:0 var(--pad-card);border-radius:var(--r-btn);
+  background:var(--card);border:1px solid var(--line);color:var(--t1);
+  font-size:var(--fs-btn-row);font-weight:600;line-height:1;cursor:pointer}
+.sd-seg button:active{transform:scale(.98)}
+.sd-seg button .n{font-size:var(--fs-sub);font-weight:700;opacity:.85}
+/* 选中态：未完成=橙（与「待整改」同色系），已完成=绿（与「已闭环」同色系） */
+.sd-seg button.on{color:#fff;border-color:transparent}
+.sd-seg button.on.warn{background:var(--warn);box-shadow:0 6px 16px -2px rgba(217,119,6,.25)}
+.sd-seg button.on.ok{background:var(--success);box-shadow:0 6px 16px -2px rgba(22,163,74,.25)}
+
+/* CF-WPS-61：改密表单（首次登录强制改密页） */
+.pwd-input{width:100%;height:var(--h-btn-row);padding:0 var(--pad-card);border-radius:var(--r-btn);
+  border:1px solid var(--line);background:var(--card);color:var(--t1);
+  font-size:var(--fs-body);font-family:inherit;outline:none;-webkit-appearance:none;box-sizing:border-box}
+.pwd-input:focus{border-color:var(--primary)}
+.pwd-row{display:flex;flex-direction:column;gap:6px;width:100%}
+.pwd-row .lab{font-size:var(--fs-sub);color:var(--t2)}
+/* CF-WPS-95：隐患排查表单（复用 opt-card/grid2 体系，只补输入件与照片条） */
+.hz-input{width:100%;height:var(--h-btn-row);padding:0 var(--pad-card);border-radius:var(--r-btn);
+  border:1px solid var(--line);background:var(--card);color:var(--t1);
+  font-size:var(--fs-body);font-family:inherit;outline:none;-webkit-appearance:none;box-sizing:border-box}
+.hz-input:focus{border-color:var(--primary)}
+textarea.hz-input{height:auto;padding:10px var(--pad-card);line-height:1.6;resize:none}
+.hz-photos{display:flex;gap:8px;flex-wrap:wrap}
+.hz-photo{position:relative;width:88px;height:88px;border-radius:var(--r-card);overflow:hidden;background:#E8E6E0;flex:0 0 auto}
+.hz-photo img{width:100%;height:100%;object-fit:cover;display:block}
+.hz-photo .hz-del{position:absolute;top:2px;right:2px;width:22px;height:22px;border-radius:var(--r-pill);
+  background:rgba(17,24,39,.72);color:#fff;border:none;font-size:13px;line-height:22px;text-align:center;cursor:pointer;padding:0}
+.hz-add{width:88px;height:88px;border:1.5px dashed var(--line);border-radius:var(--r-card);background:var(--card);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:var(--t3);
+  font-size:var(--fs-sub);cursor:pointer;flex:0 0 auto}
+.hz-req{color:var(--danger);font-weight:700}
+/* CF-WPS-100：整改闭环（指派选人 / 待办列表 / 验收）复用件 */
+.hz-cand{display:flex;align-items:center;gap:10px;padding:12px var(--pad-card);border-radius:var(--r-card);
+  background:var(--card);border:1.5px solid var(--line);cursor:pointer;margin-top:8px}
+.hz-cand.sel{border-color:var(--primary);background:rgba(29,78,216,.06)}
+.hz-cand:active{transform:scale(.99)}
+.hz-cand .nm{font-size:var(--fs-body);font-weight:600;color:var(--t1)}
+.hz-cand .sub{font-size:var(--fs-sub);color:var(--t3);margin-top:2px}
+.hz-deadline{width:100%;height:var(--h-btn-row);padding:0 var(--pad-card);border-radius:var(--r-btn);
+  border:1px solid var(--line);background:var(--card);color:var(--t1);
+  font-size:var(--fs-body);font-family:inherit;outline:none;-webkit-appearance:none;box-sizing:border-box}
+.hz-todo-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;
+  font-size:var(--fs-sub);color:var(--t3)}
+.hz-review-bar{display:flex;gap:8px;margin-top:12px}
+.hz-review-bar>button{flex:1}
+/* 2026-10-16：height → min-height —— 系统大字体放大图标/文字时按钮能撑高不裁切；
+   正常字体下内容 ≈150px < 190px，仍由 min-height 定高，外观不变。 */
+.big-cta{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--cta-icon-gap);min-height:var(--h-cta);border-radius:var(--r-card);background:var(--primary);color:#fff;cursor:pointer;border:none;box-shadow:0 10px 24px -4px rgba(29,78,216,.3)}
+.big-cta:active{transform:scale(.985)}
+.big-cta:disabled{background:#B6C4E8;box-shadow:none}
+/* 「开始检查」专用：图标 + 文字左右排列（其他 big-cta 拍现场/拍整改后仍保持竖排）*/
+.big-cta-row{flex-direction:row;height:auto;min-height:68px;padding:14px 22px;gap:14px}
+.big-cta-row .cta-title{font-size:var(--fs-h2);font-weight:700;line-height:1.15;display:block}
+/* 标题去掉行盒上下多余留白，让「图标下沿→字面下沿」真正等于 --cta-icon-gap。
+   否则 font-size 越大，行盒半leading 越大，视觉间距会被撑大且不受控。 */
+.big-cta .cta-title{font-size:var(--fs-h2);font-weight:700;line-height:1.15;display:block}
+.big-cta .cta-sub{font-size:var(--fs-body);color:var(--primary-light)}
+/* 大按钮内的图标统一尺寸 —— 三处 CTA 的图标一律取 --icon-cta，
+   避免 HTML 里各写 52/44/40（同类组件尺寸必须一致）。 */
+.big-cta svg{width:var(--icon-cta);height:var(--icon-cta);flex:0 0 auto}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:var(--r-pill);font-size:var(--fs-sub);font-weight:600}
+.chip .dot{width:8px;height:8px;border-radius:var(--r-pill)}
+.chip.red{background:var(--danger-soft);color:var(--danger)} .chip.red .dot{background:var(--danger)}
+.chip.green{background:var(--success-soft);color:var(--success)} .chip.green .dot{background:var(--success)}
+.chip.yellow{background:var(--warn-soft);color:var(--warn)} .chip.yellow .dot{background:var(--warn)}
+.chip.blue{background:var(--primary-soft);color:var(--primary)}
+
+/* ---- 拍后动作行（CF-WPS-34b） ----
+   拍完照片后两个按钮改成上下两列的小型行按钮 —— 与「未完成 违章停车·王同池」
+   那一行视觉同量级：白底卡片 + 左侧圆形图标色块 + 右侧文字，整行可点。
+   比原 big-cta (190px) + btn-row (65px) × 2 紧凑得多，又不像胶囊按钮那样像开关。 */
+.rect-row{display:flex;align-items:center;justify-content:center;gap:12px;width:100%;
+  padding:12px var(--pad-card);border-radius:var(--r-card);
+  background:var(--card);border:1px solid var(--line);
+  font-size:var(--fs-body);font-weight:600;color:var(--t1);
+  cursor:pointer;transition:transform .15s ease;text-align:left;border:none}
+.rect-row:active{transform:scale(.985)}
+.rect-row .rect-icon{width:34px;height:34px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+.rect-row.primary .rect-icon{background:var(--primary-soft);color:var(--primary)}
+.rect-row.success .rect-icon{background:var(--success-soft);color:var(--success)}
+.rect-row svg{width:18px;height:18px}
+#rf-post{display:flex;flex-direction:column;gap:10px}
+/* 台账页待补传提示条：失败记录留本地但用户必须看得见，故用告警底色 + 可点击重试 */
+#sync-bar{display:flex;align-items:center;justify-content:space-between;gap:var(--gap);margin:0 20px 12px;padding:12px 16px;border-radius:var(--r-card);background:var(--warn-soft);color:var(--warn);font-size:var(--fs-body);cursor:pointer}
+#sync-bar:active{transform:scale(.99)}
+.gps-line{font-size:var(--fs-sub);line-height:1.7;color:#BFDBFE}
+.gps-line.warn{color:#FECACA}
+.gps-line a{color:#fff;text-decoration:underline}
+.opt-card{display:flex;flex-direction:column;gap:6px;background:var(--card);border:1px solid var(--line);border-radius:var(--r-card);padding:var(--pad-opt);cursor:pointer}
+.opt-card:active{transform:scale(.98)}
+.opt-card .opt-title{font-size:var(--fs-h2);font-weight:600}
+.opt-card .opt-sub{font-size:var(--fs-body);color:var(--t3)}
+.opt-card.accent{border-color:var(--danger)}
+/* 强调态：**只换颜色、不改边框宽度** —— 改宽度会改变盒模型高度，
+   导致同类卡片相差 2px（改版前 #opt-transfer 用行内 2px 边框就踩了这个坑）。 */
+.opt-card.primary{border-color:var(--primary);box-shadow:0 0 0 1px var(--primary)}
+/* 单选卡（普通巡查结果）：必须一眼看出点了哪一个 —— 高亮边框 + 淡蓝底 + 右侧勾选标记。
+   用 box-shadow 画外圈而非加粗 border，避免选中瞬间卡片尺寸跳动。 */
+.opt-group{display:flex;flex-direction:column;gap:var(--gap)}
+.opt-card.selectable{position:relative;padding-right:76px;transition:border-color .15s,background .15s,box-shadow .15s}
+.opt-card.selectable .opt-mark{position:absolute;right:22px;top:50%;transform:translateY(-50%);width:var(--icon-mark);height:var(--icon-mark);border-radius:var(--r-pill);border:2px solid var(--line);background:#fff;display:flex;align-items:center;justify-content:center;transition:border-color .15s,background .15s}
+.opt-card.selectable .opt-mark svg{opacity:0;transition:opacity .15s}
+.opt-card.selectable.selected{border-color:var(--primary);background:var(--primary-soft);box-shadow:0 0 0 1px var(--primary)}
+.opt-card.selectable.selected .opt-title{color:var(--primary)}
+.opt-card.selectable.selected .opt-sub{color:var(--primary)}
+.opt-card.selectable.selected .opt-mark{border-color:var(--primary);background:var(--primary)}
+.opt-card.selectable.selected .opt-mark svg{opacity:1}
+/* CF-WPS-106/.109：第③步紧凑网格——类别 3 列 / 位置 4 列 / 级别·三违·重大·风险 2 列小卡 */
+.opt-card.sm{padding:10px 12px;gap:4px}
+.opt-card.sm.selectable{padding-right:30px}
+.opt-card.sm .opt-title{font-size:var(--fs-body);font-weight:500;line-height:1.4}
+.opt-card.sm .opt-mark{right:8px;width:16px;height:16px}
+.opt-card.sm .opt-mark svg{width:9px;height:9px}
+.hz-grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.hz-loc-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:var(--gap)}
+/* 三违行为宫格单元：图标在上、行为名在下。
+   用户诉求（第十四轮）：「按照列表排列，每个三违行为前放一个图标」。
+   图标取 --icon-cell 令牌，颜色随单元格文字色（继承 currentColor），
+   这样 active/选中态只需改一处 color 即可整体联动。 */
+.vio-cell{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;height:var(--h-cell);border-radius:var(--r-card);background:var(--card);border:1px solid var(--line);font-size:var(--fs-body);font-weight:600;cursor:pointer;padding:8px 10px;text-align:center;color:var(--t1)}
+.vio-cell .vio-icon{width:var(--icon-cell);height:var(--icon-cell);flex:0 0 auto;display:flex;align-items:center;justify-content:center;color:var(--primary)}
+.vio-cell .vio-icon svg{width:100%;height:100%;display:block}
+.vio-cell .vio-label{line-height:1.25;word-break:break-word}
+.vio-cell:active{transform:scale(.96);border-color:var(--primary)}
+/* CF-WPS-被指派人确认：预填派发值高亮（可改选别的） */
+.vio-cell.sel{border-color:var(--primary);background:var(--primary-soft)}
+.person-row{display:flex;align-items:center;gap:var(--gap);padding:var(--pad-row);background:var(--card);border:1px solid var(--line);border-radius:var(--r-card);cursor:pointer}
+.person-row:active{transform:scale(.98);border-color:var(--primary)}
+.avatar{width:var(--icon-avatar);height:var(--icon-avatar);border-radius:var(--r-pill);display:flex;align-items:center;justify-content:center;font-size:var(--fs-btn);font-weight:600;flex:none}
+.avatar.sm{width:var(--icon-avatar-sm);height:var(--icon-avatar-sm);border-radius:var(--r-pill);font-size:var(--fs-title)}
+.av-blue{background:var(--primary-soft);color:var(--primary)}
+.av-amber{background:#FEF3C7;color:var(--warn)}
+/* 转责任乡镇：第一步乡镇清单（12 个乡镇作业中心依次向下排列） */
+.town-row{display:flex;align-items:center;gap:var(--gap);padding:var(--pad-row);background:var(--card);border:1px solid var(--line);border-radius:var(--r-card);cursor:pointer}
+.town-row:active{transform:scale(.98);border-color:var(--primary)}
+.town-row .town-name{font-size:var(--fs-title);font-weight:600;color:var(--t1)}
+.town-row .town-meta{font-size:var(--fs-sub);color:var(--t3);margin-top:2px}
+.town-badge{flex:none;min-width:60px;text-align:center;font-size:var(--fs-sub);font-weight:600;padding:6px 10px;border-radius:var(--r-pill);background:var(--primary-soft);color:var(--primary)}
+.town-badge.warn{background:#FEF3C7;color:var(--warn)}
+/* 第二步：乡镇下的经理 / 管理员，两级分组 */
+.tp-group{font-size:var(--fs-sub);font-weight:600;color:var(--t3);letter-spacing:.04em;margin:4px 0 -2px 4px}
+.tp-person{display:flex;align-items:center;gap:var(--gap);padding:var(--pad-row);background:var(--card);border:1px solid var(--line);border-radius:var(--r-card);cursor:pointer}
+.tp-person:active{transform:scale(.98);border-color:var(--primary)}
+.tp-person .tp-name{font-size:var(--fs-title);font-weight:600;color:var(--t1)}
+.tp-person .tp-meta{font-size:var(--fs-sub);color:var(--t3);margin-top:2px}
+.tp-tag{flex:none;min-width:60px;text-align:center;font-size:var(--fs-cap);font-weight:600;padding:6px 10px;border-radius:var(--r-pill);background:#F3F4F6;color:var(--t3)}
+.tp-tag.mgr{background:var(--primary-soft);color:var(--primary)}
+.av-green{background:var(--success-soft);color:var(--success)}
+.search-bar{display:flex;align-items:center;gap:var(--gap);height:var(--h-input);padding:0 20px;border-radius:var(--r-btn);background:var(--card);border:1px solid var(--line)}
+.search-bar:focus-within{border-color:var(--primary);box-shadow:0 0 0 1px var(--primary)}
+.search-bar input{flex:1;border:none;outline:none;font-size:var(--fs-title);font-weight:600;font-family:inherit;color:var(--t1);background:transparent}
+.search-bar input::placeholder{color:var(--primary);opacity:.75}
+/* 底部导航：sticky 贴视口底部（整页滚动放开后仍固定可见）。
+   用 sticky 而非 absolute：父级不再锁高，absolute 会跟着内容跑到页面最下方。 */
+.tabbar-wrap{position:sticky;bottom:0;left:0;right:0;z-index:20;margin-top:auto;
+  padding:8px 16px calc(16px + env(safe-area-inset-bottom));
+  background:linear-gradient(180deg,rgba(245,244,241,0) 0%,var(--bg) 36%);pointer-events:none}
+.tabbar-wrap .tabbar{pointer-events:auto}
+/* CF-WPS-45：底部导航由 4 个 tab 增到 5 个（新增「派发记录」），左右内边距 24px→12px。
+   屏幕自适应 + 系统大字体兜底（2026-10-16）：
+   · .tab-item 改 flex:1 1 0 + min-width:0 —— 每个 tab 严格等分导航栏宽度，
+     标签再宽也不会把相邻 tab 挤走（旧行为 min-width:auto + 内容超宽时，
+     各标签横向溢出自己的槽位、互相粘连成一串，见 2026-10-16 真机截图事故）；
+   · 标签统一缩为 2 字（派发/整改/台账），叠加 --fs-cap 的 clamp 下限，
+     320px 窄屏 + 系统字体放大 1.5x 时单标签 ≈31px << 等分槽位 ≈53px，仍放得下；
+   · 角标 right:-6px 溢出可见 —— .tab-item 不加 overflow:hidden，避免裁掉角标。 */
+.tabbar{height:var(--h-tabbar);background:var(--card);border:1px solid var(--line);border-radius:var(--r-card);display:flex;align-items:stretch;justify-content:space-evenly;padding:0 12px;box-shadow:0 6px 18px -8px rgba(0,0,0,.18)}
+/* white-space:nowrap 是给现场安卓机留的余量：系统字体缩放会把标签渲染得更大，
+   一旦标签被压到换行，5 个 tab 的导航栏高度会被撑破。禁止换行是唯一安全解。 */
+.tab-item{flex:1 1 0;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:var(--fs-cap);color:var(--t4);cursor:pointer;border:none;background:none;font-family:inherit;position:relative;white-space:nowrap}
+.tab-item.active{color:var(--primary);font-weight:600}
+.tab-item svg{width:var(--icon-glyph);height:var(--icon-glyph)}
+/* CF-WPS-40：底部 tab 红色未读角标。此前 setBadge() 调用的三个 id 在 DOM 里都不存在，
+   等于角标从未生效——被指派人在首页看不到任何提示。现在挂到「整改任务 / 巡查台账」两个 tab 上。 */
+.tab-badge{position:absolute;top:-1px;right:-6px;min-width:17px;height:17px;padding:0 5px;border-radius:9px;
+  background:var(--danger);color:#fff;font-size:11px;font-weight:700;line-height:17px;text-align:center;
+  box-shadow:0 0 0 2px var(--card);pointer-events:none}
+.tab-badge:empty{display:none}
+.info-line{font-size:var(--fs-body);font-weight:500;color:var(--t2);line-height:1.9}
+.muted{font-size:var(--fs-sub);color:var(--t4);line-height:1.6}
+.section-label{font-size:var(--fs-body);font-weight:500;color:var(--t4)}
+.photo-box{width:100%;position:relative;border-radius:var(--r-card);overflow:hidden;background:#E8E6E0;display:flex;align-items:center;justify-content:center;min-height:var(--h-photo)}
+/* CF-WPS-107：照片落表状态角标 —— 「页面显示照片」≠「已落台账」，必须让用户一眼区分
+   （2026-10-19 死锁事故：attach 静默失败，页面一直显示本机照片，台账列却永远空）。 */
+.photo-land-badge{position:absolute;top:8px;right:8px;z-index:5;padding:3px 10px;border-radius:999px;font-size:var(--fs-cap);font-weight:600;color:#fff;box-shadow:0 1px 4px rgba(0,0,0,.28)}
+.photo-land-badge.landed{background:rgba(22,138,60,.92)}
+.photo-land-badge.pending{background:rgba(217,119,6,.94);cursor:pointer;pointer-events:auto}
+.photo-land-badge.pending::after{content:" ↻"}
+.photo-box img{width:100%;display:block}
+.photo-box.clickable{cursor:pointer}
+/* CF-WPS：照片框只在「已经有照片」时显示；未拍时不再渲染那块空灰框
+   （原来空框里写「尚未拍摄」，去掉文字后剩一块纯灰框也很扎眼）。
+   :empty 自动生效——setScenePhoto/setAfterPhoto 写入 img 即显出，
+   resetScenePhotoUI / 拍整改后重置 innerHTML="" 即隐去，无需额外 JS 切换。 */
+.photo-box:empty{display:none}
+.photo-thumb{width:var(--icon-thumb);height:var(--icon-thumb);border-radius:var(--r-card);object-fit:cover;flex:none}
+.stat-row{display:flex;gap:var(--gap)}
+/* 统计卡与入口卡同高（原 78 / 76 两个值 → 统一 --h-entry）。
+   2026-10-16：height → min-height —— 系统大字体把卡内文字放大时卡片能跟着撑高，
+   否则大数字会溢出 78px 固定高度；正常字体下内容不足 78px，外观与原固定高完全一致。 */
+.stat-card{flex:1;min-height:var(--h-entry);border-radius:var(--r-card);background:var(--card);border:1px solid var(--line);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px}
+.stat-card.drillable{cursor:pointer}
+.stat-card.drillable:active{transform:scale(.97)}
+.stat-card .num{font-size:var(--fs-h1);font-weight:700}
+.stat-card .lab{font-size:var(--fs-sub);color:var(--t3)}
+.entry-row{display:flex;gap:var(--gap)}
+.entry-card{flex:1;min-height:var(--h-entry);border-radius:var(--r-card);background:var(--card);border:1px solid var(--line);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;font-size:var(--fs-body);font-weight:600;cursor:pointer;position:relative}
+.entry-card:active{transform:scale(.97)}
+.entry-card .badge{position:absolute;top:8px;right:10px;min-width:var(--icon-badge);height:var(--icon-badge);border-radius:var(--r-pill);background:var(--danger);color:#fff;font-size:var(--fs-cap);font-weight:600;display:flex;align-items:center;justify-content:center;padding:0 6px}
+/* CF-WPS-91：首页待办提醒里**可点**的那几行。
+   原来整个待办区只有纯文本，像「有 1 条整改已提交，待复查」这种数字在页面上找不到
+   任何对应记录，也没有任何入口能进去看是哪一条（数字无家可归）。 */
+.todo-line{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.todo-line.go{cursor:pointer;color:var(--primary)}
+.todo-line.go:active{transform:scale(.99)}
+.todo-line .todo-arrow{font-size:var(--fs-sub);color:var(--primary);flex:0 0 auto}
+.blue-idcard{border-radius:var(--r-card);padding:var(--pad-card);display:flex;flex-direction:column;gap:6px;background:linear-gradient(180deg,#3B82F6 0%,#1D4ED8 100%);color:#fff}
+.blue-idcard .role-tag{font-size:var(--fs-sub);color:var(--primary-light)}
+.blue-idcard .name{font-size:var(--fs-hero);font-weight:700}
+.blue-idcard .meta{font-size:var(--fs-body);font-weight:500;line-height:1.8}
+.record-card{background:var(--card);border:1px solid var(--line);border-radius:var(--r-card);padding:var(--pad-card);display:flex;flex-direction:column;gap:8px;cursor:pointer}
+.record-card:active{transform:scale(.985)}
+.record-card.unfinished{border:1.5px solid #FCA5A5}
+.record-card .r-top{display:flex;align-items:center;gap:8px}
+.record-card .r-top>:last-child{margin-left:auto}
+.record-card .r-title{font-size:var(--fs-btn);font-weight:600}
+.record-card .r-sub{font-size:var(--fs-body);color:var(--t3)}
+/* CF-WPS-89：台账列表缩略图。飞书原图动辄几 MB，而 /api/mobile/photo 是**原样转发**
+   （没有缩略图参数），所以列表里只放 72px 小方块，并且用 IntersectionObserver
+   懒加载 —— 卡片滚进视口才去取图，一次最多 3 张并发，避免 50 条 × N 张把流量打爆。
+   未加载完是灰底占位（img 初始 opacity:0），成功淡入；失败整块移除、不留破图。 */
+.record-card .thumb-strip{display:flex;gap:8px}
+.record-card .thumb{position:relative;width:var(--icon-thumb);height:var(--icon-thumb);border-radius:var(--r-card);overflow:hidden;background:#E8E6E0;flex:none}
+.record-card .thumb img{width:100%;height:100%;object-fit:cover;display:block;opacity:0;transition:opacity .18s ease}
+.record-card .thumb img.on{opacity:1}
+.record-card .thumb .thumb-tag{position:absolute;left:0;right:0;bottom:0;font-size:var(--fs-cap);line-height:1.5;text-align:center;color:#fff;background:rgba(17,24,39,.55)}
+.record-card .r-go{display:flex;align-items:center;justify-content:space-between;color:var(--primary);font-size:var(--fs-body);font-weight:600}
+.crumbs{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.crumb{padding:6px 10px;border-radius:var(--r-pill);font-size:var(--fs-sub);font-weight:600}
+.back-link{display:flex;align-items:center;justify-content:center;gap:8px;height:var(--h-btn-sm);color:var(--primary);font-size:var(--fs-body);font-weight:600;cursor:pointer;border:none;background:none;font-family:inherit}
+.topbar-home{display:flex;align-items:center;justify-content:space-between;height:var(--h-topbar)}
+.topbar-home .app-name{font-size:var(--fs-title);font-weight:700}
+.topbar-home .me-avatar{width:var(--icon-btn);height:var(--icon-btn);border-radius:var(--r-pill);background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;font-size:var(--fs-body);font-weight:600}
+/* 首页顶栏右侧组合：刷新按钮 + 头像 */
+.topbar-right{display:flex;align-items:center;gap:var(--gap)}
+/* 强制刷新按钮——与 .icon-btn 同规格，仅在首页可见；按一次 = 清内存 orgCache + 硬刷新页面
+   （前端 shell 已部署 no-cache，下次 location.reload() 必拿最新 HTML/JS） */
+.topbar-right .icon-btn[aria-label="强制刷新"]{position:relative}
+.topbar-right .icon-btn[aria-label="强制刷新"]:active{transform:scale(.96)}
+.topbar-right .icon-btn[aria-label="强制刷新"] svg{transition:transform .4s ease}
+.topbar-right .icon-btn[aria-label="强制刷新"].spinning svg{transform:rotate(360deg)}
+.tel-btn{display:flex;align-items:center;justify-content:center;gap:var(--gap);height:var(--h-btn);border-radius:var(--r-btn);background:var(--success);color:#fff;font-size:var(--fs-btn);font-weight:600;text-decoration:none}
+.tel-btn:active{transform:scale(.98)}
+.check-line{display:flex;justify-content:space-between;font-size:var(--fs-body);color:var(--t2);line-height:2}
+.check-line b{font-weight:600}
+/* CF-WPS-106：登记隐患「照片先行三步走」—— 阶段容器 / 大图预览 / 步骤提示 */
+.hz-phase{display:none}
+.hz-phase.active{display:block;animation:hzPhaseIn .18s ease}
+@keyframes hzPhaseIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.hz-step-hint{display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:var(--r-card);background:var(--primary-soft);margin-top:6px}
+.hz-step-no{flex:0 0 auto;width:22px;height:22px;border-radius:var(--r-pill);background:var(--primary);color:#fff;
+  font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center}
+.hz-step-hint > div:not(.hz-step-no){font-size:var(--fs-body);color:var(--t2);line-height:1.5}
+.hz-photo-big{position:relative;width:100%;aspect-ratio:4/3;border-radius:var(--r-card);overflow:hidden;
+  background:#E8E6E0;margin-bottom:10px}
+.hz-photo-big img{width:100%;height:100%;object-fit:cover;display:block}
+.hz-photo-big .hz-del{position:absolute;top:8px;right:8px;width:28px;height:28px;border-radius:var(--r-pill);
+  background:rgba(0,0,0,.55);color:#fff;border:none;font-size:16px;line-height:1;display:flex;align-items:center;justify-content:center}
+.btn-link{display:block;width:100%;margin:14px auto 0;background:none;border:0;padding:10px;
+  font-size:var(--fs-body);color:var(--t3);text-align:center;font-family:inherit;cursor:pointer}
+.field-label{font-size:var(--fs-h1);font-weight:700}
+.field-sub{font-size:var(--fs-body);color:var(--t3)}
+.divider{height:1px;background:var(--line)}
+.empty-tip{text-align:center;color:var(--t4);font-size:var(--fs-body);padding:32px 0}
+.login-wrap{flex:1;display:flex;flex-direction:column;padding:32px 24px;gap:var(--pad-card);justify-content:center}
+.login-logo{display:flex;flex-direction:column;align-items:center;gap:var(--gap);margin-bottom:8px}
+.login-logo .lg{width:var(--icon-logo);height:var(--icon-logo);border-radius:var(--r-card);background:var(--primary);display:flex;align-items:center;justify-content:center}
+.login-input{display:flex;flex-direction:column;gap:6px}
+.login-input label{font-size:var(--fs-body);font-weight:500;color:var(--t2)}
+.login-input input{height:var(--h-input);border-radius:var(--r-card);border:1px solid var(--line);background:var(--card);padding:0 18px;font-size:var(--fs-title);font-family:inherit;outline:none}
+.login-input input:focus{border-color:var(--primary)}
+.login-err{color:var(--danger);font-size:var(--fs-body);min-height:20px}
+/* 分段控件：外框圆角 = 内项圆角 + 内边距（视觉同心），故用 calc 而非硬编码 */
+.seg{display:flex;height:var(--h-btn-sm);padding:4px;gap:4px;border-radius:var(--r-pill);background:#E8EAED}
+.seg .seg-item{flex:1;display:flex;align-items:center;justify-content:center;border-radius:calc(var(--h-btn-sm) / 2 - 4px);font-size:var(--fs-body);font-weight:500;color:var(--t3);cursor:pointer;border:none;background:none;font-family:inherit}
+.seg .seg-item.active{background:var(--primary);color:#fff;font-weight:600}
+.ro-tag{background:#F3F4F6;color:var(--t3);font-size:var(--fs-cap);font-weight:400;padding:5px 10px;border-radius:var(--r-pill)}
+/* ===== 「添加到手机桌面」：点击必须有**看得见**的动态反馈 =====
+   现场反馈：「点了这个按钮，完全没有动态，我怎么知道点没点中」。
+   三层反馈，缺一不可：
+     ① 按下瞬间：卡片压暗 + 微缩放（:active 在部分安卓 WebView 上不生效，
+        故 JS 同时加 .loading 类兜底改背景）
+     ② 加载中：右侧箭头换成转圈 spinner，副标题改成「正在打开…」
+     ③ 浮层：从底部滑入 + 遮罩淡入（不瞬间蹦出，视觉上确认操作已被接收） */
+#btn-add-home{transition:transform .12s ease,background-color .12s ease}
+#btn-add-home:active,#btn-add-home.loading{transform:scale(.985);background:#F3F4F6}
+#add-home-arrow,#add-home-spin{display:block}
+#add-home-spin{display:none;width:16px;height:16px;border:2px solid #D1D5DB;border-top-color:var(--primary);border-radius:50%;animation:hseSpin .7s linear infinite}
+#btn-add-home.loading #add-home-spin{display:block}
+#btn-add-home.loading #add-home-arrow{display:none}
+@keyframes hseSpin{to{transform:rotate(360deg)}}
+#add-home-modal{animation:hseFade .18s ease}
+#add-home-modal>div{animation:hseSlideUp .24s cubic-bezier(.2,.8,.3,1)}
+@keyframes hseFade{from{opacity:0}to{opacity:1}}
+@keyframes hseSlideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+#add-home-do{transition:transform .12s ease,opacity .12s ease}
+#add-home-do:active{transform:scale(.985);opacity:.88}
+#add-home-do:disabled{opacity:.6}
+#add-home-close:active{background:#F3F4F6;border-radius:12px}
+.hidden{display:none!important}
+/* ===== 全局忙碌遮罩（CF-WPS-43）=====
+   现场反馈：「点乡镇经理/管理员的姓名，要等好几秒才跳下一页，我以为没点中」。
+   根因不是逻辑错，而是点击后要串行跑完「提交记录 + 写指派」两段网络请求（各 4~6s），
+   期间页面**完全没有变化**，用户无从判断是卡死还是没点中。
+   对策：按下瞬间同步弹出遮罩（不 await 任何东西），并把按钮锁成不可重复点。 */
+#hse-busy{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;
+  background:rgba(17,24,39,.38);animation:hseFade .14s ease}
+#hse-busy>div{background:#fff;border-radius:14px;padding:22px 26px;min-width:172px;
+  display:flex;flex-direction:column;align-items:center;gap:12px;
+  box-shadow:0 12px 32px rgba(0,0,0,.18);animation:hsePop .16s cubic-bezier(.2,.8,.3,1)}
+@keyframes hsePop{from{transform:scale(.94);opacity:0}to{transform:scale(1);opacity:1}}
+#hse-busy .busy-spin{width:26px;height:26px;border:3px solid #E5E7EB;border-top-color:var(--primary);
+  border-radius:50%;animation:hseSpin .7s linear infinite}
+#hse-busy .busy-txt{font-size:var(--fs-body);font-weight:600;color:var(--t1);text-align:center}
+#hse-busy .busy-sub{font-size:var(--fs-cap);color:var(--t3);text-align:center;margin-top:-4px}
+/* ===== 落表悬浮加载窗（CF-WPS-106）=====
+   终屏（检查完成）出现即弹：半透明深色浮层像加载窗一样大字跟随上报进度——
+   很多人看完「检查完成」直接关页，等不到点「返回首页」，所以触发时机必须在终屏渲染瞬间；
+   落定后原地切换结果态（成功绿勾 / 失败原因）并自动淡出。
+   非阻断：容器 pointer-events:none，弱网下用户仍可正常操作（保住「可先返回」语义）；
+   点浮层卡片可提前收起。深色半透明卡在浅色主题与 Chrome 强制深色下均可读。 */
+#h5-sync-float{position:fixed;inset:0;z-index:9998;display:flex;align-items:flex-start;justify-content:center;
+  pointer-events:none;padding-top:calc(11vh + env(safe-area-inset-top))}
+#h5-sync-float>div{pointer-events:auto;min-width:230px;max-width:78vw;
+  background:rgba(17,24,39,.88);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
+  border-radius:16px;padding:24px 28px;display:flex;flex-direction:column;align-items:center;gap:10px;
+  box-shadow:0 12px 32px rgba(0,0,0,.35);animation:hsePop .16s cubic-bezier(.2,.8,.3,1)}
+#h5-sync-float .sf-ico{font-size:36px;line-height:1;font-weight:700}
+#h5-sync-float .sf-spin{width:30px;height:30px;border:3px solid rgba(255,255,255,.25);border-top-color:#fff;
+  border-radius:50%;animation:hseSpin .7s linear infinite}
+#h5-sync-float .sf-txt{font-size:var(--fs-title);font-weight:600;color:#fff;text-align:center;line-height:1.45}
+#h5-sync-float .sf-sub{font-size:var(--fs-cap);color:rgba(255,255,255,.72);text-align:center;line-height:1.5}
+/* 离线模式顶部提示（现场断网凭缓存身份进入时显示） */
+#offline-bar{position:fixed;top:0;left:0;right:0;z-index:9998;background:var(--warn-soft);color:#92400E;font-size:var(--fs-body);font-weight:600;text-align:center;padding:10px 16px calc(10px + env(safe-area-inset-top))}
+/* file input 专用：视觉隐藏但保持渲染。不能用 display:none —— 老版 X5/部分安卓 WebView
+   会拒绝调起 display:none 的 file input（点了「从相册上传」没反应）；
+   程序化 .click() 与 Playwright setInputFiles 均不受 pointer-events:none 影响 */
+.file-ghost{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+/* ----------------------------------------------------------------------------
+   注：原 @media (max-height:700px) 的「矮屏压缩」规则已删除。
+   那段规则为「把内容塞进一屏」而存在，会让同一组件在大/小屏高度不同
+   （按钮 64↔52、卡片 88↔66…），正是「同功能组件尺寸不一致」的来源之一。
+   整页滚动放开后不再需要压缩，组件在所有屏高下保持同一尺寸。
+   ---------------------------------------------------------------------------- */
+</style>
+</head>
+<body>
+<!-- 全局忙碌遮罩容器（CF-WPS-43）：默认 hidden，showBusy 时填充并显示 -->
+<div id="hse-busy" class="hidden" role="status" aria-live="polite"></div>
+<div id="app">
+
+<!-- ============ 启动校验（身份来自网格长巡查登录会话） ============ -->
+<section class="view active" id="view-boot">
+  <div class="statusbar"></div>
+  <div class="login-wrap">
+    <div class="login-logo">
+      <div class="lg">
+        <svg width="34" height="34" viewBox="0 0 24 24" fill="none"><path d="M12 2l8 3v6c0 5-3.5 9.5-8 11-4.5-1.5-8-6-8-11V5l8-3z" stroke="#fff" stroke-width="1.8" stroke-linejoin="round"/><path d="M8.5 12l2.5 2.5 4.5-4.5" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div style="font-size:var(--fs-hero);font-weight:700">网格巡查</div>
+      <div class="muted" id="boot-msg">正在验证登录状态…</div>
+    </div>
+    <button class="btn-primary hidden" id="btn-boot-login" style="margin-top:20px">去登录</button>
+  </div>
+</section>
+
+<!-- ============ 首页 ============ -->
+<section class="view has-tab" id="view-home">
+  <div class="statusbar"></div>
+  <div class="page">
+    <div class="topbar-home">
+      <div class="app-name">网格巡查</div>
+      <div class="topbar-right">
+        <div class="icon-btn" id="btn-refresh" aria-label="强制刷新" title="强制刷新（解决页面卡在旧逻辑）">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v4h-4" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <div class="me-avatar" id="home-avatar"></div>
+      </div>
+    </div>
+    <div class="blue-idcard">
+      <div class="role-tag" id="idc-role"></div>
+      <div class="name" id="idc-name"></div>
+      <div class="meta" id="idc-meta"></div>
+      <div class="gps-line" id="gps-bar" style="margin-top:2px"><span id="gps-addr">正在后台定位…</span><span id="gps-note"></span></div>
+    </div>
+    <button class="big-cta big-cta-row" id="btn-start">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.5" stroke="#fff" stroke-width="1.6"/></svg>
+      <div class="cta-title">开始检查</div>
+    </button>
+    <!-- CF-WPS-42：断点续传入口。
+         低端安卓机调起系统相机时，浏览器页面常被系统回收（内存紧张），拍照返回后
+         页面已重新加载 → 直接落在首页，照片和已选内容全丢（用户反馈：「拍完点确定
+         应该还在拍现场照片，结果回到首页」）。桌面 Chrome 复现不了（_t43 全绿），
+         但现场机是高发场景。草稿落 localStorage，首页给一个「继续上次检查」入口。 -->
+    <div class="card" id="resume-card" style="display:none;cursor:pointer">
+      <div style="display:flex;align-items:center;gap:var(--gap)">
+        <img id="resume-thumb" alt="上次检查的照片" style="width:52px;height:52px;border-radius:var(--r-card);object-fit:cover;flex:0 0 52px;background:#E8E6E0">
+        <div style="flex:1">
+          <div style="font-size:var(--fs-title);font-weight:600">继续上次未完成的检查</div>
+          <div style="font-size:var(--fs-sub);color:var(--t3);margin-top:2px" id="resume-step"></div>
+        </div>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 5l7 7-7 7" stroke="#9CA3AF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+    </div>
+    <!-- CF-WPS-58：四张统计卡都可点击下钻（data-drill 对应 /api/mobile/summary 下发的
+         scopes 键）。数字与下钻明细同源 —— 点了必定对得上，详见 renderStatDetail 注释。 -->
+    <div class="stat-row">
+      <div class="stat-card drillable" id="stat-month-card" data-drill="month_post" role="button" tabindex="0"><div class="num" style="color:var(--primary)" id="stat-month">0</div><div class="lab" id="stat-month-lab">本月上报</div></div>
+      <!-- CF-WPS-44：乡镇作业中心经理、管理员两级首页在「本月上报」后增加「已整改」
+           （本月完成整改数）。口径与「待整改」严格互补、不重叠：
+             · 待整改 = 指派给我且**未完成** —— 不按月过滤，跨月继续显示，直到整改完成为止；
+             · 已整改 = 指派给我且**完成时间落在本自然月**。
+           公司管理不显示（保持原有 3 卡布局，不受影响）。 -->
+      <div class="stat-card drillable" data-drill="rectified" id="stat-rectified-card" role="button" tabindex="0" style="display:none">
+        <div class="num" style="color:#7C3AED" id="stat-rectified">0</div>
+        <div class="lab">已整改</div>
+      </div>
+      <div class="stat-card drillable" data-drill="pending" role="button" tabindex="0"><div class="num" style="color:var(--warn)" id="stat-pending">0</div><div class="lab">待整改</div></div>
+      <div class="stat-card drillable" data-drill="closed" role="button" tabindex="0"><div class="num" style="color:var(--success)" id="stat-done">0</div><div class="lab">已闭环</div></div>
+    </div>
+    <div class="card" id="todo-card">
+      <div style="font-size:var(--fs-body);font-weight:600;margin-bottom:6px">待办提醒</div>
+      <div id="todo-list" style="font-size:var(--fs-body);color:var(--t2);line-height:1.9"></div>
+    </div>
+    <!-- CF-WPS-95/102：隐患排查与整改闭环入口，仅所属部门=安环管理部的账号显示；
+         Worker 接口按可信登录态部门字段再次校验。 -->
+    <div class="card" id="hazard-entry-card" style="display:none;cursor:pointer">
+      <div style="display:flex;align-items:center;gap:var(--gap)">
+        <div style="width:44px;height:44px;border-radius:var(--r-card);background:var(--warn-soft);display:flex;align-items:center;justify-content:center;flex:0 0 44px">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3.5l8.5 15.5H3.5L12 3.5z" stroke="#B45309" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 9.5v4.2" stroke="#B45309" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="16.6" r="1.1" fill="#B45309"/></svg>
+        </div>
+        <div style="flex:1">
+          <div style="font-size:var(--fs-title);font-weight:600">隐患排查</div>
+          <div style="font-size:var(--fs-sub);color:var(--t3);margin-top:2px">登记现场安全隐患，拍照留档追踪</div>
+        </div>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 5l7 7-7 7" stroke="#9CA3AF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+    </div>
+    <div style="flex:1"></div>
+  </div>
+</section>
+
+<!-- ============ CF-WPS-61：首次登录强制改密 ============ -->
+<section class="view" id="view-changepwd">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div style="width:40px"></div>
+    <div class="nav-title">修改密码</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <div class="card" style="border-left:3px solid var(--warn)">
+      <div style="font-size:var(--fs-title);font-weight:600">请先修改密码</div>
+      <div class="muted" style="margin-top:6px;line-height:1.7">
+        你现在用的是<b>初始密码</b>（姓名首字母 + 手机尾号 4 位），别人只要知道你的姓名和手机号就能算出来。
+        为了保护你的账号和巡查记录，请<b>改成只有你自己知道的密码</b>，改完即可正常使用。
+      </div>
+    </div>
+    <div class="btn-stack" style="margin-top:var(--gap)">
+      <div class="pwd-row">
+        <div class="lab">原密码</div>
+        <input class="pwd-input" id="pwd-old" type="password" autocomplete="current-password" placeholder="初始密码＝姓名首字母+手机尾号4位">
+      </div>
+      <div class="pwd-row">
+        <div class="lab">新密码</div>
+        <input class="pwd-input" id="pwd-new" type="password" autocomplete="new-password" placeholder="6~32 位，字母 / 数字 / 符号">
+      </div>
+      <div class="pwd-row">
+        <div class="lab">确认新密码</div>
+        <input class="pwd-input" id="pwd-new2" type="password" autocomplete="new-password" placeholder="再输入一次新密码">
+      </div>
+    </div>
+    <button class="btn-primary" id="btn-pwd-submit" style="margin-top:var(--gap)">确认修改</button>
+    <div class="muted" id="pwd-err" style="text-align:center;color:var(--danger);min-height:20px"></div>
+    <button class="btn-ghost btn-row" id="btn-pwd-logout" style="margin-top:var(--gap)">退出登录</button>
+  </div>
+</section>
+
+<!-- ============ 拍现场照片 ============ -->
+<section class="view" id="view-photo">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" data-back="home"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">开始检查</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <div class="field-label">拍现场照片</div>
+    <div class="field-sub">照片是检查记录的第一手证据</div>
+    <div class="photo-box" id="scene-photo-box"></div>
+    <div id="photo-actions" class="btn-stack">
+      <button class="big-cta" id="btn-capture">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.5" stroke="#fff" stroke-width="1.6"/></svg>
+        <div class="cta-title">拍现场照片</div>
+        <div class="cta-sub">调用手机摄像头</div>
+      </button>
+      <button class="btn-ghost btn-row" id="btn-album">
+        <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="3" stroke="#1A1A1A" stroke-width="1.8"/><circle cx="9" cy="9" r="2" stroke="#1A1A1A" stroke-width="1.8"/><path d="M3.5 17l5-5 4 4 3.5-3.5 4.5 4.5" stroke="#1A1A1A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        从相册上传
+      </button>
+    </div>
+    <button class="btn-primary hidden" id="btn-photo-next">下一步</button>
+    <div class="muted" style="text-align:center" id="photo-tip">照片将自动保存到本条检查记录</div>
+    <input type="file" accept="image/*" capture="environment" class="file-ghost" id="file-camera">
+    <input type="file" accept="image/*" class="file-ghost" id="file-album">
+  </div>
+</section>
+
+<!-- ============ 问题分类 ============ -->
+<section class="view" id="view-classify">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" data-back="photo"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">这是什么问题？</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <div class="opt-card" id="opt-no">
+      <div class="opt-title">不是三违</div>
+      <div class="opt-sub">普通巡查 / 其他问题，记录日常巡查情况</div>
+    </div>
+    <div class="opt-card accent" id="opt-yes">
+      <div class="opt-title">是三违</div>
+      <div class="opt-sub">三违问题处理，需选择行为与人员</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 选择三违 ============ -->
+<section class="view" id="view-vio">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" data-back="classify"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">选择三违</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <div class="field-label">属于哪种三违行为？</div>
+    <div class="field-sub">点击对应的违规行为即可</div>
+    <div class="grid2" id="vio-grid"></div>
+    <div class="muted">选项自动同步自《三违行为标准库》，后台新增或停用即实时生效</div>
+  </div>
+</section>
+
+<!-- ============ 经理：先选管理员 ============ -->
+<section class="view" id="view-pick-admin">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" data-back="vio"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">请选择违章人员</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <span class="chip blue" style="align-self:flex-start">乡镇作业中心经理 · 两步选择</span>
+    <div class="field-label">第一步：选择管理员</div>
+    <div class="field-sub">点击管理员姓名，查看他班组的人员</div>
+    <div id="admin-list" style="display:flex;flex-direction:column;gap:var(--gap)"></div>
+    <button class="btn-ghost" id="btn-find-any">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="#1D4ED8" stroke-width="2"/><path d="M16.5 16.5L21 21" stroke="#1D4ED8" stroke-width="2" stroke-linecap="round"/></svg>
+      找人 · 跨班组直接搜姓名
+    </button>
+    <div class="muted">管理员名单来自网格长信息台账「直接上级」列，台账调整后自动同步</div>
+  </div>
+</section>
+
+<!-- ============ 经理：选班组人员 / 管理员：直接选人 ============ -->
+<section class="view" id="view-pick-person">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" id="pp-back"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title" id="pp-title">选择人员</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <div class="crumbs hidden" id="pp-crumbs">
+      <span class="crumb" style="background:var(--primary-soft);color:var(--primary)" id="crumb-admin">管理员A</span>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M9 5l7 7-7 7" stroke="#9CA3AF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span class="crumb" style="background:var(--primary);color:#fff">班组人员</span>
+    </div>
+    <div class="field-label" id="pp-head">请选择违章人员</div>
+    <div class="field-sub" id="pp-sub">您权限范围内的全部人员 · 来自「花名册」</div>
+    <div id="person-list" style="display:flex;flex-direction:column;gap:var(--gap)"></div>
+    <button class="back-link hidden" id="btn-repick-admin">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1D4ED8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      返回重新选管理员
+    </button>
+    <div class="muted">人员信息保存花名册记录 ID，姓名班组等从飞书花名册自动带出</div>
+  </div>
+</section>
+
+<!-- ============ 公司管理：处理方式 ============ -->
+<section class="view" id="view-handle">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" data-back="vio"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">处理方式</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <div class="card">
+      <div style="font-size:var(--fs-title);font-weight:600" id="handle-title">三违行为</div>
+      <div class="muted" style="margin-top:4px">公司管理人员现场检查发现</div>
+    </div>
+    <div class="field-label">怎么处理？</div>
+    <div class="opt-card" id="opt-self">
+      <div class="opt-title">自己处理</div>
+      <div class="opt-sub">确认人员后，现场拍照整改</div>
+    </div>
+    <div class="opt-card primary" id="opt-transfer">
+      <div class="opt-title">转给作业中心</div>
+      <div class="opt-sub">指定作业中心与管理员，发送整改任务</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 公司管理：转作业中心（乡镇 / 公园 / 作业中心） ============ -->
+<section class="view" id="view-transfer">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" data-back="handle"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">转给作业中心</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <div class="field-label" id="tf-head">第一步：指定作业中心</div>
+    <div class="field-sub" id="tf-sub">选择问题所属的责任单位（乡镇 / 公园）</div>
+    <div id="tf-list"></div>
+  </div>
+</section>
+
+<!-- ============ 公司管理：自己处理选人（乡镇 → 班组 → 人员 级联） ============ -->
+<section class="view" id="view-co-search">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" id="co-back"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title" id="co-title">自己处理 · 选择人员</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <!-- 面包屑：点击上级层可回退（乡镇 › 班组） -->
+    <div class="crumbs hidden" id="co-crumbs"></div>
+    <div class="field-label" id="co-head">第 1 步：选择乡镇作业中心</div>
+    <div class="field-sub" id="co-sub">点击乡镇，查看该镇各班组的名称与管理员</div>
+    <div id="co-cascade"></div>
+
+    <!-- 搜索直选：乡镇层级保留入口（跳到确认页）；进到班组后隐藏，避免与级联打架 -->
+    <div id="co-search-wrap">
+      <div class="back-link" id="co-search-toggle" style="justify-content:center">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="#1D4ED8" stroke-width="2"/><path d="M16.5 16.5L21 21" stroke="#1D4ED8" stroke-width="2" stroke-linecap="round"/></svg>
+        记不住班组？直接搜姓名
+      </div>
+      <div id="co-search-box" class="hidden">
+        <div class="search-bar">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" style="flex:none"><circle cx="11" cy="11" r="7" stroke="#1D4ED8" stroke-width="2"/><path d="M16.5 16.5L21 21" stroke="#1D4ED8" stroke-width="2" stroke-linecap="round"/></svg>
+          <input id="co-search-input" placeholder="输入姓名，搜索全公司花名册">
+        </div>
+        <div class="section-label" id="co-search-label"></div>
+        <div id="co-person-list" style="display:flex;flex-direction:column;gap:var(--gap)"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 人员信息确认 ============ -->
+<section class="view" id="view-confirm">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" id="cf-back"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">确认违章信息</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <span style="font-size:var(--fs-title);font-weight:600">违章人员信息</span>
+        <span class="ro-tag">只读 · 来自花名册</span>
+      </div>
+      <div class="info-line" id="cf-info"></div>
+    </div>
+    <a class="tel-btn" id="cf-tel" href="#">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.08 4.18 2 2 0 0 1 4.06 2h3a2 2 0 0 1 2 1.72c.127.96.362 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span id="cf-tel-text">138****0000　点击拨打</span>
+    </a>
+    <div class="field-label" style="text-align:center;margin-top:8px">现在整改吗？</div>
+    <button class="btn-primary" id="btn-now">现在整改</button>
+    <button class="btn-ghost" id="btn-later">稍后整改</button>
+  </div>
+</section>
+
+<!-- ============ 拍整改后照片 ============ -->
+<section class="view" id="view-rectify">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" id="rf-back"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">整改</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <!-- CF-WPS-派发图：接任务的人点开即见「派发原图 + 上下文」，知道要改什么 -->
+    <div id="rf-context"></div>
+    <div class="photo-box" id="after-photo-box"></div>
+    <!-- CF-WPS-被指派人确认：派发任务先「下一步」确认三违行为 → 选择违章人员，再拍整改后照片 -->
+    <div id="rf-next" class="btn-stack" style="display:none">
+      <button class="big-cta" id="btn-rf-next">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M9 5l7 7-7 7" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <div class="cta-title">下一步</div>
+        <div class="cta-sub">选择违章人员</div>
+      </button>
+    </div>
+    <!-- 拍前：恢复原版大按钮（CF-WPS-34b 应用户要求改回） -->
+    <div id="rf-pre" class="btn-stack">
+      <button class="big-cta" id="btn-rf-capture">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.5" stroke="#fff" stroke-width="1.6"/></svg>
+        <div class="cta-title">拍整改后照片</div>
+        <div class="cta-sub">整改完成后，拍一张现场照片</div>
+      </button>
+      <button class="btn-ghost btn-row" id="btn-rf-album">
+        <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="3" stroke="#1A1A1A" stroke-width="1.8"/><circle cx="9" cy="9" r="2" stroke="#1A1A1A" stroke-width="1.8"/><path d="M3.5 17l5-5 4 4 3.5-3.5 4.5 4.5" stroke="#1A1A1A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        从相册上传
+      </button>
+      <button class="btn-primary btn-row" id="btn-submit-rectify" disabled>提交</button>
+    </div>
+<!-- 拍后：与「拍现场照片 / 从相册上传」同款视觉（CF-WPS 整改页统一）
+     提交 = 大蓝主按钮（与拍现场照片一致）；重新拍照 = 白底幽灵行（与从相册上传一致） -->
+<div id="rf-post" class="btn-stack" style="display:none">
+  <button class="big-cta" id="btn-submit-after">
+    <svg viewBox="0 0 24 24" fill="none"><path d="M5 12.5l4.5 4.5L19 7" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <div class="cta-title">提交</div>
+    <div class="cta-sub">整改完成，提交台账</div>
+  </button>
+  <button class="btn-ghost btn-row" id="btn-rf-recapture">
+    <svg viewBox="0 0 24 24" fill="none"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.5" stroke="currentColor" stroke-width="1.8"/></svg>
+    重新拍照
+  </button>
+</div>
+    <input type="file" accept="image/*" capture="environment" class="file-ghost" id="file-camera-2">
+    <input type="file" accept="image/*" class="file-ghost" id="file-album-2">
+    <!-- CF-WPS-41：经理转派。
+         经理打开「收到的指派」进的就是本页（openRecord → openRectify），
+         以前这里只有「自己拍整改后照片」一条路，想交给本镇管理员去现场就只能打电话。
+         现在给它一条并列的第二条路：转派给本作业中心下级。 -->
+    <div id="rf-delegate" style="display:none">
+      <div class="section-label">或者，转派给本作业中心</div>
+      <div class="card" style="display:flex;flex-direction:column;gap:8px">
+        <div style="font-size:var(--fs-sub);color:var(--t3)" id="rf-delegate-msg">选一位下级接手这条整改</div>
+        <div id="rf-delegate-list" class="btn-stack"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 完成 ============ -->
+<section class="view" id="view-done">
+  <div class="statusbar"></div>
+  <div class="page" style="padding:var(--pad-card);padding-top:56px;gap:var(--gap)">
+    <div style="width:var(--icon-state);height:var(--icon-state);border-radius:var(--r-pill);background:var(--success-soft);display:flex;align-items:center;justify-content:center;align-self:center">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none"><path d="M4 12.5l5 5L20 6.5" stroke="#16A34A" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </div>
+    <div style="font-size:var(--fs-h1);font-weight:700;text-align:center" id="done-title">整改完成</div>
+    <div class="card" style="display:flex;flex-direction:column;gap:6px" id="done-card"></div>
+    <button class="btn-primary" id="btn-done-home">返回首页</button>
+  </div>
+</section>
+
+<!-- ============ 普通巡查 ============ -->
+<section class="view" id="view-patrol">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" data-back="classify"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">普通巡查</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <div class="photo-box"><img id="patrol-photo" alt="现场照片"></div>
+    <div class="field-label">这不是三违</div>
+    <button class="btn-primary" id="btn-patrol-done" disabled>完成检查</button>
+  </div>
+</section>
+
+<!-- ============ 我的检查 ============ -->
+<section class="view has-tab" id="view-my-checks">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" data-back="home"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">巡查台账</div><div style="width:40px"></div>
+  </div>
+  <div id="sync-bar" class="hidden"></div>
+  <div class="page" id="my-checks-list"></div>
+</section>
+
+<!-- ============ 派发记录（CF-WPS-45）============
+     口径（2026-09-19 定）：只列「我派出去、对方还没整改完」的记录，**不按自然月过滤** ——
+     上月派出去的今天没整改完，这个月继续挂在这里，直到整改完成才消失。
+     页签只挂给实际会派发的角色（公司管理 / 乡镇作业中心经理）；
+     管理员不转派（转派页对管理员直接跳过），列表恒空，故不挂（见 applyDispatchTabGate）。 -->
+<section class="view has-tab" id="view-dispatch">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" data-back="home"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">派发记录</div><div style="width:40px"></div>
+  </div>
+  <div class="page" id="dispatch-list"></div>
+</section>
+
+<!-- ============ 我的整改 ============ -->
+<section class="view has-tab" id="view-my-rectify">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" data-back="home"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">我的整改</div><div style="width:40px"></div>
+  </div>
+  <div class="page" id="my-rectify-list"></div>
+</section>
+
+<!-- ============ 我的复查 ============ -->
+<section class="view" id="view-my-review">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" data-back="home"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">我的复查</div><div style="width:40px"></div>
+  </div>
+  <div class="page" id="my-review-list"></div>
+</section>
+
+<!-- ============ 下属检查 ============ -->
+<section class="view" id="view-sub-checks">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" data-back="home"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">检查记录</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <div class="seg">
+      <button class="seg-item" data-seg="mine">我的检查</button>
+      <button class="seg-item active" data-seg="sub">下属检查</button>
+    </div>
+    <div id="sub-list"></div>
+    <div class="muted">查看范围由台账组织关系 + 花名册动态决定，组织调整无需改程序</div>
+  </div>
+</section>
+
+<!-- ============ 记录详情（CF-WPS-58 起三类记录共用）============
+     标题由 setDetailTitle() 按记录类型动态设置（三违详情 / 台账详情 / 派发详情）。
+     本机记录走 renderDetail（有真实照片与电话），服务端记录走 renderServerDetail
+     （飞书附件不下发 URL ⇒ 只能显示照片数量）。 -->
+<section class="view" id="view-detail">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" id="dt-back"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title" id="dt-title">三违详情</div><div style="width:40px"></div>
+  </div>
+  <div class="page" id="detail-body"></div>
+</section>
+
+<!-- ============ CF-WPS-58：首页统计卡下钻 ============
+     点首页任意统计卡 → 进入本视图，标题与列表按 drill 类型渲染。
+     设计约束（必须守住）：这里的明细**必须**与卡片上的数字同源 ——
+     数字由 /api/mobile/summary 出，明细按 summary 下发的 scopes 取，
+     否则会「卡上写 3、点进去 0 条」。 -->
+<section class="view" id="view-stat-detail">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" id="sd-back"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title" id="sd-title">明细</div><div style="width:40px"></div>
+  </div>
+  <div class="page" id="stat-detail-body"></div>
+</section>
+
+<!-- ============ 我的（个人） ============ -->
+<section class="view has-tab" id="view-me">
+  <div class="statusbar"></div>
+  <div class="navbar"><div style="width:40px"></div><div class="nav-title">我的</div><div style="width:40px"></div></div>
+  <div class="page">
+    <div class="blue-idcard">
+      <div class="role-tag" id="me-role"></div>
+      <div class="name" id="me-name"></div>
+      <div class="meta" id="me-meta"></div>
+    </div>
+    <!-- CF-WPS-91：「待我复查」入口。
+         这个页面（#view-my-review）和它的渲染逻辑一直都存在，但**没有任何元素指向它** ——
+         首页「有 N 条整改已提交，待复查」的数字因此既点不动、也没法确认是哪几条。
+         没有待复查记录时整个卡片隐藏，不占位。 -->
+    <div class="card" style="cursor:pointer;display:none" id="btn-me-review">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div style="font-size:var(--fs-title);font-weight:600">待我复查</div>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 5l7 7-7 7" stroke="#9CA3AF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div style="font-size:var(--fs-sub);color:var(--t3);margin-top:2px" id="me-review-hint">已整改提交、等你确认闭环</div>
+    </div>
+    <div class="card" style="cursor:pointer;display:none" id="btn-me-sub">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div style="font-size:var(--fs-title);font-weight:600">下属检查</div>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 5l7 7-7 7" stroke="#9CA3AF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div style="font-size:var(--fs-sub);color:var(--t3);margin-top:2px">查看下属网格员的检查记录与闭环进度</div>
+    </div>
+    <!-- CF-WPS-100/102：「派给我的隐患」入口仅供安环管理部内部人员处理部门内任务。
+         没有待办时整卡隐藏；非安环人员无此入口也无对应接口权限。 -->
+    <div class="card" style="cursor:pointer;display:none" id="btn-me-hazard-todo">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div style="font-size:var(--fs-title);font-weight:600">派给我的隐患</div>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 5l7 7-7 7" stroke="#9CA3AF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div style="font-size:var(--fs-sub);color:var(--t3);margin-top:2px" id="me-hazard-todo-hint">安环管理部指派给你的隐患整改</div>
+    </div>
+    <!-- 「添加到手机桌面」入口：点桌面图标直接进系统（登录态在本机 localStorage，通常免登录）。
+         Android/Chrome：捕获 beforeinstallprompt → 用户主动触发系统安装对话框；
+         iOS Safari：无原生入口，弹底部 sheet 手动引导「分享 → 添加到主屏幕」。
+         已安装时（standalone）点击显示提示文案，逻辑见末尾 js。 -->
+    <div class="card" style="cursor:pointer" id="btn-add-home">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div style="font-size:var(--fs-title);font-weight:600">添加到手机桌面</div>
+        <!-- 右侧图标位：常态显示箭头，点击后由 CSS 换成转圈（见 #btn-add-home.loading） -->
+        <div style="display:flex;align-items:center;justify-content:center;width:18px;height:18px;flex:0 0 18px">
+          <svg id="add-home-arrow" width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 5l7 7-7 7" stroke="#9CA3AF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <div id="add-home-spin"></div>
+        </div>
+      </div>
+      <div style="font-size:var(--fs-sub);color:var(--t3);margin-top:2px" id="add-home-hint">点桌面图标直接进入，下次打开自动登录</div>
+    </div>
+    <div class="card">
+      <div class="info-line" id="me-info"></div>
+    </div>
+    <div class="card" style="cursor:pointer" id="btn-logout">
+      <div style="font-size:var(--fs-title);font-weight:600;color:var(--danger);text-align:center">退出登录</div>
+    </div>
+    <div class="muted">身份信息来自网格长信息台账 · 检查记录暂存本机</div>
+  </div>
+</section>
+
+<!-- ============ CF-WPS-95/102：隐患排查与整改闭环（仅安环管理部） ============ -->
+<section class="view" id="view-hazard-list">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" data-back="home"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">隐患排查</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <button class="btn-primary btn-row" id="btn-hazard-new">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg>
+      登记新隐患
+    </button>
+    <div class="btn-stack" style="margin-top:10px">
+      <button class="btn-ghost btn-row" id="btn-hazard-review">隐患验收（指派 / 通过 / 打回）</button>
+    </div>
+    <div class="seg" style="margin-top:14px">
+      <button class="seg-item active" data-hscope="mine">我登记的</button>
+      <button class="seg-item" data-hscope="all">全部隐患</button>
+    </div>
+    <div id="hazard-list"></div>
+  </div>
+</section>
+
+<section class="view" id="view-hazard-form">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" data-back="hazard-list"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">登记隐患</div><div style="width:40px"></div>
+  </div>
+  <div class="page" id="hazard-form-page">
+    <!-- ① 拍现场照片：登记隐患从拍照开始（CF-WPS-106） -->
+    <div class="hz-phase active" id="hazard-phase-photo">
+      <div class="hz-step-hint">
+        <div class="hz-step-no">1</div>
+        <div>先拍一张<b>隐患现场照片</b>，「AI 智能识别」会据此自动判定隐患</div>
+      </div>
+      <div class="btn-stack" style="margin-top:18px">
+        <button class="btn-primary btn-row" id="btn-hz-camera">拍照</button>
+        <button class="btn-ghost btn-row" id="btn-hz-album">从相册上传</button>
+      </div>
+      <button class="btn-link" id="btn-hz-skip">暂时无法拍照，直接填写隐患信息 ›</button>
+    </div>
+
+    <!-- ② 照片确认 + 重新拍摄 + AI 智能识别 -->
+    <div class="hz-phase" id="hazard-phase-preview">
+      <div class="hz-step-hint">
+        <div class="hz-step-no">2</div>
+        <div>核对照片；需要就「重新拍摄」，然后点「AI 智能识别」</div>
+      </div>
+      <div id="hz-photo-big" style="margin-top:14px"></div>
+      <div class="btn-stack" style="margin-top:6px">
+        <button class="btn-ghost btn-row" id="btn-hz-retake">重新拍摄</button>
+        <button class="btn-primary btn-row" id="btn-hz-ai">AI 智能识别</button>
+      </div>
+    </div>
+
+    <!-- ③ AI 识别结果：核对修改 + 完成提交（CF-WPS-106/.109：两行 AI 提示文案按要求移除，成功后 badge 也不再显示） -->
+    <div class="hz-phase" id="hazard-phase-detail">
+      <div id="hz-ai-badge" style="display:none;margin-top:12px;font-size:var(--fs-body);color:var(--t3);line-height:1.6"></div>
+      <div class="field-label" style="margin-top:16px">隐患类别 <span class="hz-req">*</span></div>
+      <div class="field-sub">已由 AI 根据照片自动选择，可点击修改</div>
+      <div class="hz-grid3" id="hz-cat-grid" style="margin-top:8px"></div>
+      <div class="field-label" style="margin-top:18px">隐患级别 <span class="hz-req">*</span></div>
+      <div class="grid2" id="hz-level-grid" style="margin-top:8px"></div>
+      <div class="field-label" style="margin-top:18px">隐患描述 <span class="hz-req">*</span></div>
+      <div class="field-sub">具体情况、可能造成的风险（必填）</div>
+      <textarea class="hz-input" id="hz-desc" rows="4" maxlength="500" placeholder="例：通道堆物占用消防通道，雨天易滑倒，且影响应急通行…" style="margin-top:8px"></textarea>
+      <div class="field-sub" style="text-align:right" id="hz-desc-count">0 / 500</div>
+      <div class="field-label" style="margin-top:6px">整改依据</div>
+      <textarea class="hz-input" id="hz-basis" rows="3" maxlength="1000" placeholder="AI 识别自动填入，可修改"></textarea>
+      <div class="field-label" style="margin-top:12px">整改建议</div>
+      <textarea class="hz-input" id="hz-suggestion" rows="3" maxlength="1000" placeholder="AI 识别自动填入，可修改"></textarea>
+      <div class="field-label" style="margin-top:12px">三违判定</div>
+      <div class="grid2" id="hz-tv-grid" style="margin-top:8px"></div>
+      <div class="field-label" style="margin-top:12px">重大事故隐患判定</div>
+      <div class="grid2" id="hz-mj-grid" style="margin-top:8px"></div>
+      <div class="field-label" style="margin-top:12px">风险等级</div>
+      <div class="grid2" id="hz-rl-grid" style="margin-top:8px"></div>
+      <div class="field-label" style="margin-top:18px">隐患位置（选填）</div>
+      <div class="field-sub">先点选常见位置（再点一次取消），也可手输补充或点「定位」带入当前位置</div>
+      <div class="hz-loc-grid" id="hz-loc-grid" style="margin-top:8px"></div>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+        <input class="hz-input" id="hz-location" maxlength="100" placeholder="可补充具体点位，如：垃圾中转站东侧通道">
+        <button class="btn-ghost" id="btn-hz-geo" style="flex:0 0 auto;width:76px;height:var(--h-btn-row)">定位</button>
+      </div>
+      <div class="field-label" style="margin-top:18px">现场照片</div>
+      <div class="field-sub">提交后可在详情里回看（最多 3 张）</div>
+      <div class="hz-photos" id="hz-photos" style="margin-top:8px"></div>
+      <div class="field-label" style="margin-top:18px">整改后照片（选填）</div>
+      <div class="field-sub">已整改完毕可拍照上传——登记即闭环销号；不上传则进入整改流程（最多 3 张）</div>
+      <div class="hz-photos" id="hz-rect-photos" style="margin-top:8px"></div>
+      <div class="grid2" style="margin-top:8px">
+        <button class="btn-ghost btn-row" id="btn-hz-rect-photo">拍整改后照片</button>
+        <button class="btn-ghost btn-row" id="btn-hz-rect-album">从相册上传</button>
+      </div>
+      <button class="btn-ghost btn-row" id="btn-hz-clear" style="margin-top:16px">清空表单，重新开始</button>
+      <button class="btn-primary btn-row" id="btn-hz-submit" style="margin-top:12px">完成</button>
+    </div>
+
+    <input type="file" accept="image/*" capture="environment" class="file-ghost" id="hz-file-camera">
+    <input type="file" accept="image/*" class="file-ghost" id="hz-file-album">
+    <input type="file" accept="image/*" capture="environment" class="file-ghost" id="hz-rect-file-camera">
+    <input type="file" accept="image/*" class="file-ghost" id="hz-rect-file-album">
+  </div>
+</section>
+
+<section class="view" id="view-hazard-detail">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" id="hz-detail-back" data-back="hazard-list"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">隐患详情</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <div id="hazard-detail"></div>
+  </div>
+</section>
+
+<!-- ============ CF-WPS-100/102：指派整改（安环部内部 + 期限） ============ -->
+<section class="view" id="view-hazard-assign">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" data-back="hazard-list"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">指派整改</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <div class="card"><div class="field-label">待指派隐患</div>
+      <div class="info-line" style="margin-top:6px;line-height:1.6" id="hz-assign-brief">—</div>
+    </div>
+    <div class="card">
+      <div class="field-label">整改人 <span class="hz-req">*</span></div>
+      <div class="field-sub">仅可指派给安环管理部内部人员</div>
+      <input class="hz-input" id="hz-assign-q" style="margin-top:8px" maxlength="32" placeholder="搜索姓名 / 手机号 / 部门">
+      <div id="hz-assign-cands"></div>
+    </div>
+    <div class="card">
+      <div class="field-label">整改期限 <span class="hz-req">*</span></div>
+      <div class="field-sub">到期未整改将标注逾期（默认一周内）</div>
+      <input class="hz-deadline" type="date" id="hz-assign-deadline" style="margin-top:8px">
+    </div>
+    <button class="btn-primary btn-row" id="btn-hz-assign-ok" style="margin-top:14px">确认指派</button>
+  </div>
+</section>
+
+<!-- ============ CF-WPS-100/102：安环管理部内部隐患整改待办 ============ -->
+<section class="view" id="view-hazard-todos">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" data-back="me"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">派给我的隐患</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <div id="hazard-todo-list"></div>
+  </div>
+</section>
+
+<!-- ============ CF-WPS-100：提交整改（整改人：照片 + 说明 → 待验收） ============ -->
+<section class="view" id="view-hazard-rectify">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" data-back="hazard-todos"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">提交整改</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <div class="card"><div class="field-label">隐患内容</div>
+      <div class="info-line" style="margin-top:6px;line-height:1.6" id="hz-rectify-brief">—</div>
+    </div>
+    <div class="card">
+      <div class="field-label">整改后照片（最多 3 张，选填）</div>
+      <div class="field-sub">整改完成后的现场照片，供安环部验收比对</div>
+      <div class="hz-photos" id="hz-rectify-photos" style="margin-top:8px"></div>
+      <div class="btn-stack" style="margin-top:10px">
+        <button class="btn-ghost btn-row" id="btn-hz-rectify-camera">拍照</button>
+        <button class="btn-ghost btn-row" id="btn-hz-rectify-album">从相册上传</button>
+      </div>
+      <input type="file" accept="image/*" capture="environment" class="file-ghost" id="hz-rectify-file-camera">
+      <input type="file" accept="image/*" class="file-ghost" id="hz-rectify-file-album">
+    </div>
+    <div class="card">
+      <div class="field-label">整改说明（选填）</div>
+      <textarea class="hz-input" id="hz-rectify-note" rows="3" maxlength="500" placeholder="采取了什么措施、是否还需进一步处理…" style="margin-top:8px"></textarea>
+    </div>
+    <button class="btn-primary btn-row" id="btn-hz-rectify-ok" style="margin-top:14px">提交整改</button>
+    <div class="muted" style="margin-top:8px">提交后由安环管理部验收，通过才闭环；被打回需重新整改再提交。</div>
+  </div>
+</section>
+
+<!-- ============ CF-WPS-100：隐患验收（安环部；待验收 / 已闭环） ============ -->
+<section class="view" id="view-hazard-review">
+  <div class="statusbar"></div>
+  <div class="navbar">
+    <div class="icon-btn" data-back="hazard-list"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="nav-title">隐患验收</div><div style="width:40px"></div>
+  </div>
+  <div class="page">
+    <div class="seg">
+      <button class="seg-item active" data-hseg="review">待验收</button>
+      <button class="seg-item" data-hseg="closed">已闭环</button>
+    </div>
+    <div id="hazard-review-list"></div>
+  </div>
+</section>
+
+<!-- ============ 无权限降级页 ============ -->
+<section class="view" id="view-noperm">
+  <div class="statusbar"></div>
+  <div class="page center" style="justify-content:center;align-items:center;gap:var(--gap)">
+    <div style="width:var(--icon-state);height:var(--icon-state);border-radius:var(--r-pill);background:var(--warn-soft);display:flex;align-items:center;justify-content:center">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none"><path d="M12 9v4M12 17h.01" stroke="#D97706" stroke-width="2" stroke-linecap="round"/><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" stroke="#D97706" stroke-width="1.8" stroke-linejoin="round"/></svg>
+    </div>
+    <div style="font-size:var(--fs-h2);font-weight:700">暂无巡查权限</div>
+    <div class="muted" style="text-align:center;max-width:280px">当前账号未在网格长信息台账登记或「分级」未配置，请联系管理员在台账中维护。</div>
+    <button class="btn-ghost" id="btn-noperm-logout" style="width:200px">退出登录</button>
+  </div>
+</section>
+
+<!-- ============ 底部导航（全局常驻：首页 / 派发 / 整改 / 巡查台账 / 我的）
+     2026-10-16 屏幕适配：页签标签统一缩为 2 字（派发/整改/台账），
+     页内导航栏标题（nav-title）保持原全称不变，只动页签。 ============ -->
+<div class="tabbar-wrap hidden" id="tabbar-wrap">
+  <div class="tabbar" id="tabbar">
+    <button class="tab-item active" data-tab="home">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M3 10.5L12 3l9 7.5V21a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1v-10.5z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>首页
+    </button>
+    <button class="tab-item" data-tab="dispatch" id="tab-dispatch" style="display:none">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M21.5 2.5L10.5 13.5M21.5 2.5l-7 19-4-8-8-4 19-7z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="tab-dispatch-label">派发</span><span class="tab-badge" id="badge-dispatch"></span>
+    </button>
+    <button class="tab-item" data-tab="my-rectify" id="tab-rectify">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="tab-rectify-label">整改</span><span class="tab-badge" id="badge-rectify"></span>
+    </button>
+    <button class="tab-item" data-tab="my-checks">
+      <svg viewBox="0 0 24 24" fill="none"><rect x="3.5" y="3.5" width="6.5" height="6.5" rx="1" stroke="currentColor" stroke-width="1.8"/><rect x="14" y="3.5" width="6.5" height="6.5" rx="1" stroke="currentColor" stroke-width="1.8"/><rect x="3.5" y="14" width="6.5" height="6.5" rx="1" stroke="currentColor" stroke-width="1.8"/><rect x="14" y="14" width="6.5" height="6.5" rx="1" stroke="currentColor" stroke-width="1.8"/></svg>台账<span class="tab-badge" id="badge-checks"></span>
+    </button>
+    <button class="tab-item" data-tab="me">
+      <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.8"/><path d="M4 21c1.5-3.5 4.5-5 8-5s6.5 1.5 8 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>我的
+    </button>
+  </div>
+</div>
+
+</div>
+<!-- CF-WPS-25c：脚本 URL 加 ?v=BUILD + 内联热更新检测（双保险）。
+   - ?v=BUILD 让浏览器把每次发版后的 app.js / config.js 视为不同资源→ 必然重下载。
+   - 下面内联的热更新脚本**完全绕开浏览器磁盘缓存**：fetch 一次最新 check.html，
+     读它的 hse-build meta，若比当前页面新就弹遮罩让用户手动覆盖 → 用新脚本替换旧脚本。
+   - 即使浏览器里跑的是十年前缓存的旧版 JS，远程热更新也能强制覆盖。
+   - 每次改前端逻辑同时改 hse-build meta 和这两行的 v= 后缀。 -->
+<script src="./config.js?v=2026-10-19.110"></script>
+<script src="./app.js?v=2026-10-19.110"></script>
+<script>
+/* ============== CF-WPS-25c 远程热更新检测（内联，绕开所有缓存层） ============== */
+(function(){
+  try {
+    const here = (document.querySelector('meta[name="hse-build"]')||{}).content || "0";
+    fetch('/check?probe=' + Date.now(), { cache: 'no-store', credentials: 'omit' })
+      .then(r => r.text())
+      .then(html => {
+        const m = html.match(/hse-build"\s+content="([^"]+)"/);
+        const remote = m ? m[1] : null;
+        if(remote && compareBuild(remote, here) > 0){
+          // 比当前页面**新** → 弹遮罩让用户主动覆盖（不强制刷新，否则用户输入会丢）
+          showUpdateBanner(remote, html);
+        }
+      }).catch(()=>{});
+  } catch(e){}
+  function compareBuild(a, b){
+    const pa = String(a).split('.'), pb = String(b).split('.');
+    for(let i=0;i<Math.max(pa.length,pb.length);i++){
+      const x = parseInt(pa[i]||'0',10), y = parseInt(pb[i]||'0',10);
+      if(x!==y) return x-y;
+    }
+    return 0;
+  }
+  function showUpdateBanner(remoteBuild, newHtml){
+    const d = document.createElement('div');
+    d.id = 'hse-update-banner';
+    d.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:99999;background:#1A1A1A;color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;font-size:14px;font-family:system-ui,-apple-system,sans-serif;box-shadow:0 4px 12px rgba(0,0,0,.25)';
+    d.innerHTML = '<span style="flex:1">检测到新版本 <b>'+remoteBuild+'</b>（当前 '+document.querySelector('meta[name="hse-build"]').content+'），点击下方按钮升级</span>' +
+      '<button id="hse-update-go" style="background:#fff;color:#1A1A1A;border:0;border-radius:8px;padding:8px 14px;font-weight:600;cursor:pointer;font-size:14px">立即升级</button>' +
+      '<button id="hse-update-skip" style="background:transparent;color:#fff;border:1px solid #555;border-radius:8px;padding:8px 12px;cursor:pointer;font-size:14px">稍后</button>';
+    document.body.appendChild(d);
+    document.getElementById('hse-update-go').onclick = async () => {
+      // 拉新 app.js / config.js（URL 已带 ?v=BUILD，浏览器**必须**重下载）
+      try {
+        const v = remoteBuild;
+        await Promise.all([
+          fetch('./config.js?v='+v+'&force='+Date.now(), {cache:'no-store'}).then(r=>r.text()),
+          fetch('./app.js?v='+v+'&force='+Date.now(), {cache:'no-store'}).then(r=>r.text())
+        ]);
+        // 用 location.replace 强制重新加载（带 cache-bust 查询参数）
+        location.replace('/check?cb='+Date.now());
+      } catch(e){ location.reload(); }
+    };
+    document.getElementById('hse-update-skip').onclick = () => d.remove();
+  }
+  // 暴露重检入口，方便诊断脚本和现场巡检员发现「页面卡住」时手动触发
+  window.__hse_recheckUpdate = function(){
+    return fetch('/check?probe='+Date.now(), { cache: 'no-store', credentials: 'omit' })
+      .then(r=>r.text()).then(html=>{
+        const m = html.match(/hse-build"\s+content="([^"]+)"/);
+        const remote = m ? m[1] : null;
+        const here = (document.querySelector('meta[name="hse-build"]')||{}).content || "0";
+        if(remote && compareBuild(remote, here) > 0){
+          showUpdateBanner(remote, html);
+          return 'banner-shown';
+        }
+        return 'up-to-date';
+      }).catch(e=>'err:'+e.message);
+  };
+})();
+</script>
+<script src="./check.app.js?v=2026-10-19.110" onerror="window.__hseScriptFail=1"></script>
+
+<!-- 添加到桌面引导浮层（底部 sheet） -->
+<!-- ⚠️ 显示/隐藏**必须用 style.display 控制**，不能靠 class="hidden"：
+     本元素自带内联 `display:none`，而 .hidden 只是 class，优先级低于内联样式，
+     classList.remove('hidden') 移不掉内联的 display:none —— 曾因此点了「添加到手机桌面」
+     完全没反应（安卓实测）。 -->
+<div id="add-home-modal" style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:none;align-items:flex-end;justify-content:center">
+  <div style="background:#fff;border-radius:20px 20px 0 0;padding:22px 20px 30px;max-width:420px;width:100%;box-shadow:0 -8px 24px rgba(0,0,0,.18)">
+    <div id="add-home-title" style="font-size:18px;font-weight:700;margin-bottom:10px">添加到手机桌面</div>
+    <div id="add-home-body" style="font-size:14px;color:#374151;line-height:1.8"></div>
+    <button id="add-home-do" style="display:none;width:100%;margin-top:16px;padding:14px;background:#1D4ED8;color:#fff;border:none;border-radius:14px;font-size:16px;font-weight:600">添加到桌面</button>
+    <button id="add-home-close" style="margin-top:8px;width:100%;padding:12px;background:transparent;border:none;color:#6B7280;font-size:14px">我知道了</button>
+  </div>
+</div>
+<div id="offline-bar" class="hidden">离线模式 · 已用本机缓存进入，记录先存本机，联网后自动上传</div>
+<script>
+/* CF-WPS-99：版本自愈。SPA 的旧标签页会一直跑旧代码 —— 2026-10-16 实测：
+   用户在部署前打开的标签页里继续操作，照片修复不生效（刷新后才好）。
+   做法：运行时 hse-build meta 与 version.json 比对，不一致且本会话还没为这个
+   目标版本重载过 → 整页重载。触发点：载入后 3s + 切回标签页（visibilitychange，
+   「离开再回来看一眼」正好命中）。version.json 404/异常一律静默跳过（不影响使用）。 */
+(function(){
+  try{
+    var meta = document.querySelector('meta[name="hse-build"]');
+    var running = meta && meta.content;
+    if(!running) return;
+    var reloadedFor = null;
+    try{ reloadedFor = sessionStorage.getItem('hse_build_reloaded_for'); }catch(e){}
+    var check = function(){
+      fetch('./version.json?t=' + Date.now(), { cache: 'no-store' })
+        .then(function(r){ return r.ok ? r.json() : null; })
+        .then(function(j){
+          if(!j || !j.build || j.build === running) return;
+          if(reloadedFor === j.build) return;            // 已为这个版本重载过：绝不循环刷
+          try{ sessionStorage.setItem('hse_build_reloaded_for', j.build); }catch(e){}
+          location.reload();
+        })
+        .catch(function(){});
+    };
+    document.addEventListener('visibilitychange', function(){ if(!document.hidden) check(); });
+    setTimeout(check, 3000);
+  }catch(e){}
+})();
+</script>
+</body>
+</html>

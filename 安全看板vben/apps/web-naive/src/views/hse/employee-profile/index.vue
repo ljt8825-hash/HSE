@@ -6,6 +6,7 @@
 import { h, reactive, ref, onMounted } from 'vue';
 import {
   NButton,
+  NCard,
   NDescriptions,
   NDescriptionsItem,
   NDrawer,
@@ -14,6 +15,7 @@ import {
   NInput,
   NSelect,
   NSpace,
+  NStatistic,
   NTable,
   NTag,
 } from 'naive-ui';
@@ -35,6 +37,7 @@ import {
   getProfileDriverInfo,
   type EmployeeProfileApi,
 } from '#/api/hse/employee-profile';
+import { getEmployeeStats } from '#/api/hse/employee';
 import { message } from '#/adapter/naive';
 
 defineOptions({ name: 'PersonnelProfile' });
@@ -78,9 +81,13 @@ const total = ref(0);
 const currentPage = ref(1);
 const pageSize = ref(20);
 
+// 统计卡点击筛选（total/active/left，'' 表示未点卡片，走默认列表口径）
+const activeCard = ref('');
+
 const searchForm = reactive({
   keyword: '',
   isDriver: '' as string | null,
+  status: '' as string,
 });
 
 async function loadData() {
@@ -93,6 +100,7 @@ async function loadData() {
     };
     if (searchForm.isDriver === 'true') params.is_driver = true;
     else if (searchForm.isDriver === 'false') params.is_driver = false;
+    if (searchForm.status) params.status = searchForm.status;
     const res = await getProfileList(params);
     data.value = res.list ?? [];
     total.value = res.total ?? 0;
@@ -104,14 +112,46 @@ async function loadData() {
   }
 }
 
-// ===================== 搜索 =====================
-function onSearch() {
+// 统计卡：档案总数=全部未删除、在职=花名册正式员工、离职=花名册辞职/死亡（与员工列表页口径一致）
+const statTotal = ref(0);
+const statActive = ref(0);
+const statLeft = ref(0);
+
+async function loadStats() {
+  try {
+    const stats = await getEmployeeStats();
+    statTotal.value = stats.total ?? 0;
+    statActive.value = stats.activeCount ?? 0;
+    statLeft.value = stats.leftCount ?? 0;
+  } catch {
+    /* ignore */
+  }
+}
+
+function onCardClick(key: string) {
+  activeCard.value = activeCard.value === key ? '' : key;
+  if (activeCard.value === 'active') searchForm.status = 'active';
+  else if (activeCard.value === 'left') searchForm.status = 'left';
+  else searchForm.status = '';
   currentPage.value = 1;
   loadData();
+}
+
+function onStatusChange() {
+  activeCard.value = '';
+}
+
+// ===================== 搜索 =====================
+function onSearch() {
+  activeCard.value = '';
+  currentPage.value = 1;
+  loadData();
+  loadStats();
 }
 function onReset() {
   searchForm.keyword = '';
   searchForm.isDriver = null;
+  searchForm.status = '';
   onSearch();
 }
 function onPageChange(payload: { currentPage: number; pageSize: number }) {
@@ -218,6 +258,7 @@ const profileColumns = ref<VxeTableGridColumns>([
 
 onMounted(() => {
   loadData();
+  loadStats();
 });
 </script>
 
@@ -242,6 +283,34 @@ onMounted(() => {
       </NSpace>
     </template>
 
+    <!-- 统计卡（点击联动下方列表） -->
+    <div class="mb-4 grid grid-cols-2 gap-3 md:grid-cols-3">
+      <NCard
+        :bordered="activeCard === 'total'"
+        hoverable
+        class="cursor-pointer transition-all hover:shadow-md"
+        @click="onCardClick('total')"
+      >
+        <NStatistic label="档案总数" :value="statTotal" />
+      </NCard>
+      <NCard
+        :bordered="activeCard === 'active'"
+        hoverable
+        class="cursor-pointer transition-all hover:shadow-md"
+        @click="onCardClick('active')"
+      >
+        <NStatistic label="在职人员" :value="statActive" />
+      </NCard>
+      <NCard
+        :bordered="activeCard === 'left'"
+        hoverable
+        class="cursor-pointer transition-all hover:shadow-md"
+        @click="onCardClick('left')"
+      >
+        <NStatistic label="离职人员" :value="statLeft" />
+      </NCard>
+    </div>
+
     <!-- 搜索 -->
     <HseSearchPanel @query="onSearch" @reset="onReset">
       <NGi>
@@ -261,6 +330,18 @@ onMounted(() => {
             { label: '是', value: 'true' },
             { label: '否', value: 'false' },
           ]"
+        />
+      </NGi>
+      <NGi>
+        <NSelect
+          v-model:value="searchForm.status"
+          placeholder="在职状态"
+          clearable
+          :options="[
+            { label: '在职', value: 'active' },
+            { label: '离职', value: 'left' },
+          ]"
+          @update:value="onStatusChange"
         />
       </NGi>
     </HseSearchPanel>

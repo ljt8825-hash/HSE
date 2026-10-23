@@ -78,17 +78,18 @@ const routes: RouteRecordRaw[] = [
             },
             name: 'SiteViolationAnalysis',
             path: '/site/violation/analysis',
-            component: () => import('#/views/site/violation/analysis.vue'),
+            component: () => import('#/views/analysis/violation/index.vue'),
           },
           {
             meta: {
               title: $t('page.hse.siteViolationLedger'),
               icon: 'lucide:clipboard-list',
               authority: ['admin'],
+              hideInMenu: true,
             },
-            name: 'SiteViolationLedger',
+            name: 'SiteViolationLedgerLegacy',
             path: '/site/violation/ledger',
-            component: () => import('#/views/site/violation/ledger.vue'),
+            redirect: '/ledger/violation',
           },
           {
             meta: {
@@ -165,7 +166,7 @@ const routes: RouteRecordRaw[] = [
             },
             name: 'SiteGridPatrolLedger',
             path: '/site/grid/ledger',
-            component: () => import('#/views/site/grid-ledger/index.vue'),
+            redirect: '/ledger/grid',
           },
           {
             meta: {

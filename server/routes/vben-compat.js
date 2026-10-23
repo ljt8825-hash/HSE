@@ -50,7 +50,7 @@ router.get('/user/info', async (req, res) => {
           // 权限码与后端角色权限映射一致，禁止固定返回 ['all']
           permissions: getPermissionsForRole(user.role),
           desc: user.department || '',
-          homePath: '/hse/todos',
+          homePath: '/overview/leader-dashboard',
           token: authorization.replace('Bearer ', ''),
           department: user.department,
           phone: user.phone,

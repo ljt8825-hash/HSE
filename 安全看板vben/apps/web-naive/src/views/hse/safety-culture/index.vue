@@ -7,7 +7,8 @@
  * 后端契约：GET /api/hse/safety-culture/list（只读查询+计算扣分）、POST /import（选月份上传专项活动台帐Excel）。
  * 扣分口径：表格「扣分」列>0 优先；否则按未开展√项×单位分值；生效扣分被类别上限钳制。
  */
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, nextTick, onActivated, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import type { VxeTableGridColumns } from '#/adapter/vxe-table';
 
 import {
@@ -52,6 +53,56 @@ const levelOptions = [
 /** 当前选中月份（列表按此过滤），下拉选项由数据中的月份动态生成 */
 const selectedMonth = ref('');
 const monthOptions = ref<{ label: string; value: string }[]>([]);
+
+// 支持外部下钻：query 携带 month（YYYY-MM）/ level（岗位：乡镇主管/管理员）时，加载后自动定位
+// （自动评分页「安全文化建设」列扣分明细点击下钻使用；无 query 时行为与默认一致）
+const route = useRoute();
+const drillQuery = computed(() => ({
+  month: typeof route.query.month === 'string' ? route.query.month : '',
+  level: typeof route.query.level === 'string' ? route.query.level : '',
+}));
+
+// 支持外部定位：query 携带 emp（考核对象 employeeId）时，加载后高亮定位到该人所在行
+const hlEmpId = ref<number | null>(null);
+let hlTimer: ReturnType<typeof setTimeout> | null = null;
+function safetyRowClassName(params: { row: any }): string {
+  return hlEmpId.value != null && Number(params?.row?.employeeId) === hlEmpId.value
+    ? 'safety-locate-row'
+    : '';
+}
+function scrollToHlRow() {
+  if (hlEmpId.value == null) return;
+  nextTick(() => {
+    setTimeout(() => {
+      document.querySelector<HTMLElement>('.vxe-body--row.safety-locate-row')?.scrollIntoView({
+        block: 'center',
+        behavior: 'smooth',
+      });
+    }, 120);
+  });
+}
+function scheduleHlFadeOut() {
+  if (hlTimer) clearTimeout(hlTimer);
+  hlTimer = setTimeout(() => {
+    hlEmpId.value = null;
+  }, 3800);
+}
+onUnmounted(() => {
+  if (hlTimer) clearTimeout(hlTimer);
+});
+
+/** 外部定位轻量复现：query 携带 emp 时，基于当前已加载数据高亮该人所在行并滚动聚焦 */
+function applyExternalLocate() {
+  const qEmp = typeof route.query.emp === 'string' ? Number(route.query.emp) : NaN;
+  if (!Number.isFinite(qEmp) || qEmp <= 0) return;
+  hlEmpId.value = qEmp;
+  scrollToHlRow();
+  scheduleHlFadeOut();
+}
+/** keep-alive：每次标签页被重新激活（再次从自动评分页下钻进入）时，基于当前数据重新高亮定位 */
+onActivated(() => {
+  applyExternalLocate();
+});
 
 const currentMonth = computed(() => {
   const now = new Date();
@@ -122,11 +173,29 @@ async function loadData() {
       .map((m) => ({ label: m, value: m }));
     // 月份占位：从「最大台账月+1 .. 当前月」的缺失月份 push 到尾部补齐（默认选中不变，历史缺口不动）
     fillPlaceholderMonths(monthOptions.value);
-    if (!monthOptions.value.some((o) => o.value === selectedMonth.value)) {
+    // 外部下钻（自动评分页点击下钻）：优先定位 query.month / query.level；query.month 不在下拉时补入
+    const dq = drillQuery.value;
+    if (dq.month && !monthOptions.value.some((o) => o.value === dq.month)) {
+      monthOptions.value.push({ label: dq.month, value: dq.month });
+      monthOptions.value.sort((a, b) => b.value.localeCompare(a.value));
+    }
+    if (dq.month) {
+      selectedMonth.value = dq.month;
+    } else if (!monthOptions.value.some((o) => o.value === selectedMonth.value)) {
       selectedMonth.value = monthOptions.value[0]?.value ?? currentMonth.value;
+    }
+    if (dq.level && levelOptions.some((o) => o.value === dq.level)) {
+      searchForm.level = dq.level;
     }
     applyMonthColumns();
     applyFilter();
+    // 外部定位（自动评分页点击下钻）：按 query.emp 高亮该人所在行，停留后自动淡出
+    const qEmp = typeof route.query.emp === 'string' ? Number(route.query.emp) : NaN;
+    if (Number.isFinite(qEmp) && qEmp > 0) {
+      hlEmpId.value = qEmp;
+      scrollToHlRow();
+      scheduleHlFadeOut();
+    }
   } catch {
     allRows.value = [];
     data.value = [];
@@ -595,6 +664,15 @@ const actionState = computed<Partial<Record<HseActionKey, { hidden?: boolean }>>
 onMounted(() => {
   loadData();
 });
+
+// Tabbar keep-alive：页面被缓存后 onMounted 不再触发。再次从自动评分页下钻进入
+// （query.month/level/emp 变化）时，重载并重新定位高亮到目标行。
+watch(
+  () => [route.query.month, route.query.level, route.query.emp],
+  () => {
+    loadData();
+  },
+);
 </script>
 
 <template>
@@ -671,7 +749,7 @@ onMounted(() => {
     </NAlert>
 
     <!-- 台账列表 -->
-    <HseDataGrid :columns="allColumns" :data="data" :loading="loading" :pager="false">
+    <HseDataGrid :columns="allColumns" :data="data" :loading="loading" :pager="false" row-key="id" :row-class-name="safetyRowClassName">
       <template #activityCol="{ row, column }">
         <span :class="activityDone(row, column?.field) ? 'text-success' : 'text-error'">
           {{ activityDone(row, column?.field) ? '✅' : '❌' }}
@@ -850,3 +928,15 @@ onMounted(() => {
     </NModal>
   </HsePageLayout>
 </template>
+
+<style>
+/* 外部下钻定位到目标人所在行：高亮该行（自动评分页安全文化明细点击跳转），停留后自动淡出 */
+.vxe-body--row.safety-locate-row {
+  background: rgba(37, 99, 235, 0.14) !important;
+  transition: background-color 0.8s ease;
+}
+.vxe-body--row.safety-locate-row .vxe-cell {
+  color: #1d4ed8;
+  font-weight: 600;
+}
+</style>

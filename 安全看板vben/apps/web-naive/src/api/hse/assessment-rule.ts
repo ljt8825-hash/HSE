@@ -248,6 +248,8 @@ export namespace CategoryLimitApi {
   }
   export interface CategoryLimit {
     id: number | null;
+    /** 客户端唯一键（VXE row-key），非持久化字段 */
+    _key?: string;
     category: string;
     maxDeduct: number | null;
     /** 扣分对象：self=扣本人 / manager=传导到所属乡镇作业中心经理 / 其它=自定义 */
@@ -266,6 +268,8 @@ export namespace CategoryLimitApi {
     ruleStatusesDerived?: ('enabled' | 'disabled')[];
     /** 每行规则（考核内容/扣分/状态），持久化于 rule_items，优先于 ruleNames */
     ruleItems?: CategoryRuleItem[];
+    /** 行编辑用的规则数组（客户端工作字段，非持久化） */
+    _ruleItems?: CategoryRuleItem[];
     /** 加载时的原始类别（基线），用于检测类别改名并同步规则表 */
     originalCategory?: string | null;
   }

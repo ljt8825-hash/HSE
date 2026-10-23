@@ -78,6 +78,14 @@ interface Props {
    * 开启后在需要时由调用方按页面传入，其他页不受影响。
    */
   toolbarCustom?: boolean | { storageKey?: string } & Record<string, any>;
+  /**
+   * 行拖拽排序：启用 vxe `rowDragConfig`（v4 内建，已废弃历史 dragConfig）。
+   * true=启用（默认整行可拖）；对象=透传 rowDragConfig 配置。
+   * 仅手柄触发用法：传 { trigger: 'cell' } + 目标列声明 dragSort: true。
+   * 落库由调用方监听 `row-dragend` 事件（参数 dragRow/newRow 为数据源引用），
+   * 用引用在自身数据源重排后，本组件随 data prop 变化自动刷新。
+   */
+  rowDrag?: boolean | Record<string, any>;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -97,6 +105,18 @@ const emit = defineEmits<{
   'edit-cancel': [payload: { row: any }];
   'edit-closed': [payload: { row: any; column: any }];
   'page-change': [payload: { currentPage: number; pageSize: number }];
+  /**
+   * 行拖拽结束（vxe `row-dragend`）：payload 含 oldRow/newRow/dragRow/dragPos/_index，
+   * 其中 dragRow/newRow 为数据源引用，调用方需据此在自身数据源重排后，
+   * 本组件随 data prop 变化自动刷新。（VXE 已按最终顺序内部交换，此处复原源数组即可保持一致。）
+   */
+  'row-dragend': [payload: {
+    oldRow: any;
+    newRow: any;
+    dragRow: any;
+    dragPos: string;
+    _index?: { newIndex: number; oldIndex: number };
+  }];
   reload: [];
 }>();
 
@@ -143,6 +163,20 @@ function buildGridOptions(): VxeTableGridOptions {
         : {}),
     },
   };
+
+  // 行拖拽排序：rowConfig.drag 开启 HTML5 拖拽（vxe 事件门），rowDragConfig 配置行为。
+  // handle-only 用法：调用方传 { trigger: 'cell' }，并在目标手柄列声明 dragSort: true；
+  // 默认 showIcon:false，由调用方在 slot 内渲染自己的手柄图标（如 ⠿），避免双图标。
+  if (props.rowDrag) {
+    opts.rowConfig = {
+      ...(opts.rowConfig || {}),
+      drag: true,
+    };
+    opts.rowDragConfig = {
+      showIcon: false,
+      ...(typeof props.rowDrag === 'object' ? props.rowDrag : {}),
+    };
+  }
 
   if (props.height) {
     opts.height = props.height;
@@ -235,6 +269,10 @@ const gridEvents = computed<VxeGridListeners>(() => ({
   // 单元格编辑关闭（cell 模式）：点击其他处/回车/ESC 后触发，row 已写入最新值，持久化由调用方处理
   'edit-closed': ((payload: { row: any; column: any }) => {
     emit('edit-closed', payload);
+  }) as any,
+// 行拖拽结束：转发 vxe `row-dragend`（含 dragRow/newRow 引用 → 调用方据此重排自身数据源）
+  'row-dragend': ((payload: any) => {
+    emit('row-dragend', payload);
   }) as any,
 }));
 

@@ -290,6 +290,12 @@ export function retryTaskFailed(taskId: number) {
  * 下载导入模板
  * [提示词-129] 修复 blob 吞错误：后端返回 JSON 错误时（Content-Type 为 json）解析错误信息并抛出
  */
+// 批量授权模板下载文件名中文化：type → 中文名称（未登记的类型保留英文回退）
+const IMPORT_TEMPLATE_NAME: Record<string, string | undefined> = {
+  document: '安全资料',
+  standard_clause: '标准条款',
+};
+
 export async function downloadTemplate(type: string, version = 'v1.0') {
   try {
     // responseReturn:'data' → 直接拿到 Blob
@@ -309,7 +315,9 @@ export async function downloadTemplate(type: string, version = 'v1.0') {
     const url = window.URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `hse-import-template-${type}-${version}.xlsx`;
+    const label = IMPORT_TEMPLATE_NAME[type];
+    const baseName = label ? `${label}导入模板` : `hse-import-template-${type}`;
+    link.download = `${baseName}_${version}.xlsx`;
     link.click();
     window.URL.revokeObjectURL(url);
     return { success: true };

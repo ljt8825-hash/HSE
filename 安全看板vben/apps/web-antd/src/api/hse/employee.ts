@@ -15,8 +15,8 @@ export namespace EmployeeApi {
   /** 人员分类 */
   export type PersonCategory = '适龄人员' | '超龄人员';
 
-  /** 组织状态（生命周期） */
-  export type OrgStatus = '在职' | '待岗' | '离职' | '退休' | '返聘';
+  /** 组织状态（生命周期）。后端实际返回英文枚举：employeeService 将 employment_relation IN ('辞职','死亡') 映射为 'left'，否则取 employee_assignment.status（active/inactive 等）。 */
+  export type OrgStatus = 'active' | 'left' | 'pending' | 'retired' | 'rehire';
 
   /** 员工列表项 */
   export interface EmployeeItem {

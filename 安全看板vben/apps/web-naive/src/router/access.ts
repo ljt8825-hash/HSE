@@ -14,7 +14,12 @@ import { $t } from '#/locales';
 const forbiddenComponent = () => import('#/views/_core/fallback/forbidden.vue');
 
 async function generateAccess(options: GenerateMenuAndRoutesOptions) {
-  const pageMap: ComponentRecordType = import.meta.glob('../views/**/*.vue');
+  // 仅后端/混合模式需要预加载所有页面组件映射；
+  // 前端模式下路由组件已直接 import，无需扫描全量 views，避免首屏映射表过大。
+  const pageMap: ComponentRecordType =
+    preferences.app.accessMode === 'frontend'
+      ? {}
+      : import.meta.glob('../views/**/*.vue');
 
   const layoutMap: ComponentRecordType = {
     BasicLayout,

@@ -22,6 +22,19 @@ export namespace SanweiAnalysisApi {
     infoDefect: number; // 「违章信息」子列未完成(×)次数（2026-07 前列表列）
     score: number; // 「扣分」当月三违考核分数（照片扣分+违章扣分）
     inspectionCount: number; // 「检查数量」= 该乡镇该月在「三违台账」(grid_inspection_records) 的检查记录条数
+    /** 公司查处扣分：公司管理(总+一级网格长)当月查处该乡镇三违扣分（头盔起×5 + 其他起×1） */
+    companyDeduct: {
+      score: number; // 扣分合计
+      helmetCount: number; // 未佩戴安全头盔/不戴头盔起数（×5）
+      otherCount: number; // 其他三违起数（×1）
+      /** 逐条明细：哪天/哪个人/如何违章/扣几分（前端点击数字弹窗展示） */
+      details: {
+        date: string; // YYYY-MM-DD
+        violatorName: string; // 违章人（清洗后）
+        behavior: string; // 违章行为
+        score: number; // 本起扣分（5 或 1）
+      }[];
+    };
     notAssessed: boolean; // 该月三违考核未实施（分数列标「不考核」，保留成绩数据）
     created_at: string | null;
   }
@@ -50,6 +63,22 @@ export namespace SanweiAnalysisApi {
     /** 指定月份查不到台账 → 视为满分 */
     fullMarks?: boolean;
     fullMarksNote?: string;
+    /** 公司查处·待人工审核的违章人名（冻结归并/花名册/人工映射均未命中） */
+    companyUnresolved?: CompanyUnresolvedItem[];
+  }
+
+  /** 公司查处·待人工审核的违章人 */
+  export interface CompanyUnresolvedItem {
+    month: string; // YYYY-MM
+    sourceName: string; // 清洗后的原始违章人名
+    count: number; // 当月出现次数（记录数）
+  }
+
+  /** 花名册姓名搜索候选 */
+  export interface EmployeeCandidate {
+    employeeId: number;
+    name: string;
+    department: string;
   }
 
   /** 导入结果 */
@@ -139,4 +168,34 @@ export async function continueSanweiMonthly(payload: { month: string }) {
     existing: number;
     inserted: number;
   }>(`${BASE}/continue`, payload);
+}
+
+/** 公司查处·花名册姓名模糊搜索（人工审核选人用） */
+export async function searchCompanyEmployee(keyword: string) {
+  return requestClient.get<{ list: SanweiAnalysisApi.EmployeeCandidate[] }>(
+    `${BASE}/company-deduct/employee-search`,
+    { params: { keyword } },
+  );
+}
+
+/**
+ * 公司查处·人工审核保存/更新。
+ * employeeId 提供 → 该违章人归到该花名册员工；省略 → 判定「确无此人/不计入」（抑制）。
+ */
+export async function saveCompanyResolution(payload: {
+  sourceName: string;
+  employeeId?: number | null;
+  remark?: string;
+}) {
+  return requestClient.post<{ sourceName: string; resolvedToEmployee: boolean; suppressed: boolean }>(
+    `${BASE}/company-deduct/resolution`,
+    payload,
+  );
+}
+
+/** 公司查处·撤销一笔人工审核（回到待审核） */
+export async function deleteCompanyResolution(sourceName: string) {
+  return requestClient.delete<{ deleted: boolean }>(`${BASE}/company-deduct/resolution`, {
+    params: { source_name: sourceName },
+  });
 }

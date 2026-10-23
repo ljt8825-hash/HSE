@@ -22,6 +22,29 @@ const GRID_CHIEF_INSPECTION_REQUIREMENT = {
   '三级网格长': { days: 1, requiredInspections: 1 },
 };
 
+// ========== 冻结口径：年度考核目标默认值（2026-09-28 冻结） ==========
+// 库中无年度目标值来源（objective_contract_version/indicator 表不存在，
+// safety_goals 为空），硬编码值即唯一口径。overview 与 goals 共用，避免两处漂移。
+// avgRiskScore 无对应目标责任书指标，保留独立项。
+const DEFAULT_TARGETS = {
+  accidentCount: 0, majorAccidentCount: 0, accidentWeightedIndex: 0,
+  violationCount: 50, trainingCompletionRate: 95, rectificationRate: 98,
+  avgRiskScore: 80, demeritRate: 10, gridInspectionCompliance: 90,
+};
+
+// goals 兜底目标清单（名称/分类/目标值/单位/说明），与 DEFAULT_TARGETS 同源
+const DEFAULT_GOAL_ITEMS = [
+  { name: '事故起数控制', category: '安全目标', targetValue: 0, targetUnit: '起', description: '年度事故起数控制目标' },
+  { name: '重大事故控制', category: '安全目标', targetValue: 0, targetUnit: '起', description: '年度重大及以上事故为零目标' },
+  { name: '事故指数控制', category: '安全目标', targetValue: 0, targetUnit: '分', description: '年度事故等级加权指数控制目标' },
+  { name: '三违次数控制', category: '安全目标', targetValue: 50, targetUnit: '次', description: '年度三违次数控制目标' },
+  { name: '培训完成率', category: '培训目标', targetValue: 95, targetUnit: '%', description: '年度培训合格完成率目标' },
+  { name: '隐患整改率', category: '隐患目标', targetValue: 98, targetUnit: '%', description: '年度隐患整改闭环率目标' },
+  { name: '高风险人员控制', category: '风险目标', targetValue: 5, targetUnit: '%', description: '高风险人员占比控制目标' },
+  { name: '驾驶风险控制', category: '驾驶目标', targetValue: 10, targetUnit: '%', description: '驾驶风险控制目标（近5年扣分规则，扣分率=近5年累计扣分/(全员驾驶员人数×60)×100%，分母为全员驾驶员（岗位口径驾驶员/司机）' },
+  { name: '网格长巡查合规率', category: '管理目标', targetValue: 90, targetUnit: '%', description: '网格长巡查频次合规率目标' },
+];
+
 function calculateGridCompliance(gridRows) {
   let totalRequired = 0;
   let totalActual = 0;
@@ -113,11 +136,21 @@ async function overview() {
     `SELECT COUNT(*) as total_records,
        COALESCE(SUM(demerit_points), 0) as total_points,
        COUNT(DISTINCT employee_id) as driver_count,
-       COUNT(*) FILTER (WHERE demerit_date >= $1 AND demerit_date < $2) as current_year_records,
-       COALESCE(SUM(CASE WHEN demerit_date >= $1 AND demerit_date < $2 THEN demerit_points ELSE 0 END), 0) as current_year_points
+       COUNT(*) FILTER (WHERE demerit_date >= $1 AND demerit_date <= $2) as current_year_records,
+       COALESCE(SUM(CASE WHEN demerit_date >= $1 AND demerit_date <= $2 THEN demerit_points ELSE 0 END), 0) as current_year_points
      FROM license_demerit_records
      WHERE is_deleted = false AND demerit_date >= $3`,
     [yearStart, yearEnd, fiveYearsAgoStr]
+  );
+
+  // 全员驾驶员口径（岗位：驾驶员/司机），demeritRate 分母 = 全员驾驶员 × 60
+  // 与部门/乡镇排名的 driver_count 口径一致，区别于"有扣分记录的驾驶员"
+  const driverPopResult = await pool.query(
+    `SELECT COUNT(DISTINCT e.id)::int as total_driver_count
+     FROM employee e
+     JOIN employee_assignment ea ON ea.employee_id = e.id AND ea.is_current = true AND ea.is_deleted = false
+     JOIN position p ON p.id = ea.position_id AND p.is_deleted = false
+     WHERE e.is_deleted = false AND (p.name ILIKE '%驾驶员%' OR p.name ILIKE '%司机%')`
   );
 
   const riskScoreResult = await pool.query(
@@ -162,11 +195,7 @@ async function overview() {
      GROUP BY EXTRACT(YEAR FROM accident_date) ORDER BY year`
   );
 
-  const targets = {
-    accidentCount: 0, majorAccidentCount: 0, accidentWeightedIndex: 0,
-    violationCount: 50, trainingCompletionRate: 95, rectificationRate: 98,
-    avgRiskScore: 80, demeritRate: 10, gridInspectionCompliance: 90,
-  };
+  const targets = { ...DEFAULT_TARGETS };
 
   const accidentRow = accidentResult.rows[0];
   const violationRow = violationResult.rows[0];
@@ -181,10 +210,12 @@ async function overview() {
   const hazardTotal = parseInt(hazardRow.total_count) || 0;
   const trainingQualified = parseInt(trainingRow.qualified_count) || 0;
   const hazardCompleted = parseInt(hazardRow.completed_count) || 0;
-  const driverCount = parseInt(demeritRow.driver_count) || 0;
+  const demeritDriverCount = parseInt(demeritRow.driver_count) || 0;
+  const totalDriverCount = parseInt(driverPopResult.rows[0].total_driver_count) || 0;
   const fiveYearDemeritPoints = parseInt(demeritRow.total_points) || 0;
+  const currentYearDemeritPoints = parseInt(demeritRow.current_year_points) || 0;
 
-  const demeritRate = driverCount > 0 ? Math.round((fiveYearDemeritPoints / (driverCount * 60)) * 100) : 0;
+  const demeritRate = totalDriverCount > 0 ? Math.round((fiveYearDemeritPoints / (totalDriverCount * 60)) * 100) : 0;
   const gridInspectionCompliance = calculateGridCompliance(gridChiefResult.rows);
 
   const body = {
@@ -220,9 +251,10 @@ async function overview() {
         hazardInProgressCount: parseInt(hazardRow.in_progress_count) || 0,
         demeritRecords: parseInt(demeritRow.total_records) || 0,
         demeritPoints: parseInt(demeritRow.total_points) || 0,
-        demeritDriverCount: driverCount,
+        demeritDriverCount,
+        totalDriverCount,
         currentYearDemeritRecords: parseInt(demeritRow.current_year_records) || 0,
-        currentYearDemeritPoints: fiveYearDemeritPoints,
+        currentYearDemeritPoints,
         demeritRate,
         riskTotalEmployees: parseInt(riskScoreRow.total_employees) || 0,
         riskMajorCount: parseInt(riskScoreRow.major_count) || 0,
@@ -507,224 +539,159 @@ async function departmentRanking() {
   return { __t: 'json', body };
 }
 
-// ========== GET /township-ranking — 乡镇排名 ==========
-async function townshipRanking() {
+// ========== GET /township-ranking — 乡镇排名（自动评分数据源） ==========
+// 口径（2026-09-28 冻结）：乡镇排名拉取「目标职责→自动评分」乡镇作业中心经理 tab 数据。
+// 得分 = hse_assessment_target.score_total（自动评分总分），按 score_total 降序排名；
+// 环卫作业中心为部门（归属部门排名），不纳入乡镇排名；
+// 无经理考核对象的乡镇（如津城街道作业中心）：取该周期组织下管理员考核对象 score_total
+//   平均分兜底（scoreSource='admin_aggregate'，含 adminCount/adminAvgScore/adminMaxScore）；
+// 既无经理也无管理员对象 → 单列标注无数据（hasData=false, overallRank=null, noDataTownships）。
+// cycleId 可选参数：缺省取「有乡镇经理考核对象的最新周期」。
+async function townshipRanking(cycleId) {
   const currentYear = new Date().getFullYear();
-  const yearStart = `${currentYear}-01-01`;
-  const yearEnd = `${currentYear}-12-31`;
 
-  const fiveYearsAgo = new Date();
-  fiveYearsAgo.setFullYear(fiveYearsAgo.getFullYear() - 5);
-  const fiveYearsAgoStr = fiveYearsAgo.toISOString().split('T')[0];
-
-  const townshipResult = await pool.query(
-    `SELECT id, org_name, parent_id, org_type FROM hse_org_unit
-     WHERE is_deleted = false AND org_type IN ('town_center') ORDER BY org_name`
-  );
-
-  const townships = townshipResult.rows.map(t => ({
-    id: t.id, name: t.org_name, parentId: t.parent_id, unitType: t.org_type,
-  }));
-
-  const townshipAccidentResult = await pool.query(
-    `SELECT o.id as township_id, o.org_name as township_name,
-       COUNT(a.id) as accident_count,
-       COUNT(a.id) FILTER (WHERE a.level IN ('重大', '特别重大')) as major_count,
-       COUNT(a.id) FILTER (WHERE a.level = '较大') as serious_count,
-       COUNT(a.id) FILTER (WHERE a.level = '一般') as general_count,
-       COUNT(a.id) FILTER (WHERE a.level = '轻微') as minor_count,
-       COALESCE(SUM(CASE a.level WHEN '轻微' THEN 1 WHEN '一般' THEN 3 WHEN '较大' THEN 6 WHEN '重大' THEN 10 WHEN '特别重大' THEN 15 ELSE 1 END), 0) as weighted_index
-     FROM hse_org_unit o
-     LEFT JOIN employee_assignment ea ON ea.org_unit_id = o.id AND ea.is_current = true AND ea.is_deleted = false
-     LEFT JOIN employee e ON e.id = ea.employee_id AND e.is_deleted = false
-     LEFT JOIN accidents a ON a.personnel_id::bigint = e.id AND a.is_deleted = false
-       AND a.accident_date >= $1 AND a.accident_date <= $2
-     WHERE o.is_deleted = false AND o.org_type IN ('town_center')
-     GROUP BY o.id, o.org_name`,
-    [yearStart, yearEnd]
-  );
-
-  const townshipViolationResult = await pool.query(
-    `SELECT o.id as township_id, o.org_name as township_name,
-       COUNT(vr.id) as violation_count,
-       COUNT(vr.id) FILTER (WHERE vr.violation_level = '严重') as serious_count,
-       COUNT(vr.id) FILTER (WHERE vr.violation_level = '一般') as general_count,
-       COUNT(vr.id) FILTER (WHERE vr.violation_level = '轻微') as minor_count
-     FROM hse_org_unit o
-     LEFT JOIN employee_assignment ea ON ea.org_unit_id = o.id AND ea.is_current = true AND ea.is_deleted = false
-     LEFT JOIN employee e ON e.id = ea.employee_id AND e.is_deleted = false
-     LEFT JOIN violation_records vr ON vr.violator_id = e.id AND vr.is_deleted = false
-       AND vr.violation_date >= $1 AND vr.violation_date <= $2
-     WHERE o.is_deleted = false AND o.org_type IN ('town_center')
-     GROUP BY o.id, o.org_name`,
-    [yearStart, yearEnd]
-  );
-
-  const townshipDemeritResult = await pool.query(
-    `SELECT o.id as township_id, o.org_name as township_name,
-       COUNT(DISTINCT e.id) as driver_count,
-       COUNT(ldr.id) as demerit_count_5y,
-       COALESCE(SUM(ldr.demerit_points), 0) as demerit_points_5y,
-       COUNT(ldr.id) FILTER (WHERE ldr.demerit_date >= $1 AND ldr.demerit_date <= $2) as demerit_count_current,
-       COALESCE(SUM(CASE WHEN ldr.demerit_date >= $1 AND ldr.demerit_date <= $2 THEN ldr.demerit_points ELSE 0 END), 0) as demerit_points_current
-     FROM hse_org_unit o
-     LEFT JOIN employee_assignment ea ON ea.org_unit_id = o.id AND ea.is_current = true AND ea.is_deleted = false
-     LEFT JOIN employee e ON e.id = ea.employee_id AND e.is_deleted = false
-     LEFT JOIN position p ON p.id = ea.position_id AND p.is_deleted = false
-     LEFT JOIN license_demerit_records ldr ON ldr.employee_id = e.id AND ldr.is_deleted = false
-       AND ldr.demerit_date >= $3
-     WHERE o.is_deleted = false AND o.org_type IN ('town_center')
-       AND (p.name ILIKE '%驾驶员%' OR p.name ILIKE '%司机%')
-     GROUP BY o.id, o.org_name`,
-    [yearStart, yearEnd, fiveYearsAgoStr]
-  );
-
-  const townshipRiskResult = await pool.query(
-    `SELECT o.id as township_id, o.org_name as township_name,
-       COUNT(DISTINCT e.id) as employee_count,
-       COUNT(DISTINCT e.id) FILTER (WHERE hrs.risk_level = '重大') as major_count,
-       COUNT(DISTINCT e.id) FILTER (WHERE hrs.risk_level = '较高') as high_count,
-       COUNT(DISTINCT e.id) FILTER (WHERE hrs.risk_level = '一般') as medium_count,
-       COUNT(DISTINCT e.id) FILTER (WHERE hrs.risk_level = '低') as low_count,
-       COALESCE(AVG(hrs.total_score), 0) as avg_score
-     FROM hse_org_unit o
-     LEFT JOIN employee_assignment ea ON ea.org_unit_id = o.id AND ea.is_current = true AND ea.is_deleted = false
-     LEFT JOIN employee e ON e.id = ea.employee_id AND e.is_deleted = false
-     LEFT JOIN hse_employee_risk_snapshot hrs ON hrs.employee_id = e.id AND hrs.is_deleted = false
-       AND hrs.snapshot_date >= $1
-     WHERE o.is_deleted = false AND o.org_type IN ('town_center')
-     GROUP BY o.id, o.org_name`,
-    [yearStart]
-  );
-
-  const townshipHazardResult = await pool.query(
-    `SELECT o.id as township_id, o.org_name as township_name,
-       COUNT(hr.id) as hazard_count,
-       COUNT(hr.id) FILTER (WHERE hr.hazard_level = 'high') as high_risk_count,
-       COUNT(hr.id) FILTER (WHERE hr.status = 'resolved') as resolved_count,
-       COUNT(hr.id) FILTER (WHERE hr.status = 'pending') as pending_count
-    FROM hse_org_unit o
-    LEFT JOIN employee_assignment ea ON ea.org_unit_id = o.id AND ea.is_current = true AND ea.is_deleted = false
-    LEFT JOIN employee e ON e.id = ea.employee_id AND e.is_deleted = false
-    LEFT JOIN hazard_record hr ON hr.employee_id = e.id AND hr.is_deleted = false
-      AND hr.report_date >= $1 AND hr.report_date <= $2
-    WHERE o.is_deleted = false AND o.org_type IN ('town_center')
-    GROUP BY o.id, o.org_name`,
-    [yearStart, yearEnd]
-  );
-
-  const townshipGridResult = await pool.query(
-    `SELECT o.id as township_id, o.org_name as township_name,
-       COUNT(DISTINCT e.id) FILTER (WHERE p.name ILIKE '%总网格长%') as total_grid_chief_count,
-       COUNT(DISTINCT e.id) FILTER (WHERE p.name ILIKE '%一级网格长%') as level1_grid_chief_count,
-       COUNT(DISTINCT e.id) FILTER (WHERE p.name ILIKE '%二级网格长%') as level2_grid_chief_count,
-       COUNT(DISTINCT e.id) FILTER (WHERE p.name ILIKE '%三级网格长%') as level3_grid_chief_count,
-       COUNT(DISTINCT hr.id) as inspection_count
-     FROM hse_org_unit o
-     LEFT JOIN employee_assignment ea ON ea.org_unit_id = o.id AND ea.is_current = true AND ea.is_deleted = false
-     LEFT JOIN employee e ON e.id = ea.employee_id AND e.is_deleted = false
-     LEFT JOIN position p ON p.id = ea.position_id AND p.is_deleted = false
-     LEFT JOIN hazard_record hr ON hr.employee_id = e.id AND hr.is_deleted = false
-       AND hr.report_date >= $1 AND hr.report_date <= $2
-     WHERE o.is_deleted = false AND o.org_type IN ('town_center')
-     GROUP BY o.id, o.org_name`,
-    [yearStart, yearEnd]
-  );
-
-  const accidentMap = new Map();
-  townshipAccidentResult.rows.forEach(r => accidentMap.set(r.township_id, {
-    accidentCount: parseInt(r.accident_count) || 0, majorCount: parseInt(r.major_count) || 0,
-    seriousCount: parseInt(r.serious_count) || 0, generalCount: parseInt(r.general_count) || 0,
-    minorCount: parseInt(r.minor_count) || 0, weightedIndex: parseInt(r.weighted_index) || 0,
-  }));
-
-  const violationMap = new Map();
-  townshipViolationResult.rows.forEach(r => violationMap.set(r.township_id, {
-    violationCount: parseInt(r.violation_count) || 0, seriousCount: parseInt(r.serious_count) || 0,
-    generalCount: parseInt(r.general_count) || 0, minorCount: parseInt(r.minor_count) || 0,
-  }));
-
-  const demeritMap = new Map();
-  townshipDemeritResult.rows.forEach(r => demeritMap.set(r.township_id, {
-    driverCount: parseInt(r.driver_count) || 0, demeritCount5y: parseInt(r.demerit_count_5y) || 0,
-    demeritPoints5y: parseInt(r.demerit_points_5y) || 0, demeritCountCurrent: parseInt(r.demerit_count_current) || 0,
-    demeritPointsCurrent: parseInt(r.demerit_points_current) || 0,
-  }));
-
-  const riskMap = new Map();
-  townshipRiskResult.rows.forEach(r => riskMap.set(r.township_id, {
-    employeeCount: parseInt(r.employee_count) || 0, majorCount: parseInt(r.major_count) || 0,
-    highCount: parseInt(r.high_count) || 0, mediumCount: parseInt(r.medium_count) || 0,
-    lowCount: parseInt(r.low_count) || 0, avgScore: parseFloat(r.avg_score) || 0,
-  }));
-
-  const hazardMap = new Map();
-  townshipHazardResult.rows.forEach(r => hazardMap.set(r.township_id, {
-    hazardCount: parseInt(r.hazard_count) || 0, highRiskCount: parseInt(r.high_risk_count) || 0,
-    resolvedCount: parseInt(r.resolved_count) || 0, pendingCount: parseInt(r.pending_count) || 0,
-  }));
-
-  const gridMap = new Map();
-  townshipGridResult.rows.forEach(r => gridMap.set(r.township_id, {
-    totalGridChiefCount: parseInt(r.total_grid_chief_count) || 0, level1GridChiefCount: parseInt(r.level1_grid_chief_count) || 0,
-    level2GridChiefCount: parseInt(r.level2_grid_chief_count) || 0, level3GridChiefCount: parseInt(r.level3_grid_chief_count) || 0,
-    inspectionCount: parseInt(r.inspection_count) || 0,
-  }));
-
-  const townshipRankings = townships.map(township => {
-    const acc = accidentMap.get(township.id) || { accidentCount: 0, majorCount: 0, seriousCount: 0, generalCount: 0, minorCount: 0, weightedIndex: 0 };
-    const vio = violationMap.get(township.id) || { violationCount: 0, seriousCount: 0, generalCount: 0, minorCount: 0 };
-    const dem = demeritMap.get(township.id) || { driverCount: 0, demeritCount5y: 0, demeritPoints5y: 0, demeritCountCurrent: 0, demeritPointsCurrent: 0 };
-    const risk = riskMap.get(township.id) || { employeeCount: 0, majorCount: 0, highCount: 0, mediumCount: 0, lowCount: 0, avgScore: 0 };
-    const haz = hazardMap.get(township.id) || { hazardCount: 0, highRiskCount: 0, resolvedCount: 0, pendingCount: 0 };
-    const grid = gridMap.get(township.id) || { totalGridChiefCount: 0, level1GridChiefCount: 0, level2GridChiefCount: 0, level3GridChiefCount: 0, inspectionCount: 0 };
-
-    const riskLevelScore = Math.max(0, 100 - risk.majorCount * 20 - risk.highCount * 10 - risk.mediumCount * 5);
-    const violationScore = Math.max(0, 100 - vio.violationCount * 2 - vio.seriousCount * 4);
-    const driverRiskScore = dem.driverCount > 0 ? Math.max(0, 100 - (dem.demeritPoints5y / (dem.driverCount * 60)) * 100 * 2) : 100;
-    const accidentScore = Math.max(0, 100 - acc.weightedIndex * 3 - acc.majorCount * 15);
-    const patrolScore = haz.hazardCount > 0 ? Math.max(0, Math.round((haz.resolvedCount / haz.hazardCount) * 100) - haz.pendingCount * 3) : 100;
-    const gridCompliance = calculateDeptGridCompliance(grid);
-    const managementScore = gridCompliance;
-
-    const overallScore = Math.round(
-      riskLevelScore * 0.15 + violationScore * 0.15 + driverRiskScore * 0.15 + accidentScore * 0.20 + patrolScore * 0.15 + managementScore * 0.20
+  let cycle = null;
+  if (cycleId != null && String(cycleId).trim() !== '') {
+    const c = await pool.query(
+      `SELECT id, cycle_name, assessment_year, assessment_month, status
+       FROM hse_assessment_cycle WHERE id = $1 AND is_deleted = false`,
+      [cycleId]
     );
+    if (!c.rows.length) throw new Error(`考核周期不存在: ${cycleId}`);
+    cycle = c.rows[0];
+  } else {
+    const c = await pool.query(
+      `SELECT cy.id, cy.cycle_name, cy.assessment_year, cy.assessment_month, cy.status
+       FROM hse_assessment_cycle cy
+       JOIN hse_assessment_target t ON t.cycle_id = cy.id
+         AND t.position = '乡镇作业中心经理' AND t.is_deleted = false
+       WHERE cy.is_deleted = false
+       ORDER BY cy.assessment_year DESC, cy.assessment_month DESC
+       LIMIT 1`
+    );
+    if (c.rows.length) cycle = c.rows[0];
+  }
 
+  // hse_assessment_cycle.id 为 bigint，pg 返回字符串；统一转 number 保证接口契约 cycleId:number
+  if (cycle) cycle.id = Number(cycle.id);
+
+  if (!cycle) {
     return {
-      townshipId: township.id, townshipName: township.name, unitType: township.unitType,
-      overallRank: 0, overallScore,
-      riskLevelScore, violationScore, driverRiskScore, accidentScore, patrolScore, managementScore, gridCompliance,
-      accidentCount: acc.accidentCount, majorAccidentCount: acc.majorCount,
-      seriousAccidentCount: acc.seriousCount, generalAccidentCount: acc.generalCount,
-      minorAccidentCount: acc.minorCount, accidentWeightedIndex: acc.weightedIndex,
-      violationCount: vio.violationCount, seriousViolationCount: vio.seriousCount,
-      generalViolationCount: vio.generalCount, minorViolationCount: vio.minorCount,
-      driverCount: dem.driverCount, demeritCount5y: dem.demeritCount5y,
-      demeritPoints5y: dem.demeritPoints5y, demeritCountCurrent: dem.demeritCountCurrent,
-      demeritPointsCurrent: dem.demeritPointsCurrent,
-      employeeCount: risk.employeeCount, majorRiskCount: risk.majorCount,
-      highRiskCount: risk.highCount, mediumRiskCount: risk.mediumCount,
-      lowRiskCount: risk.lowCount, avgRiskScore: risk.avgScore,
-      hazardCount: haz.hazardCount, highRiskHazardCount: haz.highRiskCount,
-      resolvedHazardCount: haz.resolvedCount, pendingHazardCount: haz.pendingCount,
-      totalGridChiefCount: grid.totalGridChiefCount, level1GridChiefCount: grid.level1GridChiefCount,
-      level2GridChiefCount: grid.level2GridChiefCount, level3GridChiefCount: grid.level3GridChiefCount,
-      inspectionCount: grid.inspectionCount,
+      __t: 'json',
+      body: {
+        code: 0,
+        data: {
+          currentYear,
+          cycleId: null,
+          cycleName: null,
+          cycleStatus: null,
+          rankings: [],
+          noDataTownships: [],
+        },
+      },
     };
-  }).sort((a, b) => b.overallScore - a.overallScore);
+  }
 
-  townshipRankings.forEach((item, index) => { item.overallRank = index + 1; });
+  const targetRows = await pool.query(
+    `SELECT id, employee_id, employee_code, employee_name, position, township, department,
+            score_auto, score_total, grade, status, review_status
+     FROM hse_assessment_target
+     WHERE cycle_id = $1 AND position = '乡镇作业中心经理' AND is_deleted = false
+     ORDER BY township`,
+    [cycle.id]
+  );
 
-  const body = {
-    code: 0,
-    data: {
-      currentYear,
-      rankings: townshipRankings,
-      scoringWeights: { riskLevel: 15, violation: 15, driverRisk: 15, accident: 20, patrol: 15, management: 20 },
+  // 管理员考核对象（无经理乡镇兜底用，如津城街道作业中心）
+  const adminRows = await pool.query(
+    `SELECT id, employee_name, township, position, score_total, grade
+     FROM hse_assessment_target
+     WHERE cycle_id = $1 AND position = '管理员' AND is_deleted = false
+     ORDER BY township, employee_name`,
+    [cycle.id]
+  );
+
+  const townships = await pool.query(
+    `SELECT id, org_name, org_type FROM hse_org_unit
+     WHERE is_deleted = false AND org_type = 'town_center' ORDER BY org_name`
+  );
+
+  const targetByTown = new Map();
+  for (const r of targetRows.rows) {
+    if (!targetByTown.has(r.township)) targetByTown.set(r.township, []);
+    targetByTown.get(r.township).push(r);
+  }
+
+  const adminByTown = new Map();
+  for (const r of adminRows.rows) {
+    if (!adminByTown.has(r.township)) adminByTown.set(r.township, []);
+    adminByTown.get(r.township).push(r);
+  }
+
+  const rankings = [];
+  const noDataTownships = [];
+  for (const t of townships.rows) {
+    const rows = targetByTown.get(t.org_name) || [];
+    if (rows.length === 0) {
+      const admins = adminByTown.get(t.org_name) || [];
+      const adminScores = admins
+        .map((a) => (a.score_total != null ? parseFloat(a.score_total) : null))
+        .filter((s) => s != null);
+      if (adminScores.length > 0) {
+        const adminAvgScore = Math.round((adminScores.reduce((a, b) => a + b, 0) / adminScores.length) * 10) / 10;
+        const adminMaxScore = Math.max(...adminScores);
+        rankings.push({
+          targetId: null, townshipId: t.id, townshipName: t.org_name, unitType: t.org_type,
+          managerName: null, managerEmployeeId: null, managerCode: null, position: null,
+          scoreAuto: null, scoreTotal: adminAvgScore, grade: null, status: null, reviewStatus: null,
+          scoreSource: 'admin_aggregate',
+          adminCount: adminScores.length, adminAvgScore, adminMaxScore,
+          overallRank: 0, hasData: true,
+        });
+        continue;
+      }
+      noDataTownships.push(t.org_name);
+      rankings.push({
+        targetId: null, townshipId: t.id, townshipName: t.org_name, unitType: t.org_type,
+        managerName: null, managerEmployeeId: null, managerCode: null, position: null,
+        scoreAuto: null, scoreTotal: null, grade: null, status: null, reviewStatus: null,
+        scoreSource: null, adminCount: null, adminAvgScore: null, adminMaxScore: null,
+        overallRank: null, hasData: false,
+      });
+      continue;
     }
+    for (const r of rows) {
+      rankings.push({
+        targetId: r.id, townshipId: t.id, townshipName: t.org_name, unitType: t.org_type,
+        managerName: r.employee_name, managerEmployeeId: r.employee_id, managerCode: r.employee_code, position: r.position,
+        scoreAuto: r.score_auto != null ? parseFloat(r.score_auto) : null,
+        scoreTotal: r.score_total != null ? parseFloat(r.score_total) : null,
+        grade: r.grade, status: r.status, reviewStatus: r.review_status,
+        scoreSource: 'manager', adminCount: null, adminAvgScore: null, adminMaxScore: null,
+        overallRank: 0, hasData: true,
+      });
+    }
+  }
+
+  const withScore = rankings
+    .filter((item) => item.hasData && item.scoreTotal != null)
+    .sort((a, b) => b.scoreTotal - a.scoreTotal || String(a.townshipName).localeCompare(String(b.townshipName)));
+  const withoutScore = rankings.filter((item) => !item.hasData || item.scoreTotal == null);
+  withScore.forEach((item, index) => { item.overallRank = index + 1; });
+
+  return {
+    __t: 'json',
+    body: {
+      code: 0,
+      data: {
+        currentYear,
+        cycleId: cycle.id,
+        cycleName: cycle.cycle_name,
+        cycleStatus: cycle.status,
+        rankings: [...withScore, ...withoutScore],
+        noDataTownships,
+      },
+    },
   };
-  return { __t: 'json', body };
 }
 
 // ========== GET /goals — 目标达成分析 ==========
@@ -733,23 +700,9 @@ async function goals() {
   const yearStart = `${currentYear}-01-01`;
   const yearEnd = `${currentYear}-12-31`;
 
-  const contractVersionsResult = await pool.query(
-    `SELECT id, name, version, effective_date, expiry_date, status, created_at, updated_at
-     FROM objective_contract_version
-     WHERE is_deleted = false AND EXTRACT(YEAR FROM effective_date) = $1
-     ORDER BY version DESC`,
-    [currentYear]
-  ).catch(() => ({ rows: [] }));
-
-  const currentVersion = contractVersionsResult.rows[0];
-  const versionId = currentVersion ? currentVersion.id : null;
-
-  const contractGoalsResult = await pool.query(
-    `SELECT id, contract_version_id, indicator_name, category, target_value, target_unit, description
-     FROM objective_contract_indicator
-     WHERE is_deleted = false AND contract_version_id = $1`,
-    [versionId]
-  ).catch(() => ({ rows: [] }));
+  // 目标口径已冻结（2026-09-28）：库中无年度目标值来源
+  // （objective_contract_version/indicator 表不存在，safety_goals 为空），
+  // 目标清单与目标值统一取 DEFAULT_GOAL_ITEMS（文件头），不再查询不存在的表。
 
   const accidentGoal = await pool.query(
     `SELECT COUNT(*) as actual,
@@ -792,6 +745,15 @@ async function goals() {
     [yearStart, yearEnd, fiveYearsAgoStr]
   );
 
+  // 全员驾驶员口径（岗位：驾驶员/司机），与 overview demeritRate 分母保持一致
+  const driverPopResult = await pool.query(
+    `SELECT COUNT(DISTINCT e.id)::int as total_driver_count
+     FROM employee e
+     JOIN employee_assignment ea ON ea.employee_id = e.id AND ea.is_current = true AND ea.is_deleted = false
+     JOIN position p ON p.id = ea.position_id AND p.is_deleted = false
+     WHERE e.is_deleted = false AND (p.name ILIKE '%驾驶员%' OR p.name ILIKE '%司机%')`
+  );
+
   const accidentRow = accidentGoal.rows[0];
   const accidentActual = parseInt(accidentRow.actual) || 0;
   const accidentMajorActual = parseInt(accidentRow.major_actual) || 0;
@@ -804,167 +766,86 @@ async function goals() {
   const riskTotal = parseInt(riskGoal.rows[0].total) || 0;
   const riskHigh = parseInt(riskGoal.rows[0].high_risk) || 0;
   const demeritRow = demeritGoal.rows[0];
-  const demeritDriverCount = parseInt(demeritRow.driver_count) || 0;
+  const totalDriverCount = parseInt(driverPopResult.rows[0].total_driver_count) || 0;
   const demeritFiveYearPoints = parseInt(demeritRow.total_points) || 0;
 
-  const dbGoals = contractGoalsResult.rows;
-  const goals = [];
+  // 冻结口径：目标清单与目标值统一取 DEFAULT_GOAL_ITEMS（文件头），
+  // 实际值与完成度按当年数据实时计算；状态分级与阈值保持既有兜底逻辑不变。
+  const goals = DEFAULT_GOAL_ITEMS.map((item, index) => {
+    let actualValue = 0, gap = 0, completionRate = 0;
+    let status = 'in_progress';
 
-  if (dbGoals.length > 0) {
-    dbGoals.forEach((goal, index) => {
-      let actualValue = 0, gap = 0, completionRate = 0;
-      let status = 'in_progress';
+    switch (item.name) {
+      case '事故起数控制':
+        actualValue = accidentActual;
+        gap = accidentActual - item.targetValue;
+        completionRate = accidentActual === 0 ? 100 : Math.max(0, 100 - accidentActual * 20);
+        status = accidentActual === 0 ? 'completed' : accidentActual <= 3 ? 'in_progress' : 'warning';
+        break;
+      case '重大事故控制':
+        actualValue = accidentMajorActual;
+        gap = 0;
+        completionRate = 100;
+        status = accidentMajorActual === 0 ? 'completed' : 'warning';
+        break;
+      case '事故指数控制':
+        actualValue = accidentWeightedIndex;
+        gap = accidentWeightedIndex - item.targetValue;
+        completionRate = accidentWeightedIndex === 0 ? 100 : Math.max(0, 100 - accidentWeightedIndex);
+        status = accidentWeightedIndex === 0 ? 'completed' : accidentWeightedIndex <= 5 ? 'in_progress' : 'warning';
+        break;
+      case '三违次数控制':
+        actualValue = violationActual;
+        gap = violationActual - item.targetValue;
+        completionRate = violationActual <= item.targetValue ? 100 : Math.max(0, 100 - ((violationActual - item.targetValue) / item.targetValue) * 50);
+        status = violationActual <= item.targetValue ? 'completed' : violationActual <= 80 ? 'in_progress' : 'warning';
+        break;
+      case '培训完成率':
+        actualValue = trainingTotal > 0 ? Math.round((trainingQualified / trainingTotal) * 100) : 0;
+        gap = actualValue - item.targetValue;
+        completionRate = actualValue;
+        status = trainingTotal > 0 && (trainingQualified / trainingTotal) >= item.targetValue / 100 ? 'completed' : 'in_progress';
+        break;
+      case '隐患整改率':
+        actualValue = hazardTotal > 0 ? Math.round((hazardCompleted / hazardTotal) * 100) : 0;
+        gap = actualValue - item.targetValue;
+        completionRate = actualValue;
+        status = hazardTotal > 0 && (hazardCompleted / hazardTotal) >= item.targetValue / 100 ? 'completed' : 'in_progress';
+        break;
+      case '高风险人员控制':
+        actualValue = riskTotal > 0 ? Math.round((riskHigh / riskTotal) * 100) : 0;
+        gap = actualValue - item.targetValue;
+        completionRate = riskTotal > 0 && (riskHigh / riskTotal) <= item.targetValue / 100 ? 100 : Math.max(0, 100 - ((riskHigh / riskTotal) - item.targetValue / 100) * 1000);
+        status = riskTotal > 0 && (riskHigh / riskTotal) <= item.targetValue / 100 ? 'completed' : 'in_progress';
+        break;
+      case '驾驶风险控制':
+        actualValue = totalDriverCount > 0 ? Math.round((demeritFiveYearPoints / (totalDriverCount * 60)) * 100) : 0;
+        gap = actualValue - item.targetValue;
+        completionRate = Math.max(0, 100 - actualValue);
+        status = actualValue <= item.targetValue ? 'completed' : 'in_progress';
+        break;
+      default:
+        actualValue = 0;
+        gap = 0 - item.targetValue;
+        completionRate = 0;
+        status = 'in_progress';
+    }
 
-      switch (goal.indicator_name) {
-        case '事故起数控制':
-          actualValue = accidentActual;
-          gap = accidentActual - goal.target_value;
-          completionRate = accidentActual === 0 ? 100 : Math.max(0, 100 - accidentActual * 20);
-          status = accidentActual === 0 ? 'completed' : accidentActual <= 3 ? 'in_progress' : 'warning';
-          break;
-        case '重大事故控制':
-          actualValue = accidentMajorActual;
-          gap = accidentMajorActual - goal.target_value;
-          completionRate = accidentMajorActual === 0 ? 100 : 0;
-          status = accidentMajorActual === 0 ? 'completed' : 'warning';
-          break;
-        case '事故指数控制':
-          actualValue = accidentWeightedIndex;
-          gap = accidentWeightedIndex - goal.target_value;
-          completionRate = accidentWeightedIndex === 0 ? 100 : Math.max(0, 100 - accidentWeightedIndex);
-          status = accidentWeightedIndex === 0 ? 'completed' : accidentWeightedIndex <= 5 ? 'in_progress' : 'warning';
-          break;
-        case '三违次数控制':
-          actualValue = violationActual;
-          gap = violationActual - goal.target_value;
-          completionRate = violationActual <= goal.target_value ? 100 : Math.max(0, 100 - ((violationActual - goal.target_value) / goal.target_value) * 50);
-          status = violationActual <= goal.target_value ? 'completed' : violationActual <= goal.target_value * 1.5 ? 'in_progress' : 'warning';
-          break;
-        case '培训完成率':
-          actualValue = trainingTotal > 0 ? Math.round((trainingQualified / trainingTotal) * 100) : 0;
-          gap = actualValue - goal.target_value;
-          completionRate = actualValue;
-          status = actualValue >= goal.target_value ? 'completed' : actualValue >= goal.target_value * 0.8 ? 'in_progress' : 'warning';
-          break;
-        case '隐患整改率':
-          actualValue = hazardTotal > 0 ? Math.round((hazardCompleted / hazardTotal) * 100) : 0;
-          gap = actualValue - goal.target_value;
-          completionRate = actualValue;
-          status = actualValue >= goal.target_value ? 'completed' : actualValue >= goal.target_value * 0.9 ? 'in_progress' : 'warning';
-          break;
-        case '高风险人员控制':
-          actualValue = riskTotal > 0 ? Math.round((riskHigh / riskTotal) * 100) : 0;
-          gap = actualValue - goal.target_value;
-          completionRate = actualValue <= goal.target_value ? 100 : Math.max(0, 100 - ((actualValue - goal.target_value) / goal.target_value) * 100);
-          status = actualValue <= goal.target_value ? 'completed' : actualValue <= goal.target_value * 2 ? 'in_progress' : 'warning';
-          break;
-        case '驾驶风险控制':
-          actualValue = demeritDriverCount > 0 ? Math.round((demeritFiveYearPoints / (demeritDriverCount * 60)) * 100) : 0;
-          gap = actualValue - goal.target_value;
-          completionRate = Math.max(0, 100 - actualValue);
-          status = actualValue <= goal.target_value ? 'completed' : actualValue <= goal.target_value * 2 ? 'in_progress' : 'warning';
-          break;
-        default:
-          actualValue = 0;
-          completionRate = 0;
-      }
-
-      goals.push({
-        id: goal.id || index + 1, name: goal.indicator_name, category: goal.category,
-        targetValue: goal.target_value, targetUnit: goal.target_unit,
-        actualValue, actualUnit: goal.target_unit, gap, completionRate, status,
-        description: goal.description,
-      });
-    });
-  } else {
-    goals.push(
-      { id: 1, name: '事故起数控制', category: '安全目标',
-        targetValue: 0, targetUnit: '起', actualValue: accidentActual, actualUnit: '起',
-        gap: accidentActual - 0, completionRate: accidentActual === 0 ? 100 : Math.max(0, 100 - accidentActual * 20),
-        status: accidentActual === 0 ? 'completed' : accidentActual <= 3 ? 'in_progress' : 'warning',
-        description: '年度事故起数控制目标',
-      },
-      { id: 2, name: '重大事故控制', category: '安全目标',
-        targetValue: 0, targetUnit: '起', actualValue: accidentMajorActual, actualUnit: '起',
-        gap: 0, completionRate: 100,
-        status: accidentMajorActual === 0 ? 'completed' : 'warning',
-        description: '年度重大及以上事故为零目标',
-      },
-      { id: 3, name: '事故指数控制', category: '安全目标',
-        targetValue: 0, targetUnit: '分', actualValue: accidentWeightedIndex, actualUnit: '分',
-        gap: accidentWeightedIndex, completionRate: accidentWeightedIndex === 0 ? 100 : Math.max(0, 100 - accidentWeightedIndex),
-        status: accidentWeightedIndex === 0 ? 'completed' : accidentWeightedIndex <= 5 ? 'in_progress' : 'warning',
-        description: '年度事故等级加权指数控制目标',
-      },
-      { id: 4, name: '三违次数控制', category: '安全目标',
-        targetValue: 50, targetUnit: '次', actualValue: violationActual, actualUnit: '次',
-        gap: violationActual - 50, completionRate: violationActual <= 50 ? 100 : Math.max(0, 100 - ((violationActual - 50) / 50) * 50),
-        status: violationActual <= 50 ? 'completed' : violationActual <= 80 ? 'in_progress' : 'warning',
-        description: '年度三违次数控制目标',
-      },
-      { id: 5, name: '培训完成率', category: '培训目标',
-        targetValue: 95, targetUnit: '%',
-        actualValue: trainingTotal > 0 ? Math.round((trainingQualified / trainingTotal) * 100) : 0, actualUnit: '%',
-        gap: (trainingTotal > 0 ? Math.round((trainingQualified / trainingTotal) * 100) : 0) - 95,
-        completionRate: trainingTotal > 0 ? Math.round((trainingQualified / trainingTotal) * 100) : 0,
-        status: trainingTotal > 0 && (trainingQualified / trainingTotal) >= 0.95 ? 'completed' : 'in_progress',
-        description: '年度培训合格完成率目标',
-      },
-      { id: 6, name: '隐患整改率', category: '隐患目标',
-        targetValue: 98, targetUnit: '%',
-        actualValue: hazardTotal > 0 ? Math.round((hazardCompleted / hazardTotal) * 100) : 0, actualUnit: '%',
-        gap: (hazardTotal > 0 ? Math.round((hazardCompleted / hazardTotal) * 100) : 0) - 98,
-        completionRate: hazardTotal > 0 ? Math.round((hazardCompleted / hazardTotal) * 100) : 0,
-        status: hazardTotal > 0 && (hazardCompleted / hazardTotal) >= 0.98 ? 'completed' : 'in_progress',
-        description: '年度隐患整改闭环率目标',
-      },
-      { id: 7, name: '高风险人员控制', category: '风险目标',
-        targetValue: 5, targetUnit: '%',
-        actualValue: riskTotal > 0 ? Math.round((riskHigh / riskTotal) * 100) : 0, actualUnit: '%',
-        gap: (riskTotal > 0 ? Math.round((riskHigh / riskTotal) * 100) : 0) - 5,
-        completionRate: riskTotal > 0 && (riskHigh / riskTotal) <= 0.05 ? 100 : Math.max(0, 100 - ((riskHigh / riskTotal) - 0.05) * 1000),
-        status: riskTotal > 0 && (riskHigh / riskTotal) <= 0.05 ? 'completed' : 'in_progress',
-        description: '高风险人员占比控制目标',
-      },
-      { id: 8, name: '驾驶风险控制', category: '驾驶目标',
-        targetValue: 10, targetUnit: '%',
-        actualValue: demeritDriverCount > 0 ? Math.round((demeritFiveYearPoints / (demeritDriverCount * 60)) * 100) : 0, actualUnit: '%',
-        gap: (demeritDriverCount > 0 ? Math.round((demeritFiveYearPoints / (demeritDriverCount * 60)) * 100) : 0) - 10,
-        completionRate: Math.max(0, 100 - (demeritDriverCount > 0 ? Math.round((demeritFiveYearPoints / (demeritDriverCount * 60)) * 100) : 0)),
-        status: (demeritDriverCount > 0 ? Math.round((demeritFiveYearPoints / (demeritDriverCount * 60)) * 100) : 0) <= 10 ? 'completed' : 'in_progress',
-        description: '驾驶风险控制目标（近5年扣分规则，扣分率=近5年累计扣分/(驾驶员人数×60)×100%）',
-      },
-      { id: 9, name: '网格长巡查合规率', category: '管理目标',
-        targetValue: 90, targetUnit: '%',
-        actualValue: 0, actualUnit: '%',
-        gap: -90, completionRate: 0,
-        status: 'in_progress',
-        description: '网格长巡查频次合规率目标',
-      },
-    );
-  }
+    return {
+      id: index + 1, name: item.name, category: item.category,
+      targetValue: item.targetValue, targetUnit: item.targetUnit,
+      actualValue, actualUnit: item.targetUnit, gap, completionRate, status,
+      description: item.description,
+    };
+  });
 
   const body = {
     code: 0,
     data: {
       currentYear,
       goals,
-      contractVersion: currentVersion ? {
-        id: currentVersion.id,
-        name: currentVersion.name,
-        version: currentVersion.version,
-        effectiveDate: currentVersion.effective_date,
-        expiryDate: currentVersion.expiry_date,
-        status: currentVersion.status,
-      } : null,
-      allVersions: contractVersionsResult.rows.map(v => ({
-        id: v.id,
-        name: v.name,
-        version: v.version,
-        effectiveDate: v.effective_date,
-        expiryDate: v.expiry_date,
-        status: v.status,
-      })),
+      contractVersion: null,
+      allVersions: [],
     }
   };
   return { __t: 'json', body };

@@ -27,7 +27,11 @@ export default defineEventHandler(async (event) => {
 
   if (!findUser) {
     clearRefreshTokenCookie(event);
-    return forbiddenResponse(event, 'Username or password is incorrect.');
+    setResponseStatus(event, 401);
+    return useResponseError(
+      'UnauthorizedException',
+      'Username or password is incorrect.',
+    );
   }
 
   const accessToken = generateAccessToken(findUser);

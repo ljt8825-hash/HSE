@@ -26,6 +26,16 @@
           <span>目标责任书管理</span>
           <div class="header-buttons">
             <Space :size="8">
+              <Radio.Group v-model:value="viewMode" size="small" button-style="solid">
+                <RadioButton value="list">
+                  <IconifyIcon icon="lucide:list" class="mr-1 align-[-2px]" />
+                  列表
+                </RadioButton>
+                <RadioButton value="card">
+                  <IconifyIcon icon="lucide:layout-grid" class="mr-1 align-[-2px]" />
+                  卡片
+                </RadioButton>
+              </Radio.Group>
               <Button @click="handleDownloadTemplate">
                 <template #icon><IconifyIcon icon="lucide:download" /></template>
                 下载模板
@@ -90,6 +100,7 @@
       </Form>
 
       <Table
+        v-if="viewMode === 'list'"
         :columns="columns"
         :data-source="table.dataList"
         :loading="table.loading"
@@ -141,6 +152,85 @@
           </template>
         </template>
       </Table>
+
+      <!-- 卡片视图 -->
+      <div v-if="viewMode === 'card'" class="resp-card-grid">
+        <Empty v-if="!table.loading && !table.dataList.length" description="暂无数据" class="py-12" />
+        <template v-else>
+          <Spin :spinning="table.loading">
+            <Row :gutter="[16, 16]" class="card-grid">
+              <Col
+                v-for="record in table.dataList"
+                :key="record.employeeId"
+                :xs="24"
+                :sm="12"
+                :lg="8"
+                :xl="6"
+              >
+                <Card
+                  :bordered="false"
+                  class="resp-card"
+                  :class="{
+                    'resp-card-signed': record.signStatus === 'signed',
+                    'resp-card-unsigned': record.signStatus !== 'signed',
+                  }"
+                >
+                  <div class="resp-card-head">
+                    <div class="resp-card-name">
+                      <span class="resp-card-emp">{{ record.name }}</span>
+                      <span class="resp-card-code">{{ record.employeeCode }}</span>
+                    </div>
+                    <Tag v-if="record.noSourceRecord && record.signStatus !== 'signed'" color="default">
+                      未签订·无源
+                    </Tag>
+                    <Tag v-else :color="record.signStatus === 'signed' ? 'green' : 'red'">
+                      {{ SIGN_TEXT[record.signStatus] || record.signStatus }}
+                    </Tag>
+                  </div>
+                  <Descriptions :column="1" size="small" class="resp-card-desc">
+                    <DescriptionsItem label="所属部门">{{ record.department || '-' }}</DescriptionsItem>
+                    <DescriptionsItem label="班组">{{ record.team || '-' }}</DescriptionsItem>
+                    <DescriptionsItem label="职位">{{ record.position || '-' }}</DescriptionsItem>
+                    <DescriptionsItem label="直接上级">{{ record.supervisor || '-' }}</DescriptionsItem>
+                    <DescriptionsItem label="入职日期">
+                      {{ record.hireDate ? dayjs(record.hireDate).format('YYYY-MM-DD') : '-' }}
+                    </DescriptionsItem>
+                  </Descriptions>
+                  <div class="resp-card-actions">
+                    <Space :size="8">
+                      <Button type="link" size="small" @click="handleView(record)">查看</Button>
+                      <Button type="link" size="small" @click="handleEditMenu(record)">
+                        {{ record.contractId ? '编辑' : '录入' }}
+                      </Button>
+                      <Popconfirm
+                        v-if="record.contractId"
+                        title="确认删除该责任书？"
+                        ok-text="删除"
+                        cancel-text="取消"
+                        ok-type="danger"
+                        @confirm="handleDelete(record)"
+                      >
+                        <Button type="link" size="small" danger>删除</Button>
+                      </Popconfirm>
+                    </Space>
+                  </div>
+                </Card>
+              </Col>
+            </Row>
+          </Spin>
+          <div class="mt-4 flex justify-end">
+            <Pagination
+              :current="table.pagination?.current || 1"
+              :page-size="table.pagination?.pageSize || 10"
+              :total="table.pagination?.total || 0"
+              show-size-changer
+              show-quick-jumper
+              :show-total="(t: number) => `共 ${t} 条记录`"
+              @change="(page: number, pageSize: number) => table.handleTableChange({ current: page, pageSize })"
+            />
+          </div>
+        </template>
+      </div>
     </Card>
 
     <!-- 新增/录入责任书 -->
@@ -324,6 +414,10 @@ import {
   Alert,
   Descriptions,
   DescriptionsItem,
+  Radio,
+  RadioButton,
+  Empty,
+  Pagination,
   message,
 } from 'ant-design-vue';
 import dayjs from 'dayjs';
@@ -347,6 +441,10 @@ import {
 } from '#/api/hse/goals';
 
 const statsLoading = ref(false);
+
+/** 列表/卡片双视图切换 */
+const viewMode = ref<'list' | 'card'>('list');
+const SIGN_TEXT: Record<string, string> = { signed: '已签订', unsigned: '未签订' };
 
 const search = useSearchForm({
   defaults: {
@@ -758,6 +856,70 @@ onMounted(async () => {
     margin-bottom: 16px;
     padding-bottom: 16px;
     border-bottom: 1px solid hsl(var(--border));
+  }
+
+  .resp-card-grid {
+    min-height: 120px;
+  }
+
+  .resp-card {
+    border: 1px solid hsl(var(--border));
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    transition: box-shadow 0.2s ease, transform 0.2s ease;
+    height: 100%;
+
+    &:hover {
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+      transform: translateY(-2px);
+    }
+  }
+
+  .resp-card-signed {
+    border-left: 3px solid #52c41a;
+  }
+
+  .resp-card-unsigned {
+    border-left: 3px solid #ff4d4f;
+  }
+
+  .resp-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
+  .resp-card-name {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .resp-card-emp {
+    font-size: 16px;
+    font-weight: 600;
+    color: hsl(var(--foreground));
+  }
+
+  .resp-card-code {
+    font-size: 12px;
+    color: hsl(var(--muted-foreground));
+  }
+
+  .resp-card-desc {
+    margin-bottom: 8px;
+  }
+
+  .resp-card-actions {
+    padding-top: 8px;
+    border-top: 1px dashed hsl(var(--border));
+
+    .ant-btn-link {
+      padding: 0;
+      height: 24px;
+    }
   }
 
   .operation-cell {

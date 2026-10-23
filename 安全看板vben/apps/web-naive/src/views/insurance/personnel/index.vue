@@ -3,13 +3,12 @@
  * 人员保险管理（web-naive）
  * 统一使用 HSE 公共组件栈：HsePageLayout + HseSearchPanel + HseActionBar + HseDataGrid + HseImportDialog + HseStatusTag
  */
-import { h, reactive, ref, onMounted } from 'vue';
+import { reactive, ref, onMounted } from 'vue';
 import type { UploadFileInfo } from 'naive-ui';
 
 import {
   NButton,
   NCard,
-  NDataTable,
   NDivider,
   NEmpty,
   NAlert,
@@ -430,23 +429,15 @@ const POLICY_TYPES = [
   { label: '工伤保险', value: '工伤保险' },
 ];
 
-const policyColumns = ref([
-  { title: '保险类型', key: 'type', align: 'center' as const, render: (row: InsurancePolicyDocument) =>
-    h(NTag, { type: row.type === '工伤保险' ? 'success' : 'info' }, { default: () => row.type }) },
-  { title: '保单号', key: 'policyNo', align: 'center' as const, minWidth: 200, ellipsis: { tooltip: true } },
-  { title: '保险年份', key: 'year', align: 'center' as const },
-  { title: '操作', key: 'action', align: 'center' as const,
-    render: (row: InsurancePolicyDocument) =>
-      h(NSpace, { justify: 'center', wrap: false, size: 4 }, {
-        default: () => [
-          h(NButton, { size: 'small', type: 'primary', quaternary: true, onClick: () => openPolicyFile(row.id) }, { default: () => '查看' }),
-          h(NButton, { size: 'small', type: 'primary', quaternary: true, onClick: () => openPolicyEdit(row) }, { default: () => '编辑' }),
-          h(NPopconfirm, { onPositiveClick: () => handlePolicyDelete(row) }, {
-            trigger: () => h(NButton, { size: 'small', type: 'error', quaternary: true }, { default: () => '删除' }),
-            default: () => '确定删除该保单吗？',
-          }),
-        ],
-      }),
+const policyColumns = ref<VxeTableGridColumns>([
+  { title: '保险类型', field: 'type', align: 'center', slots: { default: 'policyType' } },
+  { title: '保单号', field: 'policyNo', align: 'center', minWidth: 200, showOverflow: 'tooltip' },
+  { title: '保险年份', field: 'year', align: 'center' },
+  {
+    title: '操作',
+    field: 'action',
+    align: 'center',
+    slots: { default: 'policyAction' },
   },
 ]);
 
@@ -582,25 +573,17 @@ const attachmentList = ref<InsuranceApi.InsuranceAttachment[]>([]);
 const attachmentLoading = ref(false);
 const attachmentBizId = ref<number | null>(null);
 
-const attachmentColumns = ref([
-  { title: '文件名', key: 'originalName', minWidth: 180, ellipsis: { tooltip: true } },
-  { title: '版本', key: 'version', width: 80, align: 'center' as const,
-    render: (row: InsuranceApi.InsuranceAttachment) =>
-      row.isLatest ? h(NTag, { type: 'info' }, { default: () => `v${row.version}` }) : h('span', { class: 'text-muted' }, `v${row.version}`) },
-  { title: '大小', key: 'fileSize', width: 100, align: 'center' as const,
-    render: (row: InsuranceApi.InsuranceAttachment) => formatFileSize(row.fileSize) },
-  { title: '上传人', key: 'uploadedBy', width: 90, align: 'center' as const },
-  { title: '操作', key: 'action', width: 130, align: 'center' as const,
-    render: (row: InsuranceApi.InsuranceAttachment) =>
-      h(NSpace, { justify: 'center' }, {
-        default: () => [
-          h(NButton, { size: 'small', type: 'primary', quaternary: true, onClick: () => handleAttachmentDownload(row) }, { default: () => '下载' }),
-          h(NPopconfirm, { onPositiveClick: () => handleAttachmentDelete(row) }, {
-            trigger: () => h(NButton, { size: 'small', type: 'error', quaternary: true }, { default: () => '删除' }),
-            default: () => '确定删除该附件吗？',
-          }),
-        ],
-      }),
+const attachmentColumns = ref<VxeTableGridColumns>([
+  { title: '文件名', field: 'originalName', minWidth: 180, showOverflow: 'tooltip' },
+  { title: '版本', field: 'version', width: 80, align: 'center', slots: { default: 'version' } },
+  { title: '大小', field: 'fileSize', width: 100, align: 'center', slots: { default: 'size' } },
+  { title: '上传人', field: 'uploadedBy', width: 90, align: 'center' },
+  {
+    title: '操作',
+    field: 'action',
+    width: 130,
+    align: 'center',
+    slots: { default: 'attachmentAction' },
   },
 ]);
 
@@ -982,14 +965,33 @@ onMounted(() => {
           </NUpload>
           <span class="text-muted" style="font-size: 12px">支持 PDF/Word/Excel/图片，单文件不超过 10MB</span>
         </div>
-        <NDataTable
+        <HseDataGrid
           :columns="attachmentColumns"
           :data="attachmentList"
           :loading="attachmentLoading"
-          :pagination="false"
-          size="small"
-          :row-key="(row) => row.id"
-        />
+          :pager="false"
+          row-key="id"
+          :height="300"
+        >
+          <template #version="{ row }">
+            <span v-if="row.isLatest">v{{ row.version }}</span>
+            <span v-else class="text-muted">v{{ row.version }}</span>
+          </template>
+          <template #size="{ row }">{{ formatFileSize(row.fileSize) }}</template>
+          <template #attachmentAction="{ row }">
+            <NSpace justify="center">
+              <NButton size="small" type="primary" quaternary @click="handleAttachmentDownload(row)">
+                下载
+              </NButton>
+              <NPopconfirm @positive-click="handleAttachmentDelete(row)">
+                <template #trigger>
+                  <NButton size="small" type="error" quaternary>删除</NButton>
+                </template>
+                确定删除该附件吗？
+              </NPopconfirm>
+            </NSpace>
+          </template>
+        </HseDataGrid>
       </template>
       <template #footer>
         <NSpace justify="end">
@@ -1037,14 +1039,34 @@ onMounted(() => {
       <NAlert type="info" :show-icon="false" class="mb-3">
         保单主文档管理：上传 PDF 保单文件后，可在线预览、编辑保单号/年份，或删除。
       </NAlert>
-      <NDataTable
+      <HseDataGrid
         :columns="policyColumns"
         :data="policyList"
         :loading="policyLoading"
-        :pagination="false"
-        size="small"
-          :row-key="(row) => row.id"
-        />
+        :pager="false"
+        row-key="id"
+        :height="360"
+      >
+        <template #policyType="{ row }">
+          <NTag :type="row.type === '工伤保险' ? 'success' : 'info'">{{ row.type }}</NTag>
+        </template>
+        <template #policyAction="{ row }">
+          <NSpace justify="center" :wrap="false" :size="4">
+            <NButton size="small" type="primary" quaternary @click="openPolicyFile(row.id)">
+              查看
+            </NButton>
+            <NButton size="small" type="primary" quaternary @click="openPolicyEdit(row)">
+              编辑
+            </NButton>
+            <NPopconfirm @positive-click="handlePolicyDelete(row)">
+              <template #trigger>
+                <NButton size="small" type="error" quaternary>删除</NButton>
+              </template>
+              确定删除该保单吗？
+            </NPopconfirm>
+          </NSpace>
+        </template>
+      </HseDataGrid>
       <NEmpty v-if="!policyLoading && policyList.length === 0" description="暂无保单，请先导入保单" class="py-6" />
     </NModal>
 

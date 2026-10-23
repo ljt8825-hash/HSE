@@ -1,0 +1,846 @@
+{
+  "cycle": 24,
+  "executedAt": "2026-10-10T02:57:56.026Z",
+  "audit": [
+    {
+      "targetId": "414",
+      "employee_name": "张万恒",
+      "position": "乡镇作业中心经理",
+      "before": {
+        "score_auto": "95.00",
+        "score_total": "95.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "90.00",
+        "score_total": "90.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "415",
+      "employee_name": "马金华",
+      "position": "管理员",
+      "before": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "93.00",
+        "score_total": "93.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "416",
+      "employee_name": "高奎英",
+      "position": "管理员",
+      "before": {
+        "score_auto": "95.00",
+        "score_total": "95.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "95.00",
+        "score_total": "95.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "417",
+      "employee_name": "王铁民",
+      "position": "管理员",
+      "before": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "418",
+      "employee_name": "高新民",
+      "position": "管理员",
+      "before": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "98.00",
+        "score_total": "98.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "419",
+      "employee_name": "王臣祥",
+      "position": "乡镇作业中心经理",
+      "before": {
+        "score_auto": "94.00",
+        "score_total": "94.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "85.00",
+        "score_total": "85.00",
+        "grade": "B"
+      }
+    },
+    {
+      "targetId": "420",
+      "employee_name": "李春福",
+      "position": "管理员",
+      "before": {
+        "score_auto": "98.00",
+        "score_total": "98.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "98.00",
+        "score_total": "98.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "421",
+      "employee_name": "鲍明新",
+      "position": "管理员",
+      "before": {
+        "score_auto": "98.00",
+        "score_total": "98.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "98.00",
+        "score_total": "98.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "422",
+      "employee_name": "崔仁勇",
+      "position": "管理员",
+      "before": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "423",
+      "employee_name": "王建军",
+      "position": "管理员",
+      "before": {
+        "score_auto": "96.00",
+        "score_total": "96.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "96.00",
+        "score_total": "96.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "424",
+      "employee_name": "盖广勇",
+      "position": "管理员",
+      "before": {
+        "score_auto": "100.00",
+        "score_total": "100.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "100.00",
+        "score_total": "100.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "425",
+      "employee_name": "王秀泉",
+      "position": "管理员",
+      "before": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "84.00",
+        "score_total": "84.00",
+        "grade": "B"
+      }
+    },
+    {
+      "targetId": "426",
+      "employee_name": "张卫新",
+      "position": "乡镇作业中心经理",
+      "before": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "97.00",
+        "score_total": "97.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "427",
+      "employee_name": "张福梅",
+      "position": "管理员",
+      "before": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "97.00",
+        "score_total": "97.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "428",
+      "employee_name": "占先洪",
+      "position": "管理员",
+      "before": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "429",
+      "employee_name": "王学宁",
+      "position": "管理员",
+      "before": {
+        "score_auto": "95.00",
+        "score_total": "95.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "95.00",
+        "score_total": "95.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "430",
+      "employee_name": "赵书坤",
+      "position": "管理员",
+      "before": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "431",
+      "employee_name": "张玉祯",
+      "position": "管理员",
+      "before": {
+        "score_auto": "100.00",
+        "score_total": "100.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "100.00",
+        "score_total": "100.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "432",
+      "employee_name": "陈洪胜",
+      "position": "管理员",
+      "before": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "97.00",
+        "score_total": "97.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "433",
+      "employee_name": "邢志伟",
+      "position": "管理员",
+      "before": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "434",
+      "employee_name": "崔志勇",
+      "position": "管理员",
+      "before": {
+        "score_auto": "98.00",
+        "score_total": "98.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "98.00",
+        "score_total": "98.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "435",
+      "employee_name": "张华平",
+      "position": "乡镇作业中心经理",
+      "before": {
+        "score_auto": "98.00",
+        "score_total": "98.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "85.00",
+        "score_total": "85.00",
+        "grade": "B"
+      }
+    },
+    {
+      "targetId": "436",
+      "employee_name": "张东霞",
+      "position": "管理员",
+      "before": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "437",
+      "employee_name": "苑恩林",
+      "position": "管理员",
+      "before": {
+        "score_auto": "97.00",
+        "score_total": "97.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "97.00",
+        "score_total": "97.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "438",
+      "employee_name": "邢金花",
+      "position": "管理员",
+      "before": {
+        "score_auto": "98.00",
+        "score_total": "98.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "98.00",
+        "score_total": "98.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "439",
+      "employee_name": "张忠华",
+      "position": "管理员",
+      "before": {
+        "score_auto": "98.00",
+        "score_total": "98.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "80.00",
+        "score_total": "80.00",
+        "grade": "B"
+      }
+    },
+    {
+      "targetId": "440",
+      "employee_name": "靳洪刚",
+      "position": "乡镇作业中心经理",
+      "before": {
+        "score_auto": "97.00",
+        "score_total": "97.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "85.00",
+        "score_total": "85.00",
+        "grade": "B"
+      }
+    },
+    {
+      "targetId": "441",
+      "employee_name": "于会枝",
+      "position": "管理员",
+      "before": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "92.00",
+        "score_total": "92.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "442",
+      "employee_name": "张金国",
+      "position": "管理员",
+      "before": {
+        "score_auto": "98.00",
+        "score_total": "98.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "76.00",
+        "score_total": "76.00",
+        "grade": "C"
+      }
+    },
+    {
+      "targetId": "443",
+      "employee_name": "张观忠",
+      "position": "管理员",
+      "before": {
+        "score_auto": "98.00",
+        "score_total": "98.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "98.00",
+        "score_total": "98.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "444",
+      "employee_name": "谢俊章",
+      "position": "乡镇作业中心经理",
+      "before": {
+        "score_auto": "98.00",
+        "score_total": "98.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "87.00",
+        "score_total": "87.00",
+        "grade": "B"
+      }
+    },
+    {
+      "targetId": "445",
+      "employee_name": "傅学武",
+      "position": "管理员",
+      "before": {
+        "score_auto": "93.00",
+        "score_total": "93.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "93.00",
+        "score_total": "93.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "446",
+      "employee_name": "谢洪胜",
+      "position": "管理员",
+      "before": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "447",
+      "employee_name": "李新国",
+      "position": "管理员",
+      "before": {
+        "score_auto": "98.00",
+        "score_total": "98.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "98.00",
+        "score_total": "98.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "448",
+      "employee_name": "张和祥",
+      "position": "乡镇作业中心经理",
+      "before": {
+        "score_auto": "97.00",
+        "score_total": "97.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "96.00",
+        "score_total": "96.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "449",
+      "employee_name": "商荣军",
+      "position": "管理员",
+      "before": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "98.00",
+        "score_total": "98.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "450",
+      "employee_name": "王春海",
+      "position": "管理员",
+      "before": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "451",
+      "employee_name": "商洪池",
+      "position": "管理员",
+      "before": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "452",
+      "employee_name": "李振恒",
+      "position": "乡镇作业中心经理",
+      "before": {
+        "score_auto": "95.00",
+        "score_total": "95.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "85.00",
+        "score_total": "85.00",
+        "grade": "B"
+      }
+    },
+    {
+      "targetId": "453",
+      "employee_name": "陈庆祥",
+      "position": "管理员",
+      "before": {
+        "score_auto": "98.00",
+        "score_total": "98.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "76.00",
+        "score_total": "76.00",
+        "grade": "C"
+      }
+    },
+    {
+      "targetId": "454",
+      "employee_name": "李忠胜",
+      "position": "管理员",
+      "before": {
+        "score_auto": "98.00",
+        "score_total": "98.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "97.00",
+        "score_total": "97.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "455",
+      "employee_name": "张相岗",
+      "position": "管理员",
+      "before": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "97.00",
+        "score_total": "97.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "456",
+      "employee_name": "孙建栋",
+      "position": "乡镇作业中心经理",
+      "before": {
+        "score_auto": "95.00",
+        "score_total": "95.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "90.00",
+        "score_total": "90.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "457",
+      "employee_name": "张运志",
+      "position": "管理员",
+      "before": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "458",
+      "employee_name": "车书新",
+      "position": "管理员",
+      "before": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "459",
+      "employee_name": "李怀英",
+      "position": "管理员",
+      "before": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "460",
+      "employee_name": "杨清华",
+      "position": "乡镇作业中心经理",
+      "before": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "85.00",
+        "score_total": "85.00",
+        "grade": "B"
+      }
+    },
+    {
+      "targetId": "461",
+      "employee_name": "回伦山",
+      "position": "管理员",
+      "before": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "83.00",
+        "score_total": "83.00",
+        "grade": "B"
+      }
+    },
+    {
+      "targetId": "462",
+      "employee_name": "林中鹏",
+      "position": "管理员",
+      "before": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "463",
+      "employee_name": "翟中坡",
+      "position": "管理员",
+      "before": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "464",
+      "employee_name": "康景英",
+      "position": "管理员",
+      "before": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "465",
+      "employee_name": "郭志强",
+      "position": "乡镇作业中心经理",
+      "before": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "98.00",
+        "score_total": "98.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "466",
+      "employee_name": "苏书红",
+      "position": "管理员",
+      "before": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "467",
+      "employee_name": "郭秀梅",
+      "position": "管理员",
+      "before": {
+        "score_auto": "98.00",
+        "score_total": "98.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "98.00",
+        "score_total": "98.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "468",
+      "employee_name": "李先菊",
+      "position": "管理员",
+      "before": {
+        "score_auto": "94.00",
+        "score_total": "94.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "93.00",
+        "score_total": "93.00",
+        "grade": "A"
+      }
+    },
+    {
+      "targetId": "469",
+      "employee_name": "刘秀梅",
+      "position": "管理员",
+      "before": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      },
+      "after": {
+        "score_auto": "99.00",
+        "score_total": "99.00",
+        "grade": "A"
+      }
+    }
+  ]
+}

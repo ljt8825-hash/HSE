@@ -47,11 +47,17 @@ async function bootstrap(namespace: string) {
     spinning: 'spinning',
   });
 
-  // 国际化 i18n 配置
-  await setupI18n(app);
+  // 与 app 无关的初始化可并行，缩短启动序列
+  await Promise.all([
+    initComponentAdapter(),
+    initSetupVbenForm(),
+  ]);
 
-  // 配置 pinia-tore
-  await initStores(app, { namespace });
+  // 依赖 app 的初始化也可并行
+  await Promise.all([
+    setupI18n(app),
+    initStores(app, { namespace }),
+  ]);
 
   // 开发阶段自动登录：跳过登录页（含滑块验证），仅 dev 生效，生产不受影响
   if (import.meta.env.DEV) {
@@ -61,16 +67,20 @@ async function bootstrap(namespace: string) {
   // 安装权限指令
   registerAccessDirective(app);
 
-  // 初始化 tippy
-  const { initTippy } = await import('@vben/common-ui/es/tippy');
-  initTippy(app);
+  // 两个动态插件并行初始化
+  await Promise.all([
+    (async () => {
+      const { initTippy } = await import('@vben/common-ui/es/tippy');
+      initTippy(app);
+    })(),
+    (async () => {
+      const { MotionPlugin } = await import('@vben/plugins/motion');
+      app.use(MotionPlugin);
+    })(),
+  ]);
 
   // 配置路由及路由守卫
   app.use(router);
-
-  // 配置Motion插件
-  const { MotionPlugin } = await import('@vben/plugins/motion');
-  app.use(MotionPlugin);
 
   // 动态更新标题
   watchEffect(() => {

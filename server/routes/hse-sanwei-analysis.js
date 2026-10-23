@@ -15,6 +15,8 @@ const { authMiddleware, requireRole } = require('../middleware/auth');
 const { runImport, normMonth2, resolveManager } = require('../services/sanweiAnalysisImport');
 const { getAdminRoster, listAdminMonths } = require('../services/sanweiAdminRoster');
 const { deriveMonth } = require('../services/sanweiLedgerDerive');
+// 公司查处扣分·共享口径（与「三违管理考核」共用，保证两处数值与乡镇归属完全一致）
+const { buildCompanyDeduct, cleanVName } = require('../services/companyViolationDeduct');
 
 const router = express.Router();
 
@@ -77,34 +79,36 @@ router.get('/list', authMiddleware, requireRole('admin', 'safety_manager'), asyn
       params
     );
 
-    // 「检查数量」= 该乡镇该月在「三违台账」(grid_inspection_records) 中的检查记录条数。
-    // 归因口径与 /continue 聚合一致：area_team 与台账乡镇名双向互含最长匹配
-    // （兼容「保店镇一班」→「保店镇」），「公司管理」等非乡镇分组自动落空为 0。
-    const checkCountMap = new Map(); // key: `${month}|${town}` -> 检查数量
+    // 「检查数量」= 该乡镇作业中心经理该月在「三违台账」(grid_inspection_records) 中
+    // 由其「本人」作为检查人(personnel_name) 的记录条数 —— 只统计经理自己的，不含整个乡镇。
+    // 归因：personnel_name 精确命中该行经理姓名；inspector_employee_id 基本未回填，无法用员工ID关联。
+    // 网格长等其他检查人的记录不进入任何经理的「检查数量」。
+    const checkCountMap = new Map(); // key: `${month}|${managerName}` -> 检查数量
     try {
-      const townList = [...new Set((q.rows || []).map((r) => r.town).filter(Boolean))];
+      const mgrSet = new Set(
+        (q.rows || [])
+          .map((r) => r.manager_name)
+          .filter(Boolean)
+          .map((n) => String(n).trim())
+          .filter(Boolean)
+      );
       const cc = await pool.query(
-        `SELECT to_char(inspection_date, 'YYYY-MM') AS m, area_team, COUNT(*)::int AS c
+        `SELECT to_char(inspection_date, 'YYYY-MM') AS m, TRIM(personnel_name) AS pn, COUNT(*)::int AS c
            FROM grid_inspection_records
-          WHERE inspection_date IS NOT NULL AND area_team IS NOT NULL AND TRIM(area_team) <> ''
+          WHERE inspection_date IS NOT NULL AND personnel_name IS NOT NULL AND TRIM(personnel_name) <> ''
           GROUP BY 1, 2`
       );
       for (const row of cc.rows || []) {
-        const at = String(row.area_team).trim();
-        let best = null;
-        let maxLen = 0;
-        for (const t of townList) {
-          if ((at.includes(t) || t.includes(at)) && t.length > maxLen) {
-            best = t;
-            maxLen = t.length;
-          }
-        }
-        if (best) {
-          const key = `${row.m}|${best}`;
-          checkCountMap.set(key, (checkCountMap.get(key) || 0) + (Number(row.c) || 0));
-        }
+        const pn = String(row.pn).trim();
+        if (!pn || !mgrSet.has(pn)) continue; // 仅本人为检查人的记录才算数
+        const key = `${row.m}|${pn}`;
+        checkCountMap.set(key, (checkCountMap.get(key) || 0) + (Number(row.c) || 0));
       }
     } catch { /* grid_inspection_records 缺失时检查数量统一为 0 */ }
+
+    // 「公司查处扣分」= 公司管理（总网格长+一级网格长）查处该乡镇班组三违所扣分数（共享口径，见 services/companyViolationDeduct.js）
+    const candidateTowns = [...new Set((q.rows || []).map((r) => r.town).filter(Boolean))];
+    const { map: companyDeductMap, unresolved: companyUnresolved } = await buildCompanyDeduct({ candidateTowns });
 
     // 「所属部门」= 从花名册拉取乡镇作业中心经理的部门名（如「柴胡店镇乡镇作业中心」）。
     // 归因优先级：employee_id 精确命中花名册 org_name；未回填员工时用 town 与 org_name 双向互含最长匹配兜底。
@@ -134,6 +138,7 @@ router.get('/list', authMiddleware, requireRole('admin', 'safety_manager'), asyn
 
     const all = (q.rows || []).map((r) => {
       const town = r.town;
+      const managerName = String(r.manager_name || '').trim();
       // 部门：employee_id 精确匹配 → 花名册 org_name；否则 town 双向匹配花名册「xx作业中心」
       let department = town || '';
       const byEmp = r.employee_id != null ? deptByEmployee.get(String(r.employee_id)) : undefined;
@@ -164,7 +169,14 @@ router.get('/list', authMiddleware, requireRole('admin', 'safety_manager'), asyn
         // 三违考核分数：该月三违考核未实施时强制 0（保留成绩数据，标注「不考核」）
         notAssessed: !!r.not_assessed,
         score: r.not_assessed ? 0 : (Number(r.score) || 0),
-        inspectionCount: checkCountMap.get(`${r.month}|${r.town}`) || 0, // 检查数量（三违台账记录条数）
+        inspectionCount: (managerName ? checkCountMap.get(`${r.month}|${managerName}`) : 0) || 0, // 检查数量（该经理解检查记录条数）
+        // 公司查处扣分：公司管理(总+一级网格长)当月查处该乡镇三违扣分合计（头盔起×5 + 其他起×1）+ 逐条明细
+        companyDeduct: {
+          score: companyDeductMap.get(`${r.month}|${town}`)?.score || 0,
+          helmetCount: companyDeductMap.get(`${r.month}|${town}`)?.helmetCount || 0,
+          otherCount: companyDeductMap.get(`${r.month}|${town}`)?.otherCount || 0,
+          details: companyDeductMap.get(`${r.month}|${town}`)?.details || [],
+        },
         created_at: r.created_at,
       };
     });
@@ -193,11 +205,111 @@ router.get('/list', authMiddleware, requireRole('admin', 'safety_manager'), asyn
       data: {
         list, total, page, page_size: pageSize, summary, fullMarks,
         fullMarksNote: '该月无「三违照片信息统计台账」，按满分（0扣分）处理',
+        companyUnresolved, // 公司查处·待人工审核的违章人名（冻结归并/花名册/人工映射均未命中）
       },
     });
   } catch (e) {
     console.error('[sanwei-analysis/list]', e.message);
     res.status(500).json({ success: false, code: 500, message: e.message });
+  }
+});
+
+// ===================== 公司查处·违章人人工审核（落库持久化） =====================
+
+// GET /api/hse/sanwei-analysis/company-deduct/employee-search?keyword=
+// 花名册姓名模糊搜索（人工审核选人用）；按姓名匹配，最多 20 条，附所属部门
+router.get('/company-deduct/employee-search', authMiddleware, requireRole('admin', 'safety_manager'), async (req, res) => {
+  try {
+    const kw = String(req.query.keyword || '').trim();
+    if (!kw) return res.json({ success: true, code: 0, data: { list: [] } });
+    const r = await pool.query(
+      `SELECT id, name, roster_department FROM employee
+        WHERE is_deleted = FALSE AND name ILIKE '%' || $1 || '%'
+        ORDER BY name LIMIT 20`,
+      [kw]
+    );
+    return res.json({
+      success: true, code: 0,
+      data: {
+        list: (r.rows || []).map((x) => ({
+          employeeId: x.id,
+          name: x.name,
+          department: String(x.roster_department || '').trim(),
+        })),
+      },
+    });
+  } catch (e) {
+    console.error('[sanwei-analysis/employee-search]', e.message);
+    return res.status(500).json({ success: false, code: 500, message: e.message });
+  }
+});
+
+/**
+ * POST /api/hse/sanwei-analysis/company-deduct/resolution —— 人工审核保存/更新
+ * body: { source_name, employee_id?, remark? }
+ *   - employee_id 提供 → 该违章人名归到该花名册员工（计入该员工乡镇的公司查处扣分）
+ *   - employee_id 省略/null → 判定「确无此人/不计入」（抑制，不再进待审核）
+ * 审核人取自 req.user（留痕）；source_name 唯一，重复提交即更新。
+ */
+router.post('/company-deduct/resolution', authMiddleware, requireRole('admin', 'safety_manager'), async (req, res) => {
+  try {
+    const source_name = cleanVName(req.body?.source_name);
+    if (!source_name) return res.status(400).json({ success: false, code: 400, message: 'source_name 必填' });
+    let employee_id = req.body?.employee_id == null ? null : parseInt(req.body.employee_id, 10);
+    if (employee_id != null && !Number.isFinite(employee_id)) {
+      return res.status(400).json({ success: false, code: 400, message: 'employee_id 需为数字' });
+    }
+    const remark = String(req.body?.remark || '').trim();
+    const resolvedBy = String(req.user?.account || req.user?.username || req.user?.id || '').trim();
+
+    // 若给了 employee_id，校验员工存在并冗余取名
+    let employee_name = '';
+    if (employee_id != null) {
+      const em = await pool.query(
+        `SELECT id, name FROM employee WHERE id = $1 AND is_deleted = FALSE`, [employee_id]
+      );
+      if (!em.rows.length) {
+        return res.status(400).json({ success: false, code: 400, message: '该员工不存在或被删除' });
+      }
+      employee_name = em.rows[0].name;
+    }
+
+    await pool.query(
+      `INSERT INTO hse_violator_name_resolution (source_name, employee_id, employee_name, remark, resolved_by, updated_at)
+       VALUES ($1, $2, $3, $4, $5, now())
+       ON CONFLICT (source_name) DO UPDATE
+          SET employee_id = EXCLUDED.employee_id,
+              employee_name = EXCLUDED.employee_name,
+              remark = EXCLUDED.remark,
+              resolved_by = EXCLUDED.resolved_by,
+              updated_at = now()`,
+      [source_name, employee_id, employee_name || null, remark || null, resolvedBy]
+    );
+    return res.json({
+      success: true, code: 0,
+      data: { sourceName: source_name, resolvedToEmployee: employee_id != null, suppressed: employee_id == null },
+    });
+  } catch (e) {
+    console.error('[sanwei-analysis/resolution]', e.message);
+    return res.status(500).json({ success: false, code: 500, message: e.message });
+  }
+});
+
+/**
+ * DELETE /api/hse/sanwei-analysis/company-deduct/resolution?source_name=
+ * 撤销一笔人工审核（使违章人名回到「待审核」状态）
+ */
+router.delete('/company-deduct/resolution', authMiddleware, requireRole('admin', 'safety_manager'), async (req, res) => {
+  try {
+    const source_name = cleanVName(req.query.source_name);
+    if (!source_name) return res.status(400).json({ success: false, code: 400, message: 'source_name 必填' });
+    const r = await pool.query(
+      `DELETE FROM hse_violator_name_resolution WHERE source_name = $1 RETURNING id`, [source_name]
+    );
+    return res.json({ success: true, code: 0, data: { deleted: r.rowCount > 0 } });
+  } catch (e) {
+    console.error('[sanwei-analysis/resolution DELETE]', e.message);
+    return res.status(500).json({ success: false, code: 500, message: e.message });
   }
 });
 

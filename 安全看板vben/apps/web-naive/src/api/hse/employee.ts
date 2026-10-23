@@ -15,7 +15,7 @@ export namespace EmployeeApi {
   export type PersonCategory = '适龄人员' | '超龄人员';
 
   /** 组织状态（生命周期，后端返回英文枚举） */
-  export type OrgStatus = 'active' | 'left' | 'pending' | 'retired' | 'rehire';
+  export type OrgStatus = 'active' | 'left' | 'pending' | 'retired' | 'rehire' | 'reinstated';
 
   /** 员工列表项（snake_case，对齐后端返回） */
   export interface EmployeeItem {
@@ -105,14 +105,15 @@ export namespace EmployeeApi {
 
   /** 员工统计（统计卡展示） */
   export interface EmployeeStats {
+    /** 档案总数（全部未删除员工） */
     total: number;
-    /** 员工总数（与员工列表默认口径一致：有当前主岗任职） */
+    /** 员工总数（花名册覆盖口径：正式员工+辞职+死亡） */
     listTotal?: number;
-    /** 在职人员 */
+    /** 在职人员（花名册：正式员工） */
     activeCount?: number;
-    /** 离职人员（person_type=已离职 或 有离职任职，并集） */
+    /** 离职人员（花名册：辞职/死亡） */
     leftCount?: number;
-    /** 超龄人员（按生日实时判定） */
+    /** 超龄人员（在职内按生日实时判定） */
     overAgeCount?: number;
     byPersonType: Array<{ person_type: string; count: number }>;
     byPersonCategory: Array<{ person_category: string; count: number }>;

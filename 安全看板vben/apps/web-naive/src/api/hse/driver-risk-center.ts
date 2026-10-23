@@ -155,3 +155,27 @@ export function getDemeritStatistics() {
 export function getAccidentStatistics() {
   return requestClient.get<DriverRiskCenterApi.AccidentStatisticsData>(`${BASE}/accident/statistics`);
 }
+
+// ---- 风险快照重建（仅 admin，POST /hse/risk-snapshot-admin/rebuild）----
+export interface RiskSnapshotRebuildLevelDist {
+  low: number;
+  medium: number;
+  high: number;
+  critical: number;
+}
+export interface RiskSnapshotRebuildResult {
+  mode: 'dry' | 'write';
+  snapshotDate: string;
+  ratedEmployees: number;
+  levelDistribution: RiskSnapshotRebuildLevelDist;
+  identity?: { hard: number; unique: number; dup: number; missing: number };
+  wroteRows?: number;
+  rollbackHint?: string;
+  [key: string]: unknown;
+}
+export function rebuildRiskSnapshot(action: 'dry' | 'write') {
+  return requestClient.post<RiskSnapshotRebuildResult>(
+    '/hse/risk-snapshot-admin/rebuild',
+    { action },
+  );
+}

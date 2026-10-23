@@ -3,19 +3,21 @@ import { ref } from 'vue';
 
 import { Page } from '@vben/common-ui';
 
-import { NDataTable } from 'naive-ui';
+import type { VxeTableGridColumns } from '@vben/plugins/vxe-table';
 
-const columns = ref([
+import { HseDataGrid } from '#/components/hse';
+
+const columns = ref<VxeTableGridColumns>([
   {
-    key: 'no',
+    field: 'no',
     title: 'No',
   },
   {
-    key: 'title',
+    field: 'title',
     title: 'Title',
   },
   {
-    key: 'length',
+    field: 'length',
     title: 'Length',
   },
 ]);
@@ -29,9 +31,9 @@ const data = [
 <template>
   <Page
     description="表单页用于向用户收集或验证信息，基础表单常见于数据项较少的表单场景。"
-    title="NDataTable"
+    title="HseDataGrid"
   >
-    <NDataTable :columns="columns" :data="data" />
+    <HseDataGrid :columns="columns" :data="data" :pager="false" row-key="no" />
   </Page>
 </template>
 

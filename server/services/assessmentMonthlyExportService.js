@@ -110,7 +110,54 @@ async function getTargetDeductions(cycleId, targetId) {
       createdAt: d.created_at || null,
       sourceTable: d.source_table || null,
       summary: (d.source_detail && d.source_detail.summary) || null,
+      // HSE教育培训「培训台账」通路：透出源指标（缺少人数/资料不完整份数），供前端拆分明细
+      sourceDetail: d.source_detail || null,
     }));
+
+    // 管理员「HSE教育培训」列：单元格展示值取自培训台账缺训计分（missing+incomplete，
+    // 见 listTargets 的 category_deductions 覆盖），而非扣分明细记录。
+    // 当该目标本周期无「HSE教育培训」扣分明细记录时，按台账 breakdown 补齐全明细，
+    // 使点击列值能展示「缺少人员 / 资料不完整」，与列值口径一致（避免明细空）。
+    const hasTrainingSource = list.some((x) =>
+      String(x.category || '').replace(/^现场管理-/, '') === 'HSE教育培训'
+        && x.sourceDetail && (x.sourceDetail.missing != null || x.sourceDetail.incomplete != null),
+    );
+    const row0 = r.rows[0];
+    if (!hasTrainingSource && row0 && row0.position === '管理员') {
+      const cycQ = await pool.query(
+        `SELECT assessment_year, assessment_month FROM ${TABLES.cycle} WHERE id = $1 AND is_deleted = FALSE`,
+        [cycleId]
+      );
+      if (cycQ.rows.length) {
+        const month = `${cycQ.rows[0].assessment_year}-${String(cycQ.rows[0].assessment_month).padStart(2, '0')}`;
+        const lg = await pool.query(
+          `SELECT COALESCE(missing_count, 0) AS missing_count, COALESCE(incomplete_count, 0) AS incomplete_count
+           FROM hse_training_ledger_monthly WHERE month = $1 AND trainer_id = $2 LIMIT 1`,
+          [month, row0.employee_id]
+        );
+        const miss = Number(lg.rows[0]?.missing_count ?? 0);
+        const inc = Number(lg.rows[0]?.incomplete_count ?? 0);
+        if (miss + inc > 0) {
+          list.push({
+            id: null,
+            deductionItem: '教育培训、安全会议无记录',
+            deductionType: 'auto',
+            deductionSource: 'auto',
+            category: 'HSE教育培训',
+            ruleName: '教育培训、安全会议无记录',
+            suggestedScore: miss + inc,
+            confirmedScore: null,
+            reviewStatus: 'pending',
+            violationDate: null,
+            createdAt: null,
+            sourceTable: 'hse_training_ledger_monthly',
+            summary: `培训台账：缺少${miss}人/资料不完整${inc}份`,
+            // 前端 HSE教育培训 拆分逻辑据此展示「缺少人员 / 资料不完整」
+            sourceDetail: { missing: miss, incomplete: inc, unit: 1 },
+          });
+        }
+      }
+    }
     const gridLevelRow = await pool.query(
       `SELECT ga.grid_level FROM grid_areas ga
        WHERE ga.personnel_id = $1 AND COALESCE(ga.is_deleted, FALSE) = FALSE

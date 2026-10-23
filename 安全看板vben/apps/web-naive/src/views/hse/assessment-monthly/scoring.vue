@@ -11,6 +11,7 @@
  * 导出：xlsx，含 序号/姓名/岗位/乡镇/网格级别/扣分类型/扣分规则名称。
  */
 import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import type { VxeTableGridColumns } from '#/adapter/vxe-table';
 
 import {
@@ -20,8 +21,10 @@ import {
   NModal,
   NSelect,
   NSpace,
+  NSpin,
   NTabPane,
   NTabs,
+  NTag,
   NTooltip,
 } from 'naive-ui';
 import { IconifyIcon } from '@vben/icons';
@@ -189,7 +192,9 @@ const dimColumns = computed<VxeTableGridColumns>(() => {
       title: `${name}（${formatScore(max)}分）`,
       field: name,
       key: name,
-      width: 150,
+      // 用 minWidth 而非固定 width，配合 auto-width 按容器宽度平铺右侧不留白；
+      // 列数多仍超过容器时按需横向滚动（VXE auto 模式自动伸缩）
+      minWidth: 150,
       align: 'center' as const,
       className: 'is-dim-col',
       slots: { header: 'dimHeader', default: 'dimCell' },
@@ -213,7 +218,22 @@ function dimHeaderLimit(col: any): string {
 /** 维度列帮助文案（表头问号悬浮展示） */
 function dimHelpText(col: any): string {
   const name = dimHeaderName(col) || '该类别';
-  return `维度列「${name}」：展示该对象在本考核周期该类别下的有效扣分合计（各考核指标扣分明细之和，不超过该类别扣分上限）。可经「增加列 / 删除列」增删本列。`;
+  const base = normalizeCategoryName(name);
+  if (base === '三违管理') {
+    return `「三违管理」列分数获取路径：现场管理 → 三违管理 → 三违管理考核（同一考核周期、同一岗位 Tab）的「考核分数」列 = 该页当前展示列之和（网格长巡查考核 + 三违巡查 + 三违信息填报 + 各人工列 + 公司查处扣分）。仅覆盖本列展示值，不影响本页「总分」。`;
+  }
+  const PATH_TEXT: Record<string, string> = {
+    安全文化建设: '目标职责 → 安全文化建设（同一考核月份、同一岗位 Tab）的「生效扣分」列',
+    HSE教育培训: '培训 → 培训记录（同一考核月份）的「培训考核分数」列',
+    驾驶员管理: '现场管理 → 驾驶员管理 → 月度考核（同一考核月份）的「考核分数」列',
+    转运站管理: '现场管理 → 转运站管理（同一检查月份）的「考核分数」列',
+    消防管理: '现场管理 → 消防设施管理（按同一考核月份筛选）的异常设施扣分',
+  };
+  const path = PATH_TEXT[base];
+  const source = path
+    ? `分数获取路径：${path}。`
+    : '';
+  return `维度列「${name}」：展示该对象在本考核周期该类别下的有效扣分合计（按扣分规则明细汇总，不超过该类别扣分上限）。${source}可经「增加列 / 删除列」增删本列。`;
 }
 
 // 固定列表头帮助文案（悬浮问号图标展示）
@@ -260,13 +280,14 @@ function handleRemoveColumn(key: string | number) {
 }
 
 const columns = computed<VxeTableGridColumns>(() => [
-  { title: '姓名', field: 'employeeName', width: 100, align: 'center', fixed: 'left', titleHelp: { content: colHelp.employeeName } },
-  { title: '岗位', field: 'position', width: 120, align: 'center', titleHelp: { content: colHelp.position } },
-  { title: '乡镇', field: 'township', width: 120, align: 'center', titleHelp: { content: colHelp.township } },
+  { type: 'seq', title: '序号', width: 70, align: 'center' as const },
+  { title: '姓名', field: 'employeeName', minWidth: 100, align: 'center', fixed: 'left', titleHelp: { content: colHelp.employeeName } },
+  { title: '岗位', field: 'position', minWidth: 120, align: 'center', titleHelp: { content: colHelp.position } },
+  { title: '乡镇', field: 'township', minWidth: 120, align: 'center', titleHelp: { content: colHelp.township } },
   {
     title: '网格级别',
     field: 'gridLevel',
-    width: 120,
+    minWidth: 120,
     align: 'center',
     showOverflow: 'tooltip',
     slots: { default: 'gridLevelCell' },
@@ -276,14 +297,14 @@ const columns = computed<VxeTableGridColumns>(() => [
   {
     title: '总分',
     field: 'scoreTotal',
-    width: 100,
+    minWidth: 100,
     align: 'center',
     sortable: true,
     slots: { default: 'scoreTotalCell' },
     titleHelp: { content: colHelp.scoreTotal },
   },
   {
-    type: 'operation',
+    key: 'operation',
     title: '操作',
     width: 90,
     align: 'center',
@@ -292,8 +313,8 @@ const columns = computed<VxeTableGridColumns>(() => [
   },
 ]);
 
-const scrollX = computed(() => 650 + selectedCategories.value.length * 150 + 40);
-
+// 列表平铺：列均用 minWidth，配合 HseDataGrid auto-width 按容器宽度填充、右侧不留白；
+// 列多超过容器时由 VXE auto 模式按需横向滚动。
 function formatDim(row: AssessmentMonthlyApi.AssessmentTarget, key?: string) {
   if (key == null) return '0';
   const v = row.categoryDeductions?.[key];
@@ -468,10 +489,29 @@ async function loadProgress() {
 }
 
 // 「三违管理」（现场管理-三违管理）维度：展示三级菜单「三违管理考核」同为当前岗位 tab 的「考核分数」列。
-// 该考核分数 = 三违管理考核页当前展示列（自动列扣分 + 人工列 cells）之和，不同周期/岗位各自独立存储。
+// 该考核分数 = 三违管理考核页当前展示列（自动列扣分 + 人工列 cells + 公司查处扣分）之和，不同周期/岗位各自独立存储。
 // 此处仅覆盖展示列值，不影响本页「总分」（score_total 由后端评分引擎得出）。
+// 三违管理维度明细：与「三违管理考核」页当前展示列逐一对应（自动列 + 各人工列 + 公司查处扣分）
+interface ViolationBreakdownItem {
+  label: string;
+  value: number;
+}
+interface ViolationBreakdown {
+  total: number;
+  items: ViolationBreakdownItem[];
+}
+
 // 匹配键：两侧行均源于 hse_assessment_target，按 employeeId 一一对应。
-const violationScoreMap = ref<Map<number, number>>(new Map());
+// 口径与 views/hse/violation-assessment/index.vue 的 totalScore 保持一致（2026-09-26 冻结：考核分数含公司查处扣分）。
+const violationScoreMap = ref<Map<number, ViolationBreakdown>>(new Map());
+
+// 自动列 key → ListRow 扣分字段（与三违管理考核页 autoValue 同源）
+const SANWEI_AUTO_FIELDS: Record<string, string> = {
+  grid: 'gridDeduct',
+  violation: 'violationDeduct',
+  unrectified: 'unrectifiedDeduct',
+  driver: 'driverDeduct',
+};
 
 async function loadViolationScores() {
   violationScoreMap.value = new Map();
@@ -485,20 +525,23 @@ async function loadViolationScores() {
     const shown = (cfgRes?.columns ?? []).filter((c) => c.shown);
     const cells = cfgRes?.cells ?? {};
     const rows = listRes?.rows ?? [];
-    const byEmp = new Map<number, number>();
+    const byEmp = new Map<number, ViolationBreakdown>();
     for (const row of rows) {
-      let s = 0;
+      const items: ViolationBreakdownItem[] = [];
       for (const c of shown) {
+        const label = String(c.title ?? '');
         if (c.kind === 'auto') {
-          const k = c.key;
-          s += k === 'grid' ? (row.gridDeduct ?? 0) : k === 'violation' ? (row.violationDeduct ?? 0)
-            : k === 'unrectified' ? (row.unrectifiedDeduct ?? 0)
-            : k === 'driver' ? (row.driverDeduct ?? 0) : 0;
+          const field = SANWEI_AUTO_FIELDS[c.key as string];
+          const v = field ? Number((row as any)[field] ?? 0) : 0;
+          items.push({ label, value: v });
         } else {
-          s += (cells[String(row.employeeId)]?.[c.key] ?? 0) || 0;
+          items.push({ label, value: (cells[String(row.employeeId)]?.[c.key] ?? 0) || 0 });
         }
       }
-      byEmp.set(row.employeeId, Math.round(s * 100) / 100);
+      // 公司查处扣分为三违管理考核固定列（不入列池增删），与源页「考核分数」同口径计入
+      items.push({ label: '公司查处扣分', value: row.companyDeduct?.score ?? 0 });
+      const total = Math.round(items.reduce((s, it) => s + it.value, 0) * 100) / 100;
+      byEmp.set(row.employeeId, { total, items });
     }
     violationScoreMap.value = byEmp;
   } catch {
@@ -506,21 +549,222 @@ async function loadViolationScores() {
   }
 }
 
+/** 取某对象的三违管理维度明细（无则 undefined，回退后端 categoryDeductions 展示） */
+function violationBreakdownOf(row: AssessmentMonthlyApi.AssessmentTarget): ViolationBreakdown | undefined {
+  return violationScoreMap.value.get(row.employeeId);
+}
+
 /** 判断某个维度列是否为「三违管理」（兼容「现场管理-三违管理」等带前缀命名） */
 function isSanweiCategory(name?: string | null): boolean {
-  const base = String(name ?? '')
-    .trim()
-    .replace(/^现场管理-/, '');
-  return base === '三违管理';
+  return normalizeCategoryName(name) === '三违管理';
 }
 
 // 维度单元格取值：「三违管理」列改用「三违管理考核」同岗位 tab 的考核分数；其余走 categoryDeductions
 function dimValue(row: AssessmentMonthlyApi.AssessmentTarget, key?: string | null): string {
   if (key && isSanweiCategory(key)) {
-    const v = violationScoreMap.value.get(row.employeeId);
+    const v = violationScoreMap.value.get(row.employeeId)?.total;
     if (v != null && Number.isFinite(v)) return String(Number(v));
   }
   return formatDim(row, key ?? undefined);
+}
+
+const router = useRouter();
+
+/** 选中考核周期 → 所属月份（YYYY-MM，供下钻目标页自动定位） */
+function selectedCycleMonth(): string {
+  const cyc = cycleList.value.find((c) => String(c.id) === String(selectedCycleId.value));
+  if (!cyc) return '';
+  const y = cyc.assessmentYear;
+  const m = cyc.assessmentMonth;
+  if (!y || !m) return '';
+  return `${y}-${String(m).padStart(2, '0')}`;
+}
+
+/** 类别名规范化：去掉「现场管理-」前缀后比较（消防/三违等） */
+function normalizeCategoryName(name?: string | null): string {
+  return String(name ?? '')
+    .trim()
+    .replace(/^现场管理-/, '');
+}
+
+/**
+ * 维度列 → 下钻目标路由（点击明细项跳转，并携带当月/岗位参数自动定位）。
+ * 三违列走既有 /site/violation/assessment（violCycle+violPos+violTarget，见 drillToViolationAssessment）；
+ * 其余维度列挂 month=YYYY-MM；对以「人」为行的目标页（安全文化建设/培训台账/驾驶员月度考核）
+ * 额外携带被点击对象的匹配参数，目标页高亮到该人所在行；转运站/消防台账以站点/设施为行、
+ * 无人员主键，仅自动筛选到对应月份（不强高亮）。
+ */
+const CATEGORY_DRILLS: Record<
+  string,
+  {
+    path: string;
+    query: (ctx: {
+      month: string;
+      role: 'manager' | 'admin';
+      row?: AssessmentMonthlyApi.AssessmentTarget | null;
+    }) => Record<string, string>;
+  }
+> = {
+  安全文化建设: {
+    path: '/objectives/safety-culture',
+    query: ({ month, role, row }) => {
+      const q: Record<string, string> = { month, level: role === 'admin' ? '管理员' : '乡镇主管' };
+      if (row && row.employeeId != null) q.emp = String(row.employeeId);
+      return q;
+    },
+  },
+  HSE教育培训: {
+    path: '/training/records',
+    query: ({ month, row }) => {
+      const q: Record<string, string> = { month };
+      if (row && row.employeeId != null) q.emp = String(row.employeeId);
+      return q;
+    },
+  },
+  驾驶员管理: {
+    path: '/site/driver/monthly',
+    query: ({ month, row }) => {
+      const q: Record<string, string> = { month };
+      if (row && row.employeeName) q.driver = String(row.employeeName).trim();
+      return q;
+    },
+  },
+  转运站管理: {
+    path: '/site/transfer-stations',
+    query: ({ month }) => ({ month }),
+  },
+  消防管理: {
+    path: '/site/fire-facility',
+    query: ({ month }) => ({ month }),
+  },
+};
+
+/** 下钻：跳转「现场管理 → 三违管理 → 三违管理考核」，按当月/当前岗位自动定位；
+ *  传入 row 时附带 violTarget，目标页高亮定位到该人的那一行 */
+function drillToViolationAssessment(row?: AssessmentMonthlyApi.AssessmentTarget | null) {
+  const query: Record<string, string> = {
+    violCycle: String(selectedCycleId.value ?? ''),
+    violPos: ROLE_POSITION[activeRole.value] ?? '',
+  };
+  if (row && row.id != null) query.violTarget = String(row.id);
+  router.push({ path: '/site/violation/assessment', query });
+}
+
+/** 下钻：跳转其他维度列对应模块页，按当月/当前岗位自动定位；
+ *  传入被点击对象 row 时，目标页（按人列）额外高亮定位到该人所在行 */
+function drillDimDetail(category: string, row?: AssessmentMonthlyApi.AssessmentTarget | null) {
+  const base = normalizeCategoryName(category);
+  if (base === '三违管理') {
+    drillToViolationAssessment(row);
+    return;
+  }
+  const target = CATEGORY_DRILLS[base];
+  if (!target) return;
+  router.push({
+    path: target.path,
+    query: target.query({
+      month: selectedCycleMonth(),
+      role: activeRole.value,
+      row,
+    }),
+  });
+}
+
+// ============ 维度列扣分明细：居中模态框（点击非零数字打开，明细项可点击下钻） ============
+// 明细数据源：三违列取「三违管理考核」同岗位 tab 的列构成（violationScoreMap，与源页口径一致）；
+// 其余维度列统一取扣分规则明细（getTargetDeductionList 按类别过滤 + 按规则名分组汇总）。
+interface DimDetailItem {
+  label: string;
+  value: number;
+}
+const dimDetailRow = ref<AssessmentMonthlyApi.AssessmentTarget | null>(null);
+const dimDetailCategory = ref('');
+const dimDetailVisible = computed({
+  get: () => !!dimDetailRow.value,
+  set: (v: boolean) => {
+    if (!v) dimDetailRow.value = null;
+  },
+});
+const dimDetailItems = ref<DimDetailItem[]>([]);
+const dimDetailLoading = ref(false);
+
+function dimDetailTotal(): number {
+  return Math.round(dimDetailItems.value.reduce((s, it) => s + it.value, 0) * 100) / 100;
+}
+
+async function openDimDetail(row: AssessmentMonthlyApi.AssessmentTarget, column: any) {
+  const category = column ? String(column.field ?? (column as any).key ?? '') : '';
+  if (!category) return;
+  dimDetailRow.value = row;
+  dimDetailCategory.value = category;
+  dimDetailItems.value = [];
+  if (isSanweiCategory(category)) {
+    // 三违列：与「三违管理考核」页当前展示列构成一致（violationScoreMap 随主列表已加载）
+    const bd = violationBreakdownOf(row);
+    dimDetailItems.value = bd ? bd.items.map((it) => ({ label: it.label, value: it.value })) : [];
+    return;
+  }
+  if (!selectedCycleId.value) return;
+  dimDetailLoading.value = true;
+  try {
+    const res = await getTargetDeductionList(selectedCycleId.value, row.id);
+    const norm = normalizeCategoryName(category);
+    const rows0 = res.list || [];
+
+    // HSE教育培训「培训台账」通路：若按规则名合并，两条都来自同一条「培训台账缺训」规则，
+    // 无法体现「缺少人员 / 资料不完整」两个独立指标。源指标（missing/incomplete）已由后端透出，
+    // 这里据此拆成两条独立明细；非培训台账通路的同类别明细仍按规则名合并。
+    if (norm === 'HSE教育培训') {
+      let missingTotal = 0;
+      let incompleteTotal = 0;
+      let hasSource = false;
+      const others: typeof rows0 = [];
+      for (const d of rows0) {
+        if (normalizeCategoryName(d.category) !== norm) continue;
+        const sd = d.sourceDetail;
+        if (sd && (sd.missing != null || sd.incomplete != null)) {
+          hasSource = true;
+          const unit = Number(sd.unit) > 0 ? Number(sd.unit) : 1;
+          missingTotal += Number(sd.missing ?? 0) * unit;
+          incompleteTotal += Number(sd.incomplete ?? 0) * unit;
+        } else {
+          others.push(d);
+        }
+      }
+      const items: DimDetailItem[] = [];
+      if (hasSource) {
+        if (missingTotal > 0) items.push({ label: '缺少人员', value: Math.round(missingTotal * 100) / 100 });
+        if (incompleteTotal > 0) items.push({ label: '资料不完整', value: Math.round(incompleteTotal * 100) / 100 });
+      }
+      // 其余同类别（非培训台账通路）明细仍按规则名合并
+      const groupedOthers = new Map<string, number>();
+      for (const d of others) {
+        const label = d.ruleName || d.deductionItem || '未命名扣分项';
+        groupedOthers.set(label, (groupedOthers.get(label) ?? 0) + Number(d.suggestedScore ?? 0));
+      }
+      for (const [label, val] of groupedOthers) {
+        items.push({ label, value: Math.round(val * 100) / 100 });
+      }
+      dimDetailItems.value = items;
+      dimDetailLoading.value = false;
+      return;
+    }
+
+    const grouped = new Map<string, number>();
+    for (const d of rows0) {
+      if (normalizeCategoryName(d.category) !== norm) continue;
+      const label = d.ruleName || d.deductionItem || '未命名扣分项';
+      grouped.set(label, (grouped.get(label) ?? 0) + Number(d.suggestedScore ?? 0));
+    }
+    dimDetailItems.value = [...grouped].map(([label, value]) => ({
+      label,
+      value: Math.round(value * 100) / 100,
+    }));
+  } catch {
+    dimDetailItems.value = [];
+  } finally {
+    dimDetailLoading.value = false;
+  }
 }
 
 async function loadData() {
@@ -733,7 +977,7 @@ onUnmounted(() => {
         :data="dataSource"
         :loading="loading"
         :pager="false"
-        :scroll-x="scrollX"
+        auto-width
         :default-sort="{ field: 'scoreTotal', order: sortOrder }"
         @sort-change="handleSortChange"
       >
@@ -744,7 +988,7 @@ onUnmounted(() => {
           <div class="dim-col-header">
             <div class="dim-col-title-line">
               <span>{{ dimHeaderName(column) }}</span>
-              <NTooltip trigger="hover" placement="top">
+              <NTooltip trigger="hover" placement="top" style="max-width: 460px">
                 <template #trigger>
                   <IconifyIcon icon="lucide:circle-help" class="dim-col-help" />
                 </template>
@@ -755,10 +999,33 @@ onUnmounted(() => {
           </div>
         </template>
         <template #dimCell="{ row, column }">
-          <span>{{ dimValue(row as AssessmentMonthlyApi.AssessmentTarget, column && (column.field ?? (column as any).key)) }}</span>
+          <template v-if="(Number(dimValue(row as AssessmentMonthlyApi.AssessmentTarget, column && (column.field ?? (column as any).key))) || 0) > 0">
+            <NTag
+              :bordered="false"
+              size="small"
+              type="warning"
+              class="sanwei-score-tag"
+              @click="openDimDetail(row as AssessmentMonthlyApi.AssessmentTarget, column)"
+            >
+              {{ dimValue(row as AssessmentMonthlyApi.AssessmentTarget, column && (column.field ?? (column as any).key)) }}
+            </NTag>
+          </template>
+          <NTag v-else :bordered="false" size="small" type="success">
+            {{ dimValue(row as AssessmentMonthlyApi.AssessmentTarget, column && (column.field ?? (column as any).key)) }}
+          </NTag>
         </template>
         <template #scoreTotalCell="{ row }">
-          <span>{{ displayScoreTotal(row as AssessmentMonthlyApi.AssessmentTarget) }}</span>
+          <NTag
+            v-if="Number(displayScoreTotal(row as AssessmentMonthlyApi.AssessmentTarget)) > 0"
+            :bordered="false"
+            size="small"
+            type="error"
+          >
+            {{ displayScoreTotal(row as AssessmentMonthlyApi.AssessmentTarget) }}
+          </NTag>
+          <NTag v-else :bordered="false" size="small" type="success">
+            {{ displayScoreTotal(row as AssessmentMonthlyApi.AssessmentTarget) }}
+          </NTag>
         </template>
         <template #actionCell="{ row }">
           <NButton text type="primary" @click="openDetail(row as AssessmentMonthlyApi.AssessmentTarget)">
@@ -793,6 +1060,35 @@ onUnmounted(() => {
             <span>{{ REVIEW_STATUS_TEXT[(row as any).reviewStatus] || (row as any).reviewStatus || '-' }}</span>
           </template>
         </HseDataGrid>
+      </div>
+    </NModal>
+
+    <NModal
+      v-model:show="dimDetailVisible"
+      preset="card"
+      :title="`${dimHeaderName({ title: dimDetailCategory }) || dimDetailCategory} · 扣分明细`"
+      style="width: 420px; max-width: 92vw"
+      :mask-closable="true"
+    >
+      <div class="sanwei-breakdown">
+        <NSpin :show="dimDetailLoading">
+          <div
+            v-for="(item, i) in dimDetailItems"
+            :key="i"
+            class="sanwei-breakdown-item"
+            @click="isSanweiCategory(dimDetailCategory) ? drillToViolationAssessment(dimDetailRow) : drillDimDetail(dimDetailCategory, dimDetailRow)"
+          >
+            <span>{{ item.label }}</span>
+            <span class="sanwei-breakdown-val">{{ formatScore(item.value) }} 分</span>
+          </div>
+          <div v-if="!dimDetailLoading && dimDetailItems.length === 0" class="sanwei-breakdown-empty">
+            暂无扣分明细
+          </div>
+          <div class="sanwei-breakdown-total">
+            <span>合计</span>
+            <span>{{ formatScore(dimDetailTotal()) }} 分</span>
+          </div>
+        </NSpin>
       </div>
     </NModal>
   </HsePageLayout>
@@ -831,6 +1127,43 @@ onUnmounted(() => {
 .dim-col-limit {
   color: #8a919f;
   font-size: 12px;
+}
+/* 三违管理维度列：>0 数字可点击查看构成明细 */
+.sanwei-score-tag {
+  cursor: pointer;
+}
+.sanwei-breakdown {
+  min-width: 240px;
+}
+.sanwei-breakdown-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.sanwei-breakdown-item:hover {
+  background: rgba(245, 158, 11, 0.14);
+  color: #d97706;
+}
+.sanwei-breakdown-val {
+  font-variant-numeric: tabular-nums;
+}
+.sanwei-breakdown-total {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  border-top: 1px dashed #d0d5dd;
+  margin-top: 6px;
+  padding: 6px 6px 0;
+  font-weight: 600;
+}
+.sanwei-breakdown-empty {
+  padding: 12px 6px;
+  text-align: center;
+  color: #8a919f;
 }
 /* 扣分明细弹窗内容区：多行时内部滚动，避免撑高弹窗 */
 .detail-modal-body {

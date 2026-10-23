@@ -3188,6 +3188,7 @@ function hazardSubmitResponse(done, cid, dedup, origin) {
     success: true, code: 'OK', deduplicated: !!dedup,
     recordIds: (done && done.recordIds) || [],
     hazardNo: (done && done.hazardNo) || '',
+    closed: !!(done && done.closed),
     client_request_id: cid || '',
   }, 200, corsHeaders(origin));
 }
@@ -3249,6 +3250,15 @@ async function handleHazardSubmit(request, env, ctx) {
       photoTokens = [...new Set(body.photo_tokens)];
     }
 
+    // 2026-10-19.109：整改后照片（可选，≤3）—— 传了就登记即闭环销号，不上传走正常整改流程
+    let rectTokens = [];
+    if (body.rectify_photo_tokens != null) {
+      const ok = Array.isArray(body.rectify_photo_tokens) && body.rectify_photo_tokens.length <= HAZARD_PHOTO_MAX
+        && body.rectify_photo_tokens.every((t) => typeof t === 'string' && /^[A-Za-z0-9]{10,120}$/.test(t));
+      if (!ok) return errRes('HAZARD_FIELD_INVALID', `rectify_photo_tokens 不合法（≤${HAZARD_PHOTO_MAX} 个、来自上传接口）`, 400, corsHeaders(origin));
+      rectTokens = [...new Set(body.rectify_photo_tokens)];
+    }
+
     // CF-WPS-103 AI 回填字段（可选，服务端再校验枚举，防前端绕过 / 模型乱填）
     const aiBasis = patrolText(body.rectify_basis, HAZARD_BASIS_MAX);
     const aiSuggestion = patrolText(body.rectify_suggestion, HAZARD_SUGGESTION_MAX);
@@ -3308,12 +3318,18 @@ async function handleHazardSubmit(request, env, ctx) {
       '隐患级别': level,
       '隐患位置': location,
       '隐患描述': description,
-      '处理状态': HAZARD_STATUS_PENDING,
+      '处理状态': rectTokens.length ? HAZARD_STATUS_CLOSED : HAZARD_STATUS_PENDING,
       '备注': cid ? `req:${cid}` : '',
     };
     if (lat) record['纬度'] = lat;
     if (lng) record['经度'] = lng;
     if (photoTokens.length) record['现场照片'] = photoTokens.map((t) => ({ file_token: t }));
+    // 2026-10-19.109：登记即闭环 —— 跳过待验收，与验收通过同列留痕（闭环时间 + 验收结果）
+    if (rectTokens.length) {
+      record[HAZARD_FIELDS.rectifyPhotos] = rectTokens.map((t) => ({ file_token: t }));
+      record[HAZARD_FIELDS.closedAt] = todoNowLocal();
+      record[HAZARD_FIELDS.reviewResult] = '登记时已现场整改，直接闭环';
+    }
     // CF-WPS-103 AI 回填字段（已在上方校验枚举；空字符串不写，避免污染统计）
     if (aiBasis) record['整改依据'] = aiBasis;
     if (aiSuggestion) record['整改建议'] = aiSuggestion;
@@ -3335,7 +3351,7 @@ async function handleHazardSubmit(request, env, ctx) {
       }
       const recordIds = (recs || []).map((r) => (typeof r === 'string' ? r : r && r.id)).filter(Boolean);
       if (cid && recordIds.length) hazardCidPut(payload.sub, cid, recordIds[0]);   // 近实时幂等缓存
-      return { recordIds, hazardNo: record['隐患编号'] };
+      return { recordIds, hazardNo: record['隐患编号'], closed: rectTokens.length > 0 };
     };
     if (cid) {
       const task = runCreate();

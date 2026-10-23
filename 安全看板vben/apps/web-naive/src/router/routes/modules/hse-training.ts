@@ -40,10 +40,11 @@ const routes: RouteRecordRaw[] = [
           title: $t('page.hse.trainingLedger'),
           icon: 'lucide:book-open',
           authority: ['admin'],
+          hideInMenu: true,
         },
-        name: 'TrainingRecords',
+        name: 'TrainingRecordsLegacy',
         path: '/training/records',
-        component: () => import('#/views/training/ledger/index.vue'),
+        redirect: '/ledger/training',
       },
       {
         meta: {

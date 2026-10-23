@@ -18,7 +18,12 @@ import { useAuthStore } from '#/store';
 
 import { refreshTokenApi } from './core';
 
-const { apiURL } = useAppConfig(import.meta.env, import.meta.env.PROD);
+function getApiURL(): string {
+  // 模块顶层调用 useAppConfig 可能在环境变量/全局配置未就绪时读取,
+  // 故在首次创建客户端时再读取,确保拿到正确的 apiURL。
+  const { apiURL } = useAppConfig(import.meta.env, import.meta.env.PROD);
+  return apiURL;
+}
 
 function createRequestClient(baseURL: string, options?: RequestClientOptions) {
   const client = new RequestClient({
@@ -97,7 +102,27 @@ function createRequestClient(baseURL: string, options?: RequestClientOptions) {
       // 当前mock接口返回的错误字段是 error 或者 message
       const responseData = error?.response?.data ?? {};
       const errorMessage = responseData?.error ?? responseData?.message ?? '';
-      // 如果没有错误信息，则会根据状态码进行提示
+      const status = error?.response?.status;
+      // 401 已由 authenticateResponseInterceptor 统一处理,此处不再重复弹窗
+      if (status === 401) {
+        return;
+      }
+      // 403 权限不足、404 资源不存在使用 warn,避免与错误操作混淆
+      if (status === 403 || status === 404) {
+        message.warning(errorMessage || msg);
+        return;
+      }
+      // 500 服务端错误与网络/超时错误使用 error
+      if (status && status >= 500) {
+        message.error(errorMessage || msg);
+        return;
+      }
+      // 400 参数错误等业务错误使用 warning
+      if (status === 400) {
+        message.warning(errorMessage || msg);
+        return;
+      }
+      // 其余未知错误保留 error
       message.error(errorMessage || msg);
     }),
   );
@@ -105,8 +130,8 @@ function createRequestClient(baseURL: string, options?: RequestClientOptions) {
   return client;
 }
 
-export const requestClient = createRequestClient(apiURL, {
+export const requestClient = createRequestClient(getApiURL(), {
   responseReturn: 'data',
 });
 
-export const baseRequestClient = new RequestClient({ baseURL: apiURL });
+export const baseRequestClient = new RequestClient({ baseURL: getApiURL() });

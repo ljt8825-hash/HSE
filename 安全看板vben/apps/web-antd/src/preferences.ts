@@ -20,7 +20,7 @@ export const overridesPreferences = defineOverridesPreferences({
   app: {
     name: '宁津项目HSE',
     accessMode: 'frontend',
-    defaultHomePath: '/hse/todos',
+    defaultHomePath: '/overview/cockpit',
   },
   logo: {
     enable: true,

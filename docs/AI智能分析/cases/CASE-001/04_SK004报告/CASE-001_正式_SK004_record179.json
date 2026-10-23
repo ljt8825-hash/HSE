@@ -1,0 +1,478 @@
+{
+  "__wall_s": 394.4,
+  "__http": 200,
+  "response": {
+    "success": true,
+    "skill": {
+      "id": "SK-004",
+      "name": "报告生成",
+      "key": "company.report.generate",
+      "version": "v1.0.0",
+      "domain": "company",
+      "type": "report_generation",
+      "status": "Active"
+    },
+    "request_id": "f8123972-9c3a-447e-8342-5d45b2b3be89",
+    "report": {
+      "title": "2026年9月网格检查月度分析报告",
+      "report_type": "inspection_monthly",
+      "report_version": "v1",
+      "summary": "",
+      "sections": [
+        {
+          "key": "overview",
+          "title": "一、总体情况",
+          "content": "总体检查记录数为1504条，全部为有效记录，无无效记录。检查期间内未发现超出时间范围的记录。总体检查频次较为稳定，无明显波动。",
+          "tables": [
+            {
+              "key": "overview",
+              "title": "总体情况一览",
+              "columns": [
+                "指标",
+                "数值"
+              ],
+              "rows": [
+                [
+                  "总数",
+                  1504
+                ],
+                [
+                  "有效数",
+                  1504
+                ],
+                [
+                  "无效数",
+                  0
+                ],
+                [
+                  "outside_time_range",
+                  0
+                ]
+              ]
+            },
+            {
+              "key": "trend",
+              "title": "分期间数量表",
+              "columns": [
+                "期间",
+                "数量"
+              ],
+              "rows": [
+                [
+                  "2026-09-01",
+                  56
+                ],
+                [
+                  "2026-09-02",
+                  63
+                ],
+                [
+                  "2026-09-03",
+                  56
+                ],
+                [
+                  "2026-09-04",
+                  56
+                ],
+                [
+                  "2026-09-05",
+                  53
+                ],
+                [
+                  "2026-09-06",
+                  55
+                ],
+                [
+                  "2026-09-07",
+                  58
+                ],
+                [
+                  "2026-09-08",
+                  55
+                ],
+                [
+                  "2026-09-09",
+                  59
+                ],
+                [
+                  "2026-09-10",
+                  61
+                ],
+                [
+                  "2026-09-11",
+                  55
+                ],
+                [
+                  "2026-09-12",
+                  56
+                ],
+                [
+                  "2026-09-13",
+                  54
+                ],
+                [
+                  "2026-09-14",
+                  57
+                ],
+                [
+                  "2026-09-15",
+                  55
+                ],
+                [
+                  "2026-09-16",
+                  54
+                ],
+                [
+                  "2026-09-17",
+                  53
+                ],
+                [
+                  "2026-09-18",
+                  55
+                ],
+                [
+                  "2026-09-19",
+                  61
+                ],
+                [
+                  "2026-09-20",
+                  56
+                ],
+                [
+                  "2026-09-21",
+                  53
+                ],
+                [
+                  "2026-09-22",
+                  50
+                ],
+                [
+                  "2026-09-23",
+                  54
+                ],
+                [
+                  "2026-09-24",
+                  59
+                ]
+              ]
+            },
+            {
+              "key": "ranking",
+              "title": "组织/片区分布（Top 10）",
+              "columns": [
+                "排名",
+                "组织/片区",
+                "数量",
+                "占比"
+              ],
+              "rows": [
+                [
+                  1,
+                  "杜集镇",
+                  242,
+                  "16.1%"
+                ],
+                [
+                  2,
+                  "柴胡店镇",
+                  168,
+                  "11.2%"
+                ],
+                [
+                  3,
+                  "时集镇",
+                  133,
+                  "8.8%"
+                ],
+                [
+                  4,
+                  "保店镇",
+                  128,
+                  "8.5%"
+                ],
+                [
+                  5,
+                  "长官镇",
+                  126,
+                  "8.4%"
+                ],
+                [
+                  6,
+                  "刘营伍乡",
+                  109,
+                  "7.2%"
+                ],
+                [
+                  7,
+                  "张大庄镇",
+                  108,
+                  "7.2%"
+                ],
+                [
+                  8,
+                  "大柳镇",
+                  106,
+                  "7.0%"
+                ],
+                [
+                  9,
+                  "大曹镇",
+                  105,
+                  "7.0%"
+                ],
+                [
+                  10,
+                  "相衙镇",
+                  102,
+                  "6.8%"
+                ]
+              ]
+            }
+          ],
+          "evidence_ids": [
+            "ev_001",
+            "ev_003",
+            "ev_004",
+            "ev_005",
+            "ev_006",
+            "ev_008"
+          ]
+        },
+        {
+          "key": "sec_2",
+          "title": "二、趋势分析",
+          "content": "根据2026年9月1日至27日的检查记录，每日检查频次较为稳定，波动不大。具体来看，9月1日检查频次为56次，9月27日检查频次为51次，整体波动较小，未发现显著异常。",
+          "tables": [],
+          "evidence_ids": [
+            "ev_001",
+            "ev_004",
+            "ev_005",
+            "ev_006",
+            "ev_007"
+          ]
+        },
+        {
+          "key": "sec_3",
+          "title": "三、排名分析",
+          "content": "按照检查记录数量排名，排名前五的组织/片区分别为：\n1. 杜集镇：242条记录，占比16.1%；\n2. 柴胡店镇：168条记录，占比11.2%；\n3. 时集镇：133条记录，占比8.8%；\n4. 保店镇：128条记录，占比8.5%；\n5. 长官镇：126条记录，占比8.4%。",
+          "tables": [],
+          "evidence_ids": [
+            "ev_001",
+            "ev_004",
+            "ev_005",
+            "ev_006",
+            "ev_008"
+          ]
+        },
+        {
+          "key": "sec_4",
+          "title": "四、问题与异常",
+          "content": "本期未发现达到当前分析规则的明显异常波动。当前数据不足，无法形成可靠判断。",
+          "tables": [],
+          "evidence_ids": []
+        },
+        {
+          "key": "sec_5",
+          "title": "五、管理建议",
+          "content": "1. 对于排名靠前的组织/片区，建议继续保持现有检查力度，确保检查覆盖面和质量。\n2. 对于排名相对靠后的组织/片区，建议加强检查力度，提高检查频次，确保检查工作的全面性和有效性。\n3. 建议定期对检查数据进行分析，及时发现和解决问题，提高整体检查效果。",
+          "tables": [],
+          "evidence_ids": [
+            "ev_001",
+            "ev_004",
+            "ev_005",
+            "ev_006",
+            "ev_008"
+          ]
+        }
+      ],
+      "disclaimer": "本报告由 AI 辅助生成，所有统计数字以确定性事实/分析结果为准，发布前必须经人工审核。"
+    },
+    "facts": {
+      "used": [
+        "f001:row_count=1504",
+        "f002:valid_rows=1504",
+        "f003:invalid_rows=0",
+        "f004:total=1504",
+        "f005:valid=1504",
+        "f006:invalid=0",
+        "f007:outside_time_range=0",
+        "f008:组织/片区「杜集镇」=242条（16.1%）",
+        "f009:组织/片区「柴胡店镇」=168条（11.2%）",
+        "f010:组织/片区「时集镇」=133条（8.8%）",
+        "f011:组织/片区「保店镇」=128条（8.5%）",
+        "f012:组织/片区「长官镇」=126条（8.4%）",
+        "f021:组织/片区「公司管理员」=9条（0.6%）",
+        "f022:组织/片区第1名「杜集镇」=242条",
+        "f023:组织/片区第2名「柴胡店镇」=168条",
+        "f024:组织/片区第3名「时集镇」=133条",
+        "f025:组织/片区第4名「保店镇」=128条",
+        "f026:组织/片区第5名「长官镇」=126条",
+        "f032:2026-09-01=56条",
+        "f034:2026-09-03=56条",
+        "f035:2026-09-04=56条",
+        "f043:2026-09-12=56条",
+        "f051:2026-09-20=56条",
+        "f053:2026-09-22=50条",
+        "f057:2026-09-26=56条",
+        "f058:2026-09-27=51条"
+      ],
+      "unresolved": [
+        "f013:组织/片区「刘营伍乡」=109条（7.2%）",
+        "f014:组织/片区「张大庄镇」=108条（7.2%）",
+        "f015:组织/片区「大柳镇」=106条（7.0%）",
+        "f016:组织/片区「大曹镇」=105条（7.0%）",
+        "f017:组织/片区「相衙镇」=102条（6.8%）",
+        "f018:组织/片区「津城街道」=81条（5.4%）",
+        "f019:组织/片区「宁城街道」=53条（3.5%）",
+        "f020:组织/片区「公司管理」=34条（2.3%）",
+        "f027:组织/片区第6名「刘营伍乡」=109条",
+        "f028:组织/片区第7名「张大庄镇」=108条",
+        "f029:组织/片区第8名「大柳镇」=106条",
+        "f030:组织/片区第9名「大曹镇」=105条",
+        "f031:组织/片区第10名「相衙镇」=102条",
+        "f033:2026-09-02=63条",
+        "f036:2026-09-05=53条",
+        "f037:2026-09-06=55条",
+        "f038:2026-09-07=58条",
+        "f039:2026-09-08=55条",
+        "f040:2026-09-09=59条",
+        "f041:2026-09-10=61条",
+        "f042:2026-09-11=55条",
+        "f044:2026-09-13=54条",
+        "f045:2026-09-14=57条",
+        "f046:2026-09-15=55条",
+        "f047:2026-09-16=54条",
+        "f048:2026-09-17=53条",
+        "f049:2026-09-18=55条",
+        "f050:2026-09-19=61条",
+        "f052:2026-09-21=53条",
+        "f054:2026-09-23=54条"
+      ]
+    },
+    "evidence": [
+      {
+        "id": "ev_001",
+        "source_type": "business_record",
+        "source_id": "grid_inspection_records",
+        "source_domain": "company.inspection.analysis",
+        "source_field": "dataset",
+        "evidence_text": "数据来源：HSE 网格检查记录（grid_inspection_records · 只读）（2026-09-01 ~ 2026-09-30）；记录 1504 条（有效 1504 条），时间跨度 2026-09-01 ~ 2026-09-27。",
+        "evidence_strength": "high",
+        "created_at": "2026-10-14T23:22:08.732Z"
+      },
+      {
+        "id": "ev_002",
+        "source_type": "business_record",
+        "source_id": "grid_inspection_records",
+        "source_domain": "company.inspection.analysis",
+        "source_field": "mapping",
+        "evidence_text": "字段映射：检查日期←inspection_date、检查人←personnel_name、被检查对象←violator_name、组织/片区←area_team、地点←grid_name、类别←violation_type_result、状态←report_status、描述←violation_behavior；未映射: project、type",
+        "evidence_strength": "high",
+        "created_at": "2026-10-14T23:22:08.732Z"
+      },
+      {
+        "id": "ev_003",
+        "source_type": "business_record",
+        "source_id": "grid_inspection_records",
+        "source_domain": "company.inspection.analysis",
+        "source_field": "quality",
+        "evidence_text": "数据质量：重复行 6，无法解析日期 0，高空值字段: 状态(100.0%)、类别(100.0%)。",
+        "evidence_strength": "high",
+        "created_at": "2026-10-14T23:22:08.732Z"
+      },
+      {
+        "id": "ev_004",
+        "source_type": "business_record",
+        "source_id": "grid_inspection_records",
+        "source_domain": "company.inspection.analysis",
+        "source_field": "group_by:organization",
+        "evidence_text": "按「组织/片区」分组（distinct=14，口径=记录条数）：1.杜集镇=242（16.1%）；2.柴胡店镇=168（11.2%）；3.时集镇=133（8.8%）；4.保店镇=128（8.5%）；5.长官镇=126（8.4%）；6.刘营伍乡=109（7.2%）；7.张大庄镇=108（7.2%）；8.大柳镇=106（7.0%）",
+        "evidence_strength": "high",
+        "created_at": "2026-10-14T23:22:08.732Z"
+      },
+      {
+        "id": "ev_005",
+        "source_type": "business_record",
+        "source_id": "grid_inspection_records",
+        "source_domain": "company.inspection.analysis",
+        "source_field": "ranking:organization",
+        "evidence_text": "排名（按记录条数降序 TOP10）：1.杜集镇=242；2.柴胡店镇=168；3.时集镇=133；4.保店镇=128；5.长官镇=126；6.刘营伍乡=109；7.张大庄镇=108；8.大柳镇=106…",
+        "evidence_strength": "high",
+        "created_at": "2026-10-14T23:22:08.732Z"
+      },
+      {
+        "id": "ev_006",
+        "source_type": "business_record",
+        "source_id": "grid_inspection_records",
+        "source_domain": "company.inspection.analysis",
+        "source_field": "trend",
+        "evidence_text": "趋势（检查日期，粒度=day，跨度 2026-09-01~2026-09-27）：2026-09-01:56、2026-09-02:63、2026-09-03:56、2026-09-04:56、2026-09-05:53、2026-09-06:55 …",
+        "evidence_strength": "high",
+        "created_at": "2026-10-14T23:22:08.732Z"
+      },
+      {
+        "id": "ev_007",
+        "source_type": "business_record",
+        "source_id": "grid_inspection_records",
+        "source_domain": "company.inspection.analysis",
+        "source_field": "compare",
+        "evidence_text": "环比（2026-09-26→2026-09-27）：2026-09-27 为 51 次，2026-09-26 为 56 次，减少 8.93%；同比不可用：数据中不存在去年同期（2025-09-27）的有效数据，无法计算同比",
+        "evidence_strength": "high",
+        "created_at": "2026-10-14T23:22:08.732Z"
+      },
+      {
+        "id": "ev_008",
+        "source_type": "business_record",
+        "source_id": "sk004_input_analysis",
+        "source_domain": "company.report.generate",
+        "source_field": "analysis",
+        "evidence_text": "调用方提供的确定性分析结果（如 SK-003 result；dataset.row_count=1504）",
+        "evidence_strength": "high",
+        "created_at": "2026-10-14T23:26:57.849Z"
+      }
+    ],
+    "warnings": [
+      "输入规模很大，事实清单已收缩（未列出维度明细以确定性表格为准），事实清单与约束完整送达。",
+      "AI 未生成 2 个章节内容（sec_2、sec_3），已用占位文案，建议人工补充。",
+      "AI 输出为 Markdown 而非 JSON，已按章节规划顺序抢救为结构化章节（摘要可能缺失），建议人工核对。",
+      "第 1 次生成有 2 个章节内容缺失，已自动重试。",
+      "AI 输出为 Markdown 而非 JSON，已按章节规划顺序抢救为结构化章节（摘要可能缺失），建议人工核对。"
+    ],
+    "suggestions": [
+      "有 34 项事实未被报告正文引用（facts.unresolved），请确认是否需要覆盖"
+    ],
+    "confidence": "medium",
+    "metadata": {
+      "skill_key": "company.report.generate",
+      "skill_id": "SK-004",
+      "skill_version": "v1.0.0",
+      "model_policy": "report_generation",
+      "report_type": "inspection_monthly",
+      "template_key": null,
+      "section_plan_source": "user",
+      "prompt_key": "company.report.generate",
+      "prompt_version": "v1.0.0",
+      "permission_model": "role_allowlist（报告素材由调用方提供；提供素材不扩大数据库访问权限，SK-004 不负责数据授权，§三十五）",
+      "disclaimer": "本报告由 AI 辅助生成，所有统计数字以确定性事实/分析结果为准，发布前必须经人工审核。",
+      "provider": "ollama",
+      "model": "qwen2.5:7b",
+      "duration_ms": 136380,
+      "record_id": "179",
+      "record_saved": true,
+      "gateway_request_id": "f8123972-9c3a-447e-8342-5d45b2b3be89",
+      "trace_id": "ai-f8123972",
+      "usage": {
+        "input_tokens": 2050,
+        "output_tokens": 355
+      },
+      "ai_called": true,
+      "ai_context_chars": 4107,
+      "evidence_count": 8,
+      "fact_count": 60,
+      "fact_used_count": 26,
+      "fact_unresolved_count": 34,
+      "consistency_status": "pass",
+      "consistency_violations": 0
+    }
+  }
+}

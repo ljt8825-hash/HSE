@@ -53,3 +53,129 @@
   ) !important;
   --vxe-ui-table-row-current-background-color: rgba(22, 163, 74, 0.1) !important;
 }
+
+/* =====================================================================
+ * 全局表格「行悬停高亮」统一方案
+ * 需求：鼠标移到哪一行，整行底色高亮（仅底色变化，无其余交互副作用）。
+ * VXE 本已自带悬停（默认 #f5f7fa 过淡），此处将其统一为 HSE 安全绿淡色；
+ * Naive NDataTable 默认无行悬停，故补一条全局规则，二者配色保持一致。
+ * ===================================================================== */
+
+/* --- VXE：行悬停底色变量（亮/暗两套），与上方选中/勾选绿调一致 --- */
+[data-vxe-ui-theme='light'] {
+  --vxe-ui-table-row-hover-background-color: rgba(
+    22,
+    163,
+    74,
+    0.09
+  ) !important;
+  --vxe-ui-table-row-hover-striped-background-color: rgba(
+    22,
+    163,
+    74,
+    0.09
+  ) !important;
+  --vxe-ui-table-row-hover-current-background-color: rgba(
+    22,
+    163,
+    74,
+    0.13
+  ) !important;
+}
+
+[data-vxe-ui-theme='dark'] {
+  --vxe-ui-table-row-hover-background-color: rgba(
+    52,
+    211,
+    153,
+    0.12
+  ) !important;
+  --vxe-ui-table-row-hover-striped-background-color: rgba(
+    52,
+    211,
+    153,
+    0.12
+  ) !important;
+  --vxe-ui-table-row-hover-current-background-color: rgba(
+    52,
+    211,
+    153,
+    0.18
+  ) !important;
+}
+
+/* ---------------------------------------------------------------------
+ * 关键修复：vben 插件包 style.css 用更高特异性选择器
+ *   `:root .vxe-grid` 重定义了行悬停变量（指向 --accent-hover），
+ *   使上方 [data-vxe-ui-theme] 上的声明在网格元素处被覆盖。
+ * 注意：data-vxe-ui-theme 实际挂在 <html> 根元素上，.vxe-grid 自身不带。
+ * 因此在根主题下用「后代选择器 + !important」显式重写悬停变量，
+ * 特异性与 `:root .vxe-grid` 相同但带 !important，确保绿底高亮稳定生效。
+ * 悬停实际作用于行元素 .vxe-body--row（继承 .vxe-grid 变量）。
+ * --------------------------------------------------------------------- */
+[data-vxe-ui-theme='light'] .vxe-grid,
+[data-vxe-ui-theme='light'] .vxe-body--row {
+  --vxe-ui-table-row-hover-background-color: rgba(
+    22,
+    163,
+    74,
+    0.09
+  ) !important;
+  --vxe-ui-table-row-hover-striped-background-color: rgba(
+    22,
+    163,
+    74,
+    0.09
+  ) !important;
+  --vxe-ui-table-row-hover-current-background-color: rgba(
+    22,
+    163,
+    74,
+    0.13
+  ) !important;
+}
+
+[data-vxe-ui-theme='dark'] .vxe-grid,
+[data-vxe-ui-theme='dark'] .vxe-body--row {
+  --vxe-ui-table-row-hover-background-color: rgba(
+    52,
+    211,
+    153,
+    0.12
+  ) !important;
+  --vxe-ui-table-row-hover-striped-background-color: rgba(
+    52,
+    211,
+    153,
+    0.12
+  ) !important;
+  --vxe-ui-table-row-hover-current-background-color: rgba(
+    52,
+    211,
+    153,
+    0.18
+  ) !important;
+}
+
+/* ---------------------------------------------------------------------
+ * 高亮兜底（CSS 伪类，不依赖 VXE 的 JS class 机制）：
+ * 个别页面/场景下 VXE 的行悬停 class（.row--hover）未由 JS 挂载，
+ * 导致上面的变量规则匹配不到行。此处直接用 :hover 伪类让
+ * 「鼠标移到哪一行、哪一行整行变绿」，与变量方式取同样的绿。
+ * 亮/暗各一套；对斑马纹（row--stripe）同样覆盖。
+ * --------------------------------------------------------------------- */
+.vxe-body--row:hover > .vxe-body--column {
+  background-color: rgba(22, 163, 74, 0.09) !important;
+}
+[data-vxe-ui-theme='dark'] .vxe-body--row:hover > .vxe-body--column {
+  background-color: rgba(52, 211, 153, 0.12) !important;
+}
+
+/* --- Naive NDataTable：默认无行悬停，全局补齐，亮/暗各一套 --- */
+.n-data-table-tr:not(.n-data-table-tr--summary):hover > .n-data-table-td {
+  background-color: rgba(22, 163, 74, 0.09) !important;
+}
+
+html.dark .n-data-table-tr:not(.n-data-table-tr--summary):hover > .n-data-table-td {
+  background-color: rgba(52, 211, 153, 0.12) !important;
+}

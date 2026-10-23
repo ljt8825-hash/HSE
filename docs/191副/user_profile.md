@@ -1,7 +1,7 @@
-## Identity & Form of Address
+## 身份与称呼
 - Primary communication language: Chinese
 
-## Communication & Collaboration Preferences
+## 沟通与协作偏好
 - Emphasizes thorough checking and self-testing before finalizing work; requires verification of output quality
 - Follows phased development approach (completes one phase before starting the next)
 - Requires clear delivery of development reports, database migration instructions, and test reports
@@ -14,7 +14,11 @@
 - When saving files, prefers separating file writing and audit content into two steps to avoid silent failure caused by truncation
 - Requires the assistant to point out discrepancies and not just comply with user statements
 
-## Tech Stack & Methods
+## 背景与能力
+- Proficient in frontend development with Vue 3, TypeScript, and related frameworks
+- Proficient in backend development with Node.js, Express/Koa, and testing frameworks like Jest and supertest
+
+## 技术栈与方法论
 - Frontend: Vite, Vue 3, TypeScript, Pinia, Vue Router (proficient), TanStack Query, Element Plus, LogicFlow, vue-vben-admin v5.7.0, Ant Design Vue, useVbenForm/useVbenVxeGrid, EchartsUI/useEcharts, Naive UI
 - Backend: Node.js, Express/Koa, Jest, supertest (proficient), Zod (for validation), Winston (for logging), WebSocket
 

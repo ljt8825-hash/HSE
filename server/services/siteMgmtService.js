@@ -255,6 +255,8 @@ function formatGridInspectionRow(row) {
     violatorName: row.violator_name || '',
     violatorGender: row.violator_gender || '',
     violatorAge: row.violator_age || '',
+    // 违章人所属部门：gridRecordList 会用归属状态解析覆盖为最终展示部门；此处为原始列值（人工确认）。
+    violatorDept: row.violator_dept || '',
     vehicleType: row.vehicle_type || '',
     reportStatus: row.report_status || '',
     imageContent: row.image_content || '',
@@ -275,11 +277,92 @@ function formatGridInspectionRow(row) {
   };
 }
 
+// ============================================================
+// 违章人所属部门归属状态解析（三违台账）
+// ============================================================
+// 「违章人所属部门」按姓名从花名册自动匹配，归属/人工审核规则按巡查网格长等级区分（2026-09-25 冻结口径）：
+//   - 二级/三级网格长只巡查本人所属部门 → 违章人即其部门，即使重名也自动归属（取违章人候选中命中
+//     巡查人 personnel_name 部门者），不做人工审核；
+//   - 总网格长/一级网格长巡查跨乡镇 → 重名时需人工审核（列值未确认则状态=unselected）。
+// 人工确认/选择的部门持久化到 grid_inspection_records.violator_dept 列。
+// 特殊标记值（与真实部门名不会碰撞）：__unmatched__ 未匹配 / __unselected__ 待人工选择。
+const ATT_DEPT_UNMATCHED = '__unmatched__';
+const ATT_DEPT_UNSELECTED = '__unselected__';
+/** 姓名清洗：去括号备注与空白，作为花名册匹配 key（与前端 ledger.vue 口径一致） */
+function cleanAttName(s) {
+  return String(s || '').replace(/[（(][^（()）]*[)）]/g, '').replace(/[\s　]+/g, '');
+}
+/** 是否公司管理层巡查（总/一级网格长）→ 重名需人工审核 */
+function isAttCompanyLevel(level) {
+  const l = String(level || '');
+  return l.includes('总') || l.includes('一级');
+}
+/**
+ * 构建 姓名→[所属部门] 花名册映射（含在职+离职；部门口径与员工列表 dept_name 一致：乡镇作业中心级显示为
+ * 「xx乡镇作业中心」）。
+ */
+async function buildAttDeptMap() {
+  const r = await pool.query(
+    `SELECT ev.name AS name,
+            CASE WHEN ev.org_type = 'town_center'
+                 THEN regexp_replace(ev.org_name, '作业中心$', '乡镇作业中心')
+                 ELSE ev.org_name END AS dept_name
+     FROM v_employee_current ev
+     JOIN employee e ON e.id = ev.employee_id AND e.is_deleted = false
+     WHERE e.employment_relation IN ('正式员工', '辞职', '死亡')`,
+  );
+  const map = new Map();
+  for (const row of r.rows) {
+    const key = cleanAttName(row.name);
+    if (!key) continue;
+    const dept = (row.dept_name || '').trim() || '未分配部门';
+    const arr = map.get(key) || [];
+    if (!arr.includes(dept)) arr.push(dept);
+    map.set(key, arr);
+  }
+  return map;
+}
+/**
+ * 解析某一台账行的违章人所属部门展示与状态。
+ * @returns {{violatorDept:string, violatorDeptStatus:'matched'|'unmatched'|'unselected'|'manual'}}
+ */
+function deriveAttStatus({ violatorName, personnelName, gridLevel, violatorDept }, map) {
+  // 人工确认列值优先（具体部门名）：如已落库 violator_dept，状态标记为「manual」，
+  // 前端据此保留可直接改写的下拉（选错可改）。
+  if (violatorDept && violatorDept !== ATT_DEPT_UNMATCHED && violatorDept !== ATT_DEPT_UNSELECTED) {
+    return { violatorDept, violatorDeptStatus: 'manual' };
+  }
+  if (violatorDept === ATT_DEPT_UNMATCHED) {
+    return { violatorDept: '', violatorDeptStatus: 'unmatched' };
+  }
+  if (violatorDept === ATT_DEPT_UNSELECTED) {
+    return { violatorDept: '', violatorDeptStatus: 'unselected' };
+  }
+  const vKey = cleanAttName(violatorName);
+  const cand = vKey ? (map.get(vKey) || []) : [];
+  // 二级/三级网格长只巡查本人所属部门 →「不是公司管理拍摄的」尽可能按该网格长本人部门归属，
+  // 即使违章人姓名脏化/未命中花名册，也自动归到拍摄网格长所在部门，不人工审核。
+  if (!isAttCompanyLevel(gridLevel)) {
+    const sKey = cleanAttName(personnelName);
+    const sup = sKey ? (map.get(sKey) || []) : [];
+    if (sup.length) return { violatorDept: sup[0], violatorDeptStatus: 'matched' };
+    // 拍摄网格长部门未知（兜底）：退而优先违章人姓名唯一命中部门
+    if (cand.length === 1) return { violatorDept: cand[0], violatorDeptStatus: 'matched' };
+    return { violatorDept: '', violatorDeptStatus: 'unmatched' };
+  }
+  // 公司管理（总/一级）拍摄：按违章人姓名匹配，重名待人工选择
+  if (cand.length === 0) return { violatorDept: '', violatorDeptStatus: 'unmatched' };
+  if (cand.length === 1) return { violatorDept: cand[0], violatorDeptStatus: 'matched' };
+  return { violatorDept: '', violatorDeptStatus: 'unselected' };
+}
+
 // 网格长巡查台账允许单元格编辑的字段白名单（DB snake_case）
 const GRID_RECORD_EDITABLE = [
   'area_team', 'inspection_date', 'personnel_name', 'grid_level', 'position',
   'violator_name', 'violator_gender', 'violator_age', 'report_status',
   'violation_behavior', 'need_rectification', 'rectifier',
+  // 违章人所属部门：人工选择/标记后写库持久化（ATT_DEPT_UNMATCHED=未匹配 / ATT_DEPT_UNSELECTED=待选择）
+  'violator_dept',
   // GRID-03-B：整改后照片（rectified_photo）纳入可更新白名单，使移动端可对既有巡查记录
   // 「补传整改照片」。整改「完成/未完成」口径仍只由该字段承载（services/sanweiLedgerDerive.js），
   // 不引入任何整改状态字段或状态机。
@@ -1789,7 +1872,9 @@ async function gridRecordList(query, ctx) {
   const user = ctx && ctx.user;
   const logger = (ctx && ctx.logger) || console;
   try {
-    const { keyword, areaTeam, gridLevel, reportStatus, hasViolation, hasRectifiedPhoto, month } = query;
+    const { keyword, areaTeam, gridLevel, reportStatus, hasViolation, hasRectifiedPhoto, month, recordId } = query;
+    // 单条定位：按台账记录主键过滤（用于「点击扣分明细 → 定位网格台账原始记录」），仅 PG 主键数值 id
+    const locateId = /^\d+$/.test(String(recordId == null ? '' : recordId)) ? parseInt(String(recordId), 10) : 0;
     const wantViolation = hasViolation && String(hasViolation) !== '0' && String(hasViolation).toLowerCase() !== 'false';
     const wantRectified = hasRectifiedPhoto && String(hasRectifiedPhoto) !== '0' && String(hasRectifiedPhoto).toLowerCase() !== 'false';
     const page = Math.max(1, parseInt(query.page) || 1);
@@ -1824,6 +1909,7 @@ async function gridRecordList(query, ctx) {
       if (areaTeam) data = data.filter(r => r.areaTeam === areaTeam);
       if (gridLevel) data = data.filter(r => r.gridLevel === gridLevel);
       if (reportStatus) data = data.filter(r => r.reportStatus === reportStatus);
+      if (locateId) data = data.filter(r => Number(r.id) === locateId);
       if (monthFilter) data = data.filter(r => r.inspectionDate && String(r.inspectionDate).slice(0, 7) === monthFilter);
       if (wantViolation) {
         data = data.filter(r => r.violationBehavior && String(r.violationBehavior).trim() !== '' && !['无三违行为', '--', '-', '无'].includes(String(r.violationBehavior).trim()));
@@ -1859,6 +1945,7 @@ async function gridRecordList(query, ctx) {
     if (gridLevel) { conditions.push(`grid_level = $${paramIdx++}`); params.push(gridLevel); }
     if (reportStatus) { conditions.push(`report_status = $${paramIdx++}`); params.push(reportStatus); }
     if (monthFilter) { conditions.push(`to_char(inspection_date, 'YYYY-MM') = $${paramIdx++}`); params.push(monthFilter); }
+    if (locateId) { conditions.push(`id = $${paramIdx++}`); params.push(locateId); }
     if (wantViolation) {
       // 真实三违：排除「无三违行为」及占位符（-- / - / 无），避免把无内容行混入三违台账
       conditions.push(`violation_behavior IS NOT NULL AND TRIM(violation_behavior) <> '' AND violation_behavior NOT IN ('无三违行为', '--', '-', '无')`);
@@ -1885,6 +1972,35 @@ async function gridRecordList(query, ctx) {
         ? `ORDER BY inspection_date ${sortOrder} NULLS LAST, id DESC`
         : `ORDER BY ${sortCol} ${sortOrder} NULLS LAST, id DESC`;
 
+    // 「违章人所属部门」筛选（attDept）：归属状态依赖花名册解析（matched/未匹配/未选择），无法用纯 SQL
+    // WHERE 表达，故取满足基础条件的必要列全量后内存解析、过滤、再分页（台账量级小，可接受）。
+    const attDept = String(query.attDept || '').trim();
+    if (attDept) {
+      const allR = await pool.query(
+        `SELECT * FROM grid_inspection_records ${whereClause} ${orderClause}`,
+        params
+      );
+      const attMap = await buildAttDeptMap();
+      const records = allR.rows.map((r) => {
+        const f = formatGridInspectionRow(r);
+        const d = deriveAttStatus(f, attMap);
+        f.violatorDept = d.violatorDept;
+        f.violatorDeptStatus = d.violatorDeptStatus;
+        return f;
+      });
+      let filtered = records;
+      if (attDept === 'unmatched') {
+        filtered = records.filter((r) => r.violatorDeptStatus === 'unmatched');
+      } else if (attDept === 'unselected') {
+        filtered = records.filter((r) => r.violatorDeptStatus === 'unselected');
+      } else {
+        filtered = records.filter((r) => r.violatorDept === attDept);
+      }
+      const totalAtt = filtered.length;
+      const listAtt = filtered.slice(offset, offset + pageSize);
+      return { __t: 'json', payload: { list: listAtt, total: totalAtt, page, pageSize }, message: `查询成功，共 ${totalAtt} 条` };
+    }
+
     const countR = await pool.query(`SELECT COUNT(*)::int AS total FROM grid_inspection_records ${whereClause}`, params);
     const total = countR.rows[0].total;
 
@@ -1893,7 +2009,15 @@ async function gridRecordList(query, ctx) {
       `SELECT * FROM grid_inspection_records ${whereClause} ${orderClause} LIMIT $${paramIdx++} OFFSET $${paramIdx++}`,
       params
     );
-    const list = result.rows.map(formatGridInspectionRow);
+    // 补充违章人所属部门展示与状态（未传 attDept 时仅用于展示，不改变行集合）
+    const attMap = await buildAttDeptMap();
+    const list = result.rows.map((r) => {
+      const f = formatGridInspectionRow(r);
+      const d = deriveAttStatus(f, attMap);
+      f.violatorDept = d.violatorDept;
+      f.violatorDeptStatus = d.violatorDeptStatus;
+      return f;
+    });
     return { __t: 'json', payload: { list, total, page, pageSize }, message: `查询成功，共 ${total} 条` };
   } catch (err) {
     console.error('[gridRecordList]', err.message);
@@ -1910,20 +2034,29 @@ async function gridRecordFilterOptions() {
       return { __t: 'json', payload: await gridWps.filterOptions(), message: '查询成功(WPS)' };
     }
     if (!isConnected()) {
-      return { __t: 'json', payload: { areaTeams: [], gridLevels: [], reportStatuses: [], months: [] }, message: '查询成功(内存模式)' };
+      return { __t: 'json', payload: { areaTeams: [], gridLevels: [], reportStatuses: [], months: [], attDepartments: [] }, message: '查询成功(内存模式)' };
     }
-    const [atR, glR, rsR, moR] = await Promise.all([
+    const [atR, glR, rsR, moR, attDptR] = await Promise.all([
       pool.query('SELECT DISTINCT area_team FROM grid_inspection_records WHERE area_team IS NOT NULL AND area_team != \'\' ORDER BY area_team'),
       pool.query('SELECT DISTINCT grid_level FROM grid_inspection_records WHERE grid_level IS NOT NULL AND grid_level != \'\' ORDER BY grid_level'),
       pool.query('SELECT DISTINCT report_status FROM grid_inspection_records WHERE report_status IS NOT NULL AND report_status != \'\' ORDER BY report_status'),
       // 月份选项（YYYY-MM）：按巡查日期聚合，最新在前
       pool.query(`SELECT DISTINCT to_char(inspection_date, 'YYYY-MM') AS ym FROM grid_inspection_records WHERE inspection_date IS NOT NULL ORDER BY ym DESC`),
+      // 「违章人所属部门」具体部门选项：来自花名册 dept 口径（与 buildAttDeptMap 一致）
+      pool.query(`SELECT DISTINCT
+         CASE WHEN ev.org_type = 'town_center' THEN regexp_replace(ev.org_name, '作业中心$', '乡镇作业中心')
+              ELSE ev.org_name END AS dept_name
+         FROM v_employee_current ev
+         JOIN employee e ON e.id = ev.employee_id AND e.is_deleted = false
+         WHERE e.employment_relation IN ('正式员工', '辞职', '死亡')
+         ORDER BY 1`),
     ]);
     return { __t: 'json', payload: {
       areaTeams: atR.rows.map(r => r.area_team),
       gridLevels: glR.rows.map(r => r.grid_level),
       reportStatuses: rsR.rows.map(r => r.report_status),
       months: moR.rows.map(r => r.ym),
+      attDepartments: attDptR.rows.map(r => r.dept_name),
     }, message: '查询成功' };
   } catch (err) {
     console.error('[gridRecordFilterOptions]', err.message);
@@ -1947,6 +2080,14 @@ async function gridRecordUpdate(id, body, ctx) {
     const idNum = parseInt(id, 10);
     if (!idNum) return { __t: 'json', error: { code: -2, message: '参数错误' } };
     const b = body || {};
+    // 违章人姓名属影响统计口径的敏感列：仅 admin 可直接修改（普通安全员只可选/改部门，不能改姓名）。
+    // 需在「集散→白名单」前拦截，PG 与内存分支一致 fail-closed。
+    if (
+      b.violator_name !== undefined &&
+      String(user && user.role) !== 'admin'
+    ) {
+      return { __t: 'json', httpStatus: 403, error: { code: 403, message: '无权限修改违章人姓名' } };
+    }
     const sets = [];
     const params = [];
     let paramIdx = 1;

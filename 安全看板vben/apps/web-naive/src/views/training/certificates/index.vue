@@ -4,12 +4,11 @@
  * 统一使用 HSE 公共组件栈；接入真实 API。
  * 对应 web-antd 的 training/index.vue（培训记录/证书管理）。
  */
-import { computed, h, nextTick, onMounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 
 import {
   NButton,
   NCard,
-  NDataTable,
   NDatePicker,
   NDivider,
   NForm,
@@ -25,7 +24,6 @@ import {
   NTabs,
   NTag,
   NText,
-  type DataTableColumns,
 } from 'naive-ui';
 import { $t } from '#/locales';
 
@@ -561,55 +559,23 @@ async function handleDeleteAttachment(row: TrainingRecordApi.TrainingAttachment)
   }
 }
 
-const attachmentColumns: DataTableColumns<TrainingRecordApi.TrainingAttachment> = [
+const attachmentColumns: VxeTableGridColumns = [
   {
     title: '文件名',
-    key: 'originalName',
-    ellipsis: { tooltip: true },
-    render: (row) =>
-      h('div', { class: 'flex items-center gap-1' }, [
-        h(
-          'a',
-          {
-            href: row.fileUrl,
-            target: '_blank',
-            rel: 'noopener',
-            class: 'text-primary',
-          },
-          { default: () => row.originalName },
-        ),
-        row.isLatest
-          ? h(NTag, { size: 'small', type: 'success', bordered: false }, { default: () => '最新' })
-          : null,
-      ]),
+    field: 'originalName',
+    showOverflow: 'tooltip',
+    slots: { default: 'fileName' },
   },
-  { title: '版本', key: 'version', width: 90, render: (row) => row.version || '-' },
-  { title: '大小', key: 'fileSize', width: 90, render: (row) => formatFileSize(row.fileSize) },
-  { title: '上传人', key: 'uploadedBy', width: 110, render: (row) => row.uploadedBy || '-' },
-  { title: '上传时间', key: 'createdAt', width: 160, render: (row) => formatDateTime(row.createdAt) },
+  { title: '版本', field: 'version', width: 90, align: 'center', slots: { default: 'fileVersion' } },
+  { title: '大小', field: 'fileSize', width: 90, align: 'center', slots: { default: 'fileSize' } },
+  { title: '上传人', field: 'uploadedBy', width: 110, align: 'center', slots: { default: 'fileUploadedBy' } },
+  { title: '上传时间', field: 'createdAt', width: 160, align: 'center', slots: { default: 'fileTime' } },
   {
     title: '操作',
-    key: 'action',
+    field: 'action',
     width: 150,
-    render: (row) =>
-      h(NSpace, { size: 4, justify: 'center' }, {
-        default: () => [
-          h(
-            'a',
-            { href: row.fileUrl, target: '_blank', rel: 'noopener', class: 'text-primary' },
-            { default: () => '下载' },
-          ),
-          h(
-            NPopconfirm,
-            { onPositiveClick: () => handleDeleteAttachment(row) },
-            {
-              trigger: () =>
-                h(NButton, { size: 'small', type: 'error', quaternary: true }, { default: () => '删除' }),
-              default: () => '确定删除该附件吗？',
-            },
-          ),
-        ],
-      }),
+    align: 'center',
+    slots: { default: 'fileAction' },
   },
 ];
 
@@ -629,27 +595,23 @@ const CHANGE_TYPE_LABEL: Record<string, string> = {
   delete: '删除',
 };
 
-const versionColumns: DataTableColumns<TrainingRecordApi.TrainingVersionRecord> = [
-  { title: '版本', key: 'version', width: 100, render: (row) => row.version || '-' },
+const versionColumns: VxeTableGridColumns = [
+  { title: '版本', field: 'version', width: 100, align: 'center', slots: { default: 'verVersion' } },
   {
     title: '变更类型',
-    key: 'changeType',
+    field: 'changeType',
     width: 110,
-    render: (row) =>
-      h(
-        NTag,
-        { size: 'small', bordered: false, type: CHANGE_TYPE_TAG[row.changeType] ?? 'default' },
-        { default: () => CHANGE_TYPE_LABEL[row.changeType] ?? row.changeType ?? '-' },
-      ),
+    align: 'center',
+    slots: { default: 'verChangeType' },
   },
   {
     title: '变更说明',
-    key: 'changeSummary',
-    ellipsis: { tooltip: true },
-    render: (row) => row.changeSummary || '-',
+    field: 'changeSummary',
+    showOverflow: 'tooltip',
+    slots: { default: 'verSummary' },
   },
-  { title: '操作人', key: 'changedBy', width: 110, render: (row) => row.changedBy || '-' },
-  { title: '时间', key: 'createdAt', width: 160, render: (row) => formatDateTime(row.createdAt) },
+  { title: '操作人', field: 'changedBy', width: 110, align: 'center', slots: { default: 'verChangedBy' } },
+  { title: '时间', field: 'createdAt', width: 160, align: 'center', slots: { default: 'verTime' } },
 ];
 
 async function onSubmit() {
@@ -1274,27 +1236,69 @@ onMounted(async () => {
                 @change="onAttachmentFileChange"
               />
             </div>
-            <NDataTable
+            <HseDataGrid
               v-if="attachmentList.length"
               :columns="attachmentColumns"
               :data="attachmentList"
               :loading="attachmentLoading"
-              size="small"
-              :bordered="false"
-              :pagination="false"
-            />
+              :pager="false"
+              row-key="id"
+              :height="320"
+            >
+              <template #fileName="{ row }">
+                <div class="flex items-center gap-1">
+                  <a
+                    :href="row.fileUrl"
+                    target="_blank"
+                    rel="noopener"
+                    class="text-primary"
+                  >{{ row.originalName }}</a>
+                  <NTag v-if="row.isLatest" size="small" type="success" :bordered="false">最新</NTag>
+                </div>
+              </template>
+              <template #fileVersion="{ row }">{{ row.version || '-' }}</template>
+              <template #fileSize="{ row }">{{ formatFileSize(row.fileSize) }}</template>
+              <template #fileUploadedBy="{ row }">{{ row.uploadedBy || '-' }}</template>
+              <template #fileTime="{ row }">{{ formatDateTime(row.createdAt) }}</template>
+              <template #fileAction="{ row }">
+                <NSpace :size="4" justify="center">
+                  <a
+                    :href="row.fileUrl"
+                    target="_blank"
+                    rel="noopener"
+                    class="text-primary"
+                  >下载</a>
+                  <NPopconfirm @positive-click="handleDeleteAttachment(row)">
+                    <template #trigger>
+                      <NButton size="small" type="error" quaternary>删除</NButton>
+                    </template>
+                    确定删除该附件吗？
+                  </NPopconfirm>
+                </NSpace>
+              </template>
+            </HseDataGrid>
             <NText v-else depth="3">暂无附件，点击右上角上传</NText>
           </NTabPane>
           <NTabPane name="versions" tab="历史版本">
-            <NDataTable
+            <HseDataGrid
               v-if="versionList.length"
               :columns="versionColumns"
               :data="versionList"
               :loading="versionLoading"
-              size="small"
-              :bordered="false"
-              :pagination="false"
-            />
+              :pager="false"
+              row-key="id"
+              :height="320"
+            >
+              <template #verVersion="{ row }">{{ row.version || '-' }}</template>
+              <template #verChangeType="{ row }">
+                <NTag :size="'small'" :bordered="false" :type="CHANGE_TYPE_TAG[row.changeType] ?? 'default'">
+                  {{ CHANGE_TYPE_LABEL[row.changeType] ?? row.changeType ?? '-' }}
+                </NTag>
+              </template>
+              <template #verSummary="{ row }">{{ row.changeSummary || '-' }}</template>
+              <template #verChangedBy="{ row }">{{ row.changedBy || '-' }}</template>
+              <template #verTime="{ row }">{{ formatDateTime(row.createdAt) }}</template>
+            </HseDataGrid>
             <NText v-else depth="3">暂无版本变更记录</NText>
           </NTabPane>
         </NTabs>

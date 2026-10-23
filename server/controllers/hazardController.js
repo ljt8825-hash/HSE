@@ -30,7 +30,8 @@ function respond(req, res, r) {
   if (r.__t === 'csv') {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     const fname = `hazards_${new Date().toISOString().slice(0, 10)}.csv`;
-    res.setHeader('Content-Disposition', `attachment; filename="${fname}"`);
+    // RFC 5987 双保险：filename 回退 ASCII + filename* 编码（当前 fname 为 ASCII，统一加固防御中文扩展）
+    res.setHeader('Content-Disposition', `attachment; filename="${fname}"; filename*=UTF-8''${encodeURIComponent(fname)}`);
     return res.send(r.csv);
   }
   return res.json(success(r.payload ?? null, r.message));

@@ -62,16 +62,20 @@ const canEdit = computed(() => hasAccessByRoles(['admin', 'safety_manager']));
 const STATUS_LABEL: Record<string, string> = {
   active: '在职',
   left: '离职',
+  inactive: '离职',
   pending: '待岗',
   retired: '退休',
   rehire: '返聘',
+  reinstated: '返聘',
 };
 const STATUS_TAG: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'neutral'> = {
   active: 'success',
   left: 'neutral',
+  inactive: 'neutral',
   pending: 'warning',
   retired: 'info',
   rehire: 'info',
+  reinstated: 'info',
 };
 
 // ===================== 列表数据 =====================
@@ -662,7 +666,7 @@ onMounted(() => {
             { label: '待岗', value: 'pending' },
             { label: '离职', value: 'left' },
             { label: '退休', value: 'retired' },
-            { label: '返聘', value: 'rehire' },
+            { label: '返聘', value: 'reinstated' },
           ]"
         />
       </NGi>

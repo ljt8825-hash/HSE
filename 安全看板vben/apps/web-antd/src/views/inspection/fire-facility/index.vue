@@ -450,21 +450,54 @@ const formRules: Record<string, any> = {
 const detailDrawerVisible = ref(false);
 const currentRecord = ref<SiteApi.FireEquipment | null>(null);
 
-// ========= 负责人关联花名册 =========
+// ========= 负责人关联花名册（转运站操作员） =========
+// 业务口径（用户确认）：消防设施负责人 = 该转运站所属乡镇作业中心中「职位=转运站操作员」的在岗人员。
+// 操作员发生替换（xx辞职/离职 → xx正式员工接替）时，负责人应随现任在岗操作员更新。
 const managerOptions = ref<Array<{ value: string; phone?: string; employee_code?: string }>>([]);
-const rosterEmployees = ref<EmployeeApi.EmployeeItem[]>([]);
 const rosterTip = ref('');
+const employees = ref<EmployeeApi.EmployeeItem[]>([]);
 
-// 从转运站名称解析乡镇名
-function getTownshipFromStation(stationName: string): string {
-  return stationName.replace('转运站', '').trim();
+function isTransferStationOperator(emp: EmployeeApi.EmployeeItem): boolean {
+  return emp.position_name === '转运站操作员';
 }
-
-// 从 org_path 解析二级部门（转运站）
-function getSecondaryDept(orgPath?: string): string {
-  if (!orgPath) return '';
-  const parts = orgPath.split('/').filter(Boolean);
-  return parts[1] || '';
+// 在岗：org_status=active（后端已将「辞职/死亡」等映射为 left）
+function isInService(emp: EmployeeApi.EmployeeItem): boolean {
+  return emp.org_status === 'active';
+}
+// 归一化乡镇键：去掉子位置(值班室1等)/转运站/作业中心/乡镇后缀，用于「安装位置」与操作员部门对齐
+function normTownKey(input: string): string {
+  return String(input || '')
+    .replace(/-.*$/, '')
+    .replace(/转运站$/g, '')
+    .replace(/作业中心$/g, '')
+    .replace(/乡镇$/g, '')
+    .replace(/[镇乡]$/g, '')
+    .trim();
+}
+// 负责人可能为多名，以 /、中文顿号等分隔
+function splitManagerNames(manager?: string): string[] {
+  return String(manager || '')
+    .split(/[\/、,，;；\s]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+const transferOperators = computed<EmployeeApi.EmployeeItem[]>(() =>
+  (employees.value || []).filter((e) => isTransferStationOperator(e) && isInService(e)),
+);
+function operatorsOfStation(location?: string): EmployeeApi.EmployeeItem[] {
+  const key = normTownKey(location || '');
+  if (!key) return [];
+  return transferOperators.value.filter((op) => normTownKey(op.dept_name || '') === key);
+}
+// 按职位筛选，仅拉取转运站操作员（后端 positionName 精确过滤）
+async function loadEmployees() {
+  try {
+    const res = await getEmployeeList({ pageSize: 9999, positionName: '转运站操作员' } as any);
+    employees.value = res.list ?? [];
+  } catch (err) {
+    console.warn('加载转运站操作员失败:', err);
+    employees.value = [];
+  }
 }
 
 // 加载转运站选项（从部门树提取含"转运站"的二级部门）
@@ -491,43 +524,24 @@ async function loadTransferStations() {
   }
 }
 
-// 根据安装位置加载花名册人员
-async function fetchRosterForLocation(location: string) {
+// 根据安装位置返回负责人候选（现任在岗转运站操作员）
+function fetchRosterForLocation(location: string) {
   if (!location) {
     managerOptions.value = [];
-    rosterEmployees.value = [];
     rosterTip.value = '';
     return;
   }
-  try {
-    const township = getTownshipFromStation(location);
-    const res = await getEmployeeList({
-      township,
-      pageSize: 999,
-    } as any);
-    // 过滤出该转运站的人员
-    const employees = (res.list || []).filter((emp) => {
-      const secondaryDept = getSecondaryDept(emp.org_path);
-      return secondaryDept === location;
-    });
-    rosterEmployees.value = employees;
-    managerOptions.value = employees.map((e) => ({
-      value: e.name,
-      phone: e.phone || '',
-      employee_code: e.employee_code || '',
-    }));
-    if (employees.length === 0) {
-      rosterTip.value = `未找到 ${location} 的花名册人员，可手动输入`;
-    } else {
-      rosterTip.value = `已关联 ${location} 花名册 ${employees.length} 人`;
-    }
-  } catch (err) {
-    console.warn('获取花名册失败:', err);
-    managerOptions.value = [];
-    rosterEmployees.value = [];
-    rosterTip.value = '花名册加载失败，可手动输入';
-  }
+  const ops = operatorsOfStation(location);
+  managerOptions.value = ops.map((e) => ({
+    value: e.name || '',
+    phone: e.phone || '',
+    employee_code: e.employee_code || '',
+  }));
+  rosterTip.value = ops.length
+    ? `已关联 ${location} 转运站操作员 ${ops.length} 人`
+    : `未找到 ${location} 的在岗转运站操作员，可手动输入`;
 }
+
 
 function handleLocationChange(value: any) {
   const loc = typeof value === 'string' ? value : '';
@@ -787,15 +801,12 @@ const personnelMatchResult = ref<{
   }>;
 } | null>(null);
 
-// 全量花名册缓存（按转运站分组）
-const rosterByStation = ref<Record<string, EmployeeApi.EmployeeItem[]>>({});
-
-// 判断某条记录的负责人是否在花名册中
+// 判断某条记录的负责人是否为本站位在岗转运站操作员（支持多名分隔）
 function isManagerMismatch(record: any): boolean {
-  if (!record.manager || !record.location) return false;
-  const roster = rosterByStation.value[record.location];
-  if (!roster) return false;
-  return !roster.some((emp) => emp.name === record.manager);
+  const names = splitManagerNames(record.manager);
+  if (!names.length || !record.location) return false;
+  const opsAtStation = operatorsOfStation(record.location);
+  return names.some((n) => !opsAtStation.some((op) => op.name === n));
 }
 
 const matchColumns = [
@@ -806,32 +817,12 @@ const matchColumns = [
   { title: '状态', key: 'status', width: 90, fixed: 'right' as const },
 ];
 
-// 加载全量花名册并按转运站分组
-async function loadRosterByStation() {
-  try {
-    const res = await getEmployeeList({ pageSize: 9999 });
-    const grouped: Record<string, EmployeeApi.EmployeeItem[]> = {};
-    for (const emp of res.list || []) {
-      const station = getSecondaryDept(emp.org_path);
-      if (station && station.includes('转运站')) {
-        if (!grouped[station]) {
-          grouped[station] = [];
-        }
-        grouped[station].push(emp);
-      }
-    }
-    rosterByStation.value = grouped;
-  } catch (err) {
-    console.warn('加载花名册失败:', err);
-  }
-}
-
-// 执行人员匹配校验
+// 执行人员匹配校验（转运站操作员口径）
 async function checkPersonnelMatch() {
   personnelMatchLoading.value = true;
   personnelMatchVisible.value = true;
   try {
-    await loadRosterByStation();
+    await loadEmployees();
     const mismatches: Array<{
       id: number;
       name: string;
@@ -842,12 +833,11 @@ async function checkPersonnelMatch() {
     let matched = 0;
 
     for (const facility of equipmentList.value) {
-      if (!facility.manager) {
-        continue;
-      }
+      const names = splitManagerNames(facility.manager);
+      if (!names.length) continue;
       const station = facility.location || '';
-      const roster = rosterByStation.value[station] || [];
-      const found = roster.some((emp) => emp.name === facility.manager);
+      const opsAtStation = operatorsOfStation(station);
+      const found = names.every((n) => opsAtStation.some((op) => op.name === n));
       if (found) {
         matched++;
       } else {
@@ -856,7 +846,7 @@ async function checkPersonnelMatch() {
           name: facility.name,
           location: station || '-',
           manager: facility.manager,
-          rosterNames: roster.map((e) => e.name),
+          rosterNames: opsAtStation.map((e) => e.name),
         });
       }
     }
@@ -903,10 +893,10 @@ function handleDownloadMatchErrors() {
   message.success('不匹配记录已下载');
 }
 
-// 监听列表变化，自动加载花名册用于匹配标注
+// 监听列表变化，自动加载转运站操作员用于匹配标注
 watch(equipmentList, () => {
-  if (equipmentList.value.length > 0 && Object.keys(rosterByStation.value).length === 0) {
-    loadRosterByStation();
+  if (equipmentList.value.length > 0 && employees.value.length === 0) {
+    loadEmployees();
   }
 });
 

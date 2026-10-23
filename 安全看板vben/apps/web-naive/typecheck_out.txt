@@ -1,0 +1,74 @@
+
+> @vben/web-naive@5.7.0 typecheck G:\hse-dashboard\安全看板vben\apps\web-naive
+> vue-tsc --noEmit --skipLibCheck
+
+src/views/hse/assessment-monthly/deduction-adjust.vue(126,7): error TS2322: Type 'number | null' is not assignable to type 'number | undefined'.
+  Type 'null' is not assignable to type 'number | undefined'.
+src/views/hse/assessment-monthly/deduction-adjust.vue(127,76): error TS2367: This comparison appears to be unintentional because the types 'number' and 'string' have no overlap.
+src/views/hse/assessment-monthly/deduction-adjust.vue(188,47): error TS2322: Type '"default" | "neutral" | "error" | "success" | "warning" | "info"' is not assignable to type '"primary" | "default" | "error" | "success" | "warning" | "info" | undefined'.
+  Type '"neutral"' is not assignable to type '"primary" | "default" | "error" | "success" | "warning" | "info" | undefined'.
+src/views/hse/assessment-monthly/scoring.vue(520,36): error TS2322: Type 'string | number' is not assignable to type 'number'.
+  Type 'string' is not assignable to type 'number'.
+src/views/hse/assessment-monthly/scoring.vue(520,68): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+src/views/hse/assessment-monthly/scoring.vue(521,38): error TS2322: Type 'string | number' is not assignable to type 'number'.
+  Type 'string' is not assignable to type 'number'.
+src/views/hse/assessment-monthly/scoring.vue(521,70): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+src/views/hse/assessment-rule/index.vue(160,45): error TS7006: Parameter 'name' implicitly has an 'any' type.
+src/views/hse/assessment-rule/index.vue(160,51): error TS7006: Parameter 'i' implicitly has an 'any' type.
+src/views/hse/assessment-rule/index.vue(744,25): error TS18048: 'n.children' is possibly 'undefined'.
+src/views/hse/assessment-rule/index.vue(1056,71): error TS2532: Object is possibly 'undefined'.
+src/views/hse/assessment-rule/index.vue(1062,18): error TS18048: 'row' is possibly 'undefined'.
+src/views/hse/assessment-rule/index.vue(1065,19): error TS18048: 'row' is possibly 'undefined'.
+src/views/hse/assessment-rule/index.vue(1066,19): error TS18048: 'row' is possibly 'undefined'.
+src/views/hse/assessment-rule/index.vue(1067,19): error TS18048: 'row' is possibly 'undefined'.
+src/views/hse/assessment-rule/index.vue(1068,22): error TS18048: 'row' is possibly 'undefined'.
+src/views/hse/assessment-rule/index.vue(1069,22): error TS18048: 'row' is possibly 'undefined'.
+src/views/hse/assessment-rule/index.vue(1070,20): error TS18048: 'row' is possibly 'undefined'.
+src/views/hse/assessment-rule/index.vue(1071,22): error TS18048: 'row' is possibly 'undefined'.
+src/views/hse/assessment-rule/index.vue(1072,21): error TS18048: 'row' is possibly 'undefined'.
+src/views/hse/assessment-rule/index.vue(1073,22): error TS18048: 'row' is possibly 'undefined'.
+src/views/hse/assessment-rule/index.vue(1073,55): error TS18048: 'row' is possibly 'undefined'.
+src/views/hse/assessment-rule/index.vue(1074,20): error TS18048: 'row' is possibly 'undefined'.
+src/views/hse/assessment-rule/index.vue(1074,51): error TS18048: 'row' is possibly 'undefined'.
+src/views/hse/assessment-rule/index.vue(1075,19): error TS18048: 'row' is possibly 'undefined'.
+src/views/hse/assessment-rule/index.vue(1076,17): error TS18048: 'row' is possibly 'undefined'.
+src/views/hse/assessment-rule/index.vue(1077,17): error TS18048: 'row' is possibly 'undefined'.
+src/views/hse/assessment-rule/index.vue(1082,47): error TS18048: 'row' is possibly 'undefined'.
+src/views/hse/assessment-rule/index.vue(1114,22): error TS2345: Argument of type '{ detailCode: null; detailName: string; deductScore: number; unit: string; sortOrder: number; _t: string; }' is not assignable to parameter of type '{ _t?: string | undefined; id: number; detailCode: string | null; detailName: string; deductScore: number; unit: string; sortOrder: number; }'.
+  Property 'id' is missing in type '{ detailCode: null; detailName: string; deductScore: number; unit: string; sortOrder: number; _t: string; }' but required in type '{ _t?: string | undefined; id: number; detailCode: string | null; detailName: string; deductScore: number; unit: string; sortOrder: number; }'.
+src/views/hse/assessment-rule/index.vue(1482,26): error TS2322: Type '"primary" | "success" | "warning" | "info"' is not assignable to type 'HseStatusType | undefined'.
+  Type '"primary"' is not assignable to type 'HseStatusType | undefined'.
+src/views/hse/assessment-rule/index.vue(1512,26): error TS2322: Type '"default" | "success"' is not assignable to type 'HseStatusType | undefined'.
+  Type '"default"' is not assignable to type 'HseStatusType | undefined'.
+src/views/hse/assessment-rule/index.vue(2022,30): error TS2322: Type '"default" | "info"' is not assignable to type 'HseStatusType | undefined'.
+  Type '"default"' is not assignable to type 'HseStatusType | undefined'.
+src/views/hse/assessment-rule/index.vue(2027,30): error TS2322: Type '"primary" | "success" | "warning" | "info"' is not assignable to type 'HseStatusType | undefined'.
+  Type '"primary"' is not assignable to type 'HseStatusType | undefined'.
+src/views/hse/assessment-rule/index.vue(2048,61): error TS18047: '__VLS_ctx.viewData' is possibly 'null'.
+src/views/hse/assessment-rule/index.vue(2052,30): error TS2322: Type '"default" | "success"' is not assignable to type 'HseStatusType | undefined'.
+  Type '"default"' is not assignable to type 'HseStatusType | undefined'.
+src/views/hse/employee/departments.vue(280,3): error TS2322: Type '(string | number)[]' is not assignable to type 'number[]'.
+  Type 'string | number' is not assignable to type 'number'.
+    Type 'string' is not assignable to type 'number'.
+src/views/hse/meeting-records/index.vue(164,15): error TS2532: Object is possibly 'undefined'.
+src/views/hse/meeting-records/index.vue(168,3): error TS2532: Object is possibly 'undefined'.
+src/views/hse/meeting-records/index.vue(322,23): error TS2322: Type 'string | null' is not assignable to type 'Value | null | undefined'.
+  Type 'string' is not assignable to type 'Value | null | undefined'.
+src/views/hse/meeting-records/index.vue(393,34): error TS2322: Type '"default" | "error" | "success"' is not assignable to type 'HseStatusType | undefined'.
+  Type '"default"' is not assignable to type 'HseStatusType | undefined'.
+src/views/hse/responsibility-forms/index.vue(13,3): error TS6133: 'NDatePicker' is declared but its value is never read.
+src/views/hse/responsibility-forms/index.vue(37,10): error TS6133: 'getEmployeeSelectorBatch' is declared but its value is never read.
+src/views/site/driver/violation/ViolationList.vue(878,54): error TS2345: Argument of type 'string | number' is not assignable to parameter of type 'number'.
+  Type 'string' is not assignable to type 'number'.
+src/views/site/driver/violation/ViolationList.vue(890,27): error TS2322: Type 'string' is not assignable to type 'boolean | undefined'.
+src/views/site/grid-ledger/index.vue(493,5): error TS2353: Object literal may only specify known properties, and 'sortOrder' does not exist in type 'ColumnOptions<any>'.
+src/views/site/grid/index.vue(255,10): error TS6133: 'onPageChange' is declared but its value is never read.
+src/views/site/grid/index.vue(569,10): error TS6133: 'handleViewViolations' is declared but its value is never read.
+src/views/site/violation/analysis.vue(79,7): error TS6133: 'reviewKeywords' is declared but its value is never read.
+src/views/training/certificates/index.vue(396,9): error TS2739: Type '{ id: number; name: string; trainingType: string; department: string; position: string; personnelType: string; trainingDate: string; validity: string; result: string; expiryStatus: "normal"; }' is missing the following properties from type 'TrainingRecordItem': trainer, durationMinutes, content, score
+src/views/training/certificates/index.vue(481,23): error TS2532: Object is possibly 'undefined'.
+src/views/training/certificates/index.vue(481,48): error TS2532: Object is possibly 'undefined'.
+src/views/training/certificates/index.vue(784,19): error TS7031: Binding element 'cellValue' implicitly has an 'any' type.
+ ELIFECYCLE  Command failed with exit code 2.

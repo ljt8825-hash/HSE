@@ -105,6 +105,8 @@ export const useAccessStore = defineStore('core-access', {
       'accessToken',
       'refreshToken',
       'accessCodes',
+      'accessMenus',
+      'accessRoutes',
       'isLockScreen',
       'lockScreenPassword',
     ],

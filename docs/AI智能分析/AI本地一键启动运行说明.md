@@ -43,7 +43,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File G:\hse-dashboard\start-hse-a
 | HSE Backend（开发栈） | 5888 | 环境变量 `HSE_BACKEND_PORT` 可覆盖；**禁止 5876** |
 | HSE Frontend（vite dev） | 5173 | 环境变量 `HSE_FRONTEND_PORT` 可覆盖 |
 | PostgreSQL | 5432 | 沿用 `server\.env` 的 `safety_dashboard` 库 |
-| Ollama | 11434 | 启动脚本只检查，不负责拉起 |
+| Ollama | 11434 | 启动脚本只检查，不负责拉起；未运行用 `scripts\start-ollama.ps1` 拉起 |
 | 生产 HSE Backend | 5876 | 由 `HSE-Backend` 计划任务（SYSTEM）管理，**脚本永不触碰** |
 
 覆盖端口示例：
@@ -172,9 +172,30 @@ Node              [OK]  v22.x
 ## 四、Ollama 检查
 
 - 启动脚本与健康检查均以 HTTP 为准：`http://127.0.0.1:11434/api/tags`，**不只看进程名**
-- 当前本机 Ollama 运行方式：**DBX 便携版**（Ollama.Ollama.Portable，winget 安装），自动监听 11434
-- 手动启动命令：`ollama serve`（若 Ollama 未运行）
+- 当前本机 Ollama 运行方式：**DBX 便携版**（Ollama.Ollama.Portable，winget 安装，`G:\ollama\ollama.exe`）
+- **拉起命令（推荐）**：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File G:\hse-dashboard\scripts\start-ollama.ps1
+```
+
+  该脚本幂等（11434 已可达则输出 `Already running（复用）`）、启动后轮询 HTTP 就绪、自动校验必需模型；
+  用**进程级** `OLLAMA_PORT=11434` 覆盖端口漂移，不改任何全局环境变量。
+- 手动启动命令（备用）：`ollama serve`
 - 检查脚本不会自动拉起 Ollama；Ollama 未运行时会明确报 `Ollama 未运行（127.0.0.1:11434 不可达）`
+
+### 4.1 端口漂移坑（OLLAMA_PORT）
+
+本机 User 环境变量存在 `OLLAMA_PORT=11438`（历史遗留）。它会让**裸 `ollama serve`** 监听 11438 而非契约端口 11434，
+从而让一键启动 `[3/7]` 恒失败、后端 `OLLAMA_BASE_URL=http://localhost:11434` 也连不上。
+
+- `scripts\start-ollama.ps1` 已在进程级覆盖，**不受影响**（脚本启动时会打印 `[WARN] User 环境变量 OLLAMA_PORT=11438`）
+- 如需根治（让裸 `ollama serve` 也走 11434），在确认无其他工具依赖 11438 后执行：
+
+```powershell
+[Environment]::SetEnvironmentVariable('OLLAMA_PORT', $null, 'User')
+# 执行后需重开终端生效
+```
 
 ---
 
@@ -245,10 +266,11 @@ node app.js
 
 | 现象 | 诊断 | 处理 |
 |------|------|------|
-| 11434 未监听 | `Test-NetConnection 127.0.0.1 -Port 11434` 失败 | 启动 Ollama（`ollama serve` 或打开 DBX） |
+| 11434 未监听 | `Test-NetConnection 127.0.0.1 -Port 11434` 失败 | 运行 `scripts\start-ollama.ps1`（或 `ollama serve`） |
+| 启动了 Ollama 但 11434 仍不可达 | 疑似端口漂移：`netstat -ano -p tcp \| findstr 1143` 看到 11438 | 环境变量 `OLLAMA_PORT=11438` 所致；用 `scripts\start-ollama.ps1`，或按 §4.1 清理该变量 |
 | 模型不存在 | 健康检查 [4]/[5] FAIL | `ollama pull qwen2.5:7b` / `ollama pull nomic-embed-text` |
 | 模型加载失败 / 生成超时 | Worker 窗口报错、冒烟测试超时 | 查看 Ollama 日志；CPU 环境冷启动慢属正常，等 2~3 分钟重试 |
-| Ollama 进程退出 | 健康检查 [3] FAIL | 重启 Ollama；检查是否被其他进程改过 OLLAMA_HOST |
+| Ollama 进程退出 | 健康检查 [3] FAIL | 重启 Ollama；检查是否被其他进程改过 OLLAMA_HOST / OLLAMA_PORT |
 
 ### Backend 相关
 

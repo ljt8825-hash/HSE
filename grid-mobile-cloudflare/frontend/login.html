@@ -11,6 +11,8 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="网格巡查">
   <meta name="theme-color" content="#1D4ED8">
+  <!-- 构建版本：与 check.html 同名 meta，用于真机远程比对「用户跑的是哪一版」 -->
+  <meta name="hse-build" content="2026-10-21.130">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f5f7fa; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
@@ -26,6 +28,9 @@
     .remember input { width: 16px; height: 16px; accent-color: #2563eb; margin: 0; }
     .remember .hint { color: #a8abb2; font-size: 12px; }
     .err { margin-top: 14px; font-size: 13px; color: #f56c6c; text-align: center; min-height: 18px; }
+    .diag { margin-top: 12px; font-size: 11px; color: #9aa3af; text-align: center; word-break: break-all; line-height: 1.6; }
+    .diag.bad { color: #b91c1c; background: #fef2f2; border-radius: 8px; padding: 8px; }
+    .diag button { display: block; width: auto !important; height: 32px !important; margin: 8px auto 0 !important; padding: 0 14px !important; font-size: 13px !important; background: #dc2626 !important; }
   </style>
 </head>
 <body>
@@ -42,9 +47,54 @@
     </div>
     <button id="btn">登 录</button>
     <div class="err" id="err"></div>
+    <div class="diag" id="diag"></div>
   </div>
-  <script src="./config.js?v=2026-10-16.95"></script>
-  <script src="./app.js?v=2026-10-16.95"></script>
+  <!-- CF-WPS-111 手机端自诊断：先注册错误采集，再加载业务脚本。
+       背景：2026-10-21 手机端登录页点了没反应，但服务端下发的 HTML/JS 字节与本地完全一致、
+       CSP 已放行内联脚本、登录接口 401 正常，桌面浏览器通过 —— 必须让手机自己说出原因。 -->
+  <script>
+  (function () {
+    var diag = window.__hseDiag = {
+      build: (document.querySelector('meta[name="hse-build"]') || {}).content || '?',
+      errors: []
+    };
+    function paint() {
+      var el = document.getElementById('diag');
+      if (!el) return;
+      var ok = typeof window.mobileApi === 'function' && typeof window.ensureSession === 'function';
+      var text = '版本 ' + diag.build + ' · 脚本' + (ok ? '已加载' : '未加载');
+      if (diag.errors.length) text += ' · ' + diag.errors[0];
+      el.textContent = text;
+      el.className = 'diag' + (ok && !diag.errors.length ? '' : ' bad');
+    }
+    function push(msg) {
+      if (diag.errors.indexOf(msg) < 0) diag.errors.push(msg);
+      paint();
+    }
+    window.addEventListener('error', function (e) {
+      var t = e.target;
+      // 资源加载失败（capture 阶段）与运行时错误分开报，定位完全不同。
+      // 只盯本站脚本：第三方统计脚本失败与登录无关，不能吓到现场用户。
+      if (t && t.tagName === 'SCRIPT') {
+        var src = String(t.src || '');
+        if (!src || src.indexOf(location.origin) !== 0) return;
+        push('脚本加载失败：' + src.split('/').pop());
+      } else {
+        push('脚本报错：' + (e.message || '未知'));
+      }
+    }, true);
+    window.addEventListener('unhandledrejection', function (e) {
+      var r = e.reason;
+      push('异常：' + ((r && (r.message || r)) || '未知'));
+    });
+    window.__hseDiagPaint = paint;
+    // 手机很少真正退出应用，从后台切回会恢复 bfcache 里的旧页面实例（旧脚本状态）。
+    // persisted=true 说明是缓存恢复而非新加载 → 强制重载拿最新 HTML/脚本。
+    window.addEventListener('pageshow', function (e) { if (e.persisted) location.reload(); });
+  })();
+  </script>
+  <script src="./config.js?v=2026-10-16.104"></script>
+  <script src="./app.js?v=2026-10-16.104"></script>
   <script>
     const btn = document.getElementById('btn');
     const err = document.getElementById('err');
@@ -81,10 +131,11 @@
           if (rememberEl.checked) saveLoginCreds(phone, password); else clearLoginCreds();
           location.replace(HOME);
         } else {
-          err.textContent = r.body.message || '登录失败';
+          // 带上真实状态码：真机排查时能区分「请求没发出 / 超时 / 被网关拒绝 / 凭据错误」
+          err.textContent = (r.body.message || '登录失败') + (r.status ? '（HTTP ' + r.status + '）' : '（无响应，可能超时或断网）');
         }
-      } catch {
-        err.textContent = '网络异常，请稍后再试';
+      } catch (e) {
+        err.textContent = '网络异常：' + ((e && e.message) || '请求未发出');
       } finally {
         btn.disabled = false; btn.textContent = '登 录';
       }
@@ -93,6 +144,36 @@
     [phoneEl, pwdEl].forEach(el => el.addEventListener('keydown', e => {
       if (e.key === 'Enter') { e.preventDefault(); doLogin(); }
     }));
+  </script>
+  <!-- 加载后自检：业务全局缺失（旧缓存 / 被拦截 / 语法不兼容）时显示红色提示，
+       并给一个「清缓存并刷新」出口，避免用户面对一个点了没反应的按钮。 -->
+  <script>
+  (function () {
+    function check() {
+      if (window.__hseDiagPaint) window.__hseDiagPaint();
+      var ok = typeof window.mobileApi === 'function' && typeof window.ensureSession === 'function'
+        && typeof window.setSession === 'function' && typeof window.doLogin === 'function';
+      if (ok) return;
+      var box = document.getElementById('diag');
+      if (!box) return;
+      box.className = 'diag bad';
+      if (box.querySelector('button')) return;
+      var b = document.createElement('button');
+      b.textContent = '清缓存并刷新';
+      b.onclick = function () {
+        this.disabled = true;
+        var sw = (navigator.serviceWorker && navigator.serviceWorker.getRegistrations)
+          ? navigator.serviceWorker.getRegistrations() : Promise.resolve([]);
+        sw.then(function (rs) { return Promise.all((rs || []).map(function (r) { return r.unregister(); })); })
+          .then(function () { return (window.caches && caches.keys) ? caches.keys() : []; })
+          .then(function (ks) { return Promise.all((ks || []).map(function (k) { return caches.delete(k); })); })
+          .catch(function () {})
+          .then(function () { location.replace('/login?r=' + Date.now()); });
+      };
+      box.appendChild(b);
+    }
+    if (document.readyState === 'complete') check(); else window.addEventListener('load', check);
+  })();
   </script>
 </body>
 </html>

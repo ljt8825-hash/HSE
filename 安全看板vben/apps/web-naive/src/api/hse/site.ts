@@ -107,6 +107,10 @@ export namespace SiteApi {
     violatorName: string;
     violatorGender: string;
     violatorAge: string;
+    /** 违章人所属部门：已确认部门名；unmatched/unselected 场景为 ''（后端归属解析后返回） */
+    violatorDept?: string;
+    /** 违章人所属部门归属状态：matched=自动归属 / manual=人工确认落库(可选，选错可改) / unmatched=未匹配 / unselected=待人工选择（公司级重名） */
+    violatorDeptStatus?: 'matched' | 'manual' | 'unmatched' | 'unselected';
     vehicleType: string;
     reportStatus: string;
     imageContent: string;
@@ -133,6 +137,10 @@ export namespace SiteApi {
     hasViolation?: boolean;
     /** 仅含整改后照片有内容的记录（排除占位符），供三违台账使用 */
     hasRectifiedPhoto?: boolean;
+    /** 违章人所属部门筛选：具体部门名 / 'unmatched'(未匹配) / 'unselected'(未选择) */
+    attDept?: string;
+    /** 单条定位：按台账记录主键过滤（配合「点击扣分明细 → 定位网格台账原始记录」用） */
+    recordId?: string | number;
     page?: number;
     pageSize?: number;
     /** 服务端排序字段（白名单列）；默认不传按巡查日期倒序 */
@@ -147,6 +155,8 @@ export namespace SiteApi {
     reportStatuses: string[];
     /** 月份选项（YYYY-MM）：按巡查日期聚合，最新在前 */
     months?: string[];
+    /** 「违章人所属部门」具体部门选项（来自花名册 dept 口径） */
+    attDepartments?: string[];
   }
 
   export interface SiteStats {

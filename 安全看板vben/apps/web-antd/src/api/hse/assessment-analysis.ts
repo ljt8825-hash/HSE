@@ -52,6 +52,7 @@ export namespace AssessmentAnalysisApi {
     demeritRecords: number;
     demeritPoints: number;
     demeritDriverCount: number;
+    totalDriverCount: number;
     currentYearDemeritRecords: number;
     currentYearDemeritPoints: number;
     demeritRate: number;
@@ -155,53 +156,34 @@ export namespace AssessmentAnalysisApi {
   }
 
   export interface TownshipRankingItem {
+    targetId: number | null;
     townshipId: number;
     townshipName: string;
     unitType: string;
-    overallRank: number;
-    overallScore: number;
-    riskLevelScore: number;
-    violationScore: number;
-    driverRiskScore: number;
-    accidentScore: number;
-    patrolScore: number;
-    managementScore: number;
-    gridCompliance: number;
-    accidentCount: number;
-    majorAccidentCount: number;
-    seriousAccidentCount: number;
-    generalAccidentCount: number;
-    minorAccidentCount: number;
-    accidentWeightedIndex: number;
-    violationCount: number;
-    seriousViolationCount: number;
-    generalViolationCount: number;
-    minorViolationCount: number;
-    driverCount: number;
-    demeritCount5y: number;
-    demeritPoints5y: number;
-    demeritCountCurrent: number;
-    demeritPointsCurrent: number;
-    employeeCount: number;
-    majorRiskCount: number;
-    highRiskCount: number;
-    mediumRiskCount: number;
-    lowRiskCount: number;
-    avgRiskScore: number;
-    hazardCount: number;
-    highRiskHazardCount: number;
-    resolvedHazardCount: number;
-    pendingHazardCount: number;
-    totalGridChiefCount: number;
-    level1GridChiefCount: number;
-    level2GridChiefCount: number;
-    level3GridChiefCount: number;
-    inspectionCount: number;
+    managerName: string | null;
+    managerEmployeeId: number | null;
+    managerCode: string | null;
+    position: string | null;
+    scoreAuto: number | null;
+    scoreTotal: number | null;
+    grade: string | null;
+    status: string | null;
+    reviewStatus: string | null;
+    scoreSource: 'manager' | 'admin_aggregate' | null;
+    adminCount: number | null;
+    adminAvgScore: number | null;
+    adminMaxScore: number | null;
+    overallRank: number | null;
+    hasData: boolean;
   }
 
   export interface TownshipRankingData {
     currentYear: number;
+    cycleId: number | null;
+    cycleName: string | null;
+    cycleStatus: string | null;
     rankings: TownshipRankingItem[];
+    noDataTownships: string[];
   }
 
   export type GoalStatus = 'completed' | 'in_progress' | 'warning';
@@ -289,8 +271,10 @@ export function getDepartmentRanking() {
   return requestClient.get<AssessmentAnalysisApi.DepartmentRankingData>(`${BASE}/department-ranking`);
 }
 
-export function getTownshipRanking() {
-  return requestClient.get<AssessmentAnalysisApi.TownshipRankingData>(`${BASE}/township-ranking`);
+export function getTownshipRanking(cycleId?: number | string) {
+  return requestClient.get<AssessmentAnalysisApi.TownshipRankingData>(`${BASE}/township-ranking`, {
+    params: cycleId != null && cycleId !== '' ? { cycleId } : undefined,
+  });
 }
 
 export function getAssessmentGoals() {

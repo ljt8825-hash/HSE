@@ -16,14 +16,17 @@ import {
   NDatePicker,
   NDescriptions,
   NDescriptionsItem,
+  NEmpty,
   NForm,
   NFormItem,
   NGi,
   NInput,
   NModal,
+  NPagination,
   NPopconfirm,
   NSelect,
   NSpace,
+  NSpin,
   NStatistic,
   NText,
   NUpload,
@@ -134,6 +137,14 @@ const currentPage = ref(1);
 const pageSize = ref(10);
 const sortBy = ref<string | undefined>(undefined);
 const sortOrder = ref<'asc' | 'desc' | undefined>(undefined);
+/** 列表/卡片双视图切换（类似乡镇排名） */
+const viewMode = ref<'list' | 'card'>('list');
+
+const SIGN_TEXT: Record<string, string> = { signed: '已签订', unsigned: '未签订' };
+const SIGN_TAG: Record<string, 'success' | 'danger' | 'neutral'> = {
+  signed: 'success',
+  unsigned: 'danger',
+};
 
 async function fetchStats() {
   try {
@@ -192,6 +203,16 @@ function onReset() {
 function onPageChange(payload: { currentPage: number; pageSize: number }) {
   currentPage.value = payload.currentPage;
   pageSize.value = payload.pageSize;
+  loadData();
+}
+
+function handleCardPage(page: number) {
+  currentPage.value = page;
+  loadData();
+}
+function handleCardPageSize(pageSize: number) {
+  pageSize.value = pageSize;
+  currentPage.value = 1;
   loadData();
 }
 
@@ -701,8 +722,31 @@ onMounted(async () => {
       </NGi>
     </HseSearchPanel>
 
-    <!-- 列表 -->
+    <!-- 列表 / 卡片视图切换 -->
+    <div class="mb-3 flex items-center justify-between">
+      <NText depth="2" class="text-sm">责任书台账（{{ total }} 人）</NText>
+      <NSpace :size="8">
+        <NButton
+          size="small"
+          :type="viewMode === 'list' ? 'primary' : 'default'"
+          secondary="viewMode !== 'list'"
+          @click="viewMode = 'list'"
+        >
+          列表视图
+        </NButton>
+        <NButton
+          size="small"
+          :type="viewMode === 'card' ? 'primary' : 'default'"
+          secondary="viewMode !== 'card'"
+          @click="viewMode = 'card'"
+        >
+          卡片视图
+        </NButton>
+      </NSpace>
+    </div>
+
     <HseDataGrid
+      v-if="viewMode === 'list'"
       ref="gridRef"
       :columns="columns"
       :data="data"
@@ -740,6 +784,77 @@ onMounted(async () => {
         </NSpace>
       </template>
     </HseDataGrid>
+
+    <!-- 卡片视图 -->
+    <div v-else-if="viewMode === 'card'" class="resp-card-grid">
+      <NSpin :show="loading">
+        <NEmpty v-if="!loading && !data.length" description="暂无数据" class="py-12" />
+        <template v-else>
+          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            <NCard
+              v-for="row in data"
+              :key="row.employeeId"
+              :bordered="false"
+              class="resp-card"
+              :class="{
+                'resp-card-signed': row.signStatus === 'signed',
+                'resp-card-unsigned': row.signStatus !== 'signed',
+              }"
+            >
+              <div class="resp-card-head">
+                <div class="resp-card-name">
+                  <span class="resp-card-emp">{{ row.name }}</span>
+                  <span class="resp-card-code">{{ row.employeeCode }}</span>
+                </div>
+                <HseStatusTag v-if="row.noSourceRecord && row.signStatus !== 'signed'" type="neutral">
+                  未签订·无源
+                </HseStatusTag>
+                <HseStatusTag v-else :type="SIGN_TAG[row.signStatus] || 'danger'">
+                  {{ SIGN_TEXT[row.signStatus] || row.signStatus }}
+                </HseStatusTag>
+              </div>
+              <NDescriptions :column="1" label-placement="left" size="small" class="resp-card-desc">
+                <NDescriptionsItem label="所属部门">{{ row.department || '-' }}</NDescriptionsItem>
+                <NDescriptionsItem label="班组">{{ row.team || '-' }}</NDescriptionsItem>
+                <NDescriptionsItem label="职位">{{ row.position || '-' }}</NDescriptionsItem>
+                <NDescriptionsItem label="直接上级">{{ row.supervisor || '-' }}</NDescriptionsItem>
+                <NDescriptionsItem label="入职日期">
+                  {{ row.hireDate ? fmtDate(row.hireDate) : '-' }}
+                </NDescriptionsItem>
+              </NDescriptions>
+              <div class="resp-card-actions">
+                <NSpace :size="8">
+                  <NButton size="small" quaternary type="primary" @click="handleView(row)">查看</NButton>
+                  <NButton
+                    size="small"
+                    quaternary
+                    type="primary"
+                    @click="onActionMenuSelect('edit', row)"
+                  >
+                    {{ row.contractId ? '编辑' : '录入' }}
+                  </NButton>
+                  <NPopconfirm v-if="row.contractId" @positive-click="handleDelete(row)">
+                    <template #trigger>
+                      <NButton size="small" quaternary type="error">删除</NButton>
+                    </template>
+                    确认删除该责任书？
+                  </NPopconfirm>
+                </NSpace>
+              </div>
+            </NCard>
+          </div>
+          <div class="pt-4">
+            <NPagination
+              :page="currentPage"
+              :page-size="pageSize"
+              :item-count="total"
+              @update:page="handleCardPage"
+              @update:page-size="handleCardPageSize"
+            />
+          </div>
+        </template>
+      </NSpin>
+    </div>
 
     <!-- 录入/编辑责任书 -->
     <NModal
@@ -1025,5 +1140,54 @@ onMounted(async () => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ===== 卡片视图 ===== */
+.resp-card-grid {
+  min-height: 120px;
+}
+.resp-card {
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+.resp-card:hover {
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+  transform: translateY(-2px);
+}
+.resp-card-signed {
+  border-left: 3px solid #18a058;
+}
+.resp-card-unsigned {
+  border-left: 3px solid #d03050;
+}
+.resp-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.resp-card-name {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.resp-card-emp {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1f1f1f;
+}
+.resp-card-code {
+  font-size: 12px;
+  color: #999;
+}
+.resp-card-desc {
+  margin-bottom: 8px;
+}
+.resp-card-actions {
+  padding-top: 8px;
+  border-top: 1px dashed #e5e7eb;
 }
 </style>

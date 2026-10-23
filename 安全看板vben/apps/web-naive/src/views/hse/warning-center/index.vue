@@ -76,15 +76,54 @@
           <!-- 预警表格 -->
           <NCard :bordered="false" class="table-card">
             <template #header>预警列表</template>
-            <NDataTable
+            <HseDataGrid
               :columns="warningColumns"
               :data="warningList"
               :loading="warningLoading"
-              :row-key="(row: WarningCenterApi.WarningRecord) => row.id"
-              :pagination="warningPagination"
-              size="small"
-              :scroll-x="1400"
-            />
+              row-key="id"
+              :pager="{ pageSizes: [10, 20, 50] }"
+              :total="warningPagination.itemCount"
+              :current-page="warningPagination.page"
+              :page-size="warningPagination.pageSize"
+              @page-change="onWarningPageChange"
+            >
+              <template #sourceTypeCell="{ row }">
+                <NTag type="info" :bordered="false">{{ row.sourceTypeLabel }}</NTag>
+              </template>
+              <template #warningLevelCell="{ row }">
+                <NTag :type="getColorTagType(row.warningLevelColor)" :bordered="false">
+                  {{ row.warningLevelLabel }}
+                </NTag>
+              </template>
+              <template #statusCell="{ row }">
+                <NTag :bordered="false">{{ row.statusLabel }}</NTag>
+              </template>
+              <template #warningActionCell="{ row }">
+                <NSpace justify="center" :wrap="false" size="small">
+                  <NButton size="small" text type="primary" @click="goWarningDetail(row)">
+                    查看详情
+                  </NButton>
+                  <NButton
+                    v-if="canJumpToSource(row)"
+                    size="small"
+                    text
+                    type="primary"
+                    @click="goToSourceSystem(row)"
+                  >
+                    {{ getJumpButtonText(row) }}
+                  </NButton>
+                  <NButton
+                    v-if="row.rectificationTaskId"
+                    size="small"
+                    text
+                    type="primary"
+                    @click="goTaskFromWarning(row)"
+                  >
+                    查看任务
+                  </NButton>
+                </NSpace>
+              </template>
+            </HseDataGrid>
           </NCard>
         </div>
       </NTabPane>
@@ -119,15 +158,94 @@
           <!-- 任务表格 -->
           <NCard :bordered="false" class="table-card">
             <template #header>整改任务列表</template>
-            <NDataTable
+            <HseDataGrid
               :columns="taskColumns"
               :data="taskList"
               :loading="taskLoading"
-              :row-key="(row: WarningCenterApi.WarningTask) => row.id"
-              :pagination="taskPagination"
-              size="small"
-              :scroll-x="1600"
-            />
+              row-key="id"
+              :pager="{ pageSizes: [10, 20, 50] }"
+              :total="taskPagination.itemCount"
+              :current-page="taskPagination.page"
+              :page-size="taskPagination.pageSize"
+              @page-change="onTaskPageChange"
+            >
+              <template #taskWarningLevelCell="{ row }">
+                <NTag :type="getWarningLevelTagType(row.warningLevel)" :bordered="false">
+                  {{ row.warningLevelLabel }}
+                </NTag>
+              </template>
+              <template #deadlineCell="{ row }">
+                <span :class="getDeadlineClass(row.overdueStatus)">
+                  {{ row.deadlineDate }}
+                  <span v-if="row.overdueStatus === 'overdue'" class="overdue-tag">逾期</span>
+                  <span v-else-if="row.overdueStatus === 'expiring'" class="expiring-tag">
+                    即将到期
+                  </span>
+                </span>
+              </template>
+              <template #taskStatusCell="{ row }">
+                <NTag :type="getColorTagType(row.statusColor)" :bordered="false">
+                  {{ row.statusLabel }}
+                </NTag>
+              </template>
+              <template #priorityCell="{ row }">
+                <NTag :type="getColorTagType(getPriorityColor(row.priority))" :bordered="false">
+                  {{ row.priorityLabel }}
+                </NTag>
+              </template>
+              <template #progressCell="{ row }">
+                <NProgress type="line" :percentage="row.progress ?? 0" />
+              </template>
+              <template #taskActionCell="{ row }">
+                <NSpace justify="center" :wrap="false" size="small">
+                  <NButton
+                    v-if="row.status === 'pending'"
+                    size="small"
+                    text
+                    type="primary"
+                    @click="handleDispatch(row)"
+                  >
+                    下发
+                  </NButton>
+                  <NButton
+                    v-if="row.status === 'dispatched'"
+                    size="small"
+                    text
+                    type="primary"
+                    @click="handleProcess(row)"
+                  >
+                    处理
+                  </NButton>
+                  <NButton
+                    v-if="row.status === 'processing'"
+                    size="small"
+                    text
+                    type="primary"
+                    @click="openSubmitProofModal(row)"
+                  >
+                    提交证明
+                  </NButton>
+                  <NButton
+                    v-if="row.status === 'pending_review'"
+                    size="small"
+                    text
+                    type="primary"
+                    @click="openReviewModal(row)"
+                  >
+                    复核
+                  </NButton>
+                  <NButton
+                    v-if="row.status === 'rejected'"
+                    size="small"
+                    text
+                    type="primary"
+                    @click="handleProcess(row)"
+                  >
+                    处理
+                  </NButton>
+                </NSpace>
+              </template>
+            </HseDataGrid>
           </NCard>
         </div>
 
@@ -277,13 +395,21 @@
 
           <!-- 按等级统计表格 -->
           <NCard title="按预警等级统计" :bordered="false" class="table-card">
-            <NDataTable
+            <HseDataGrid
               :columns="levelStatColumns"
               :data="analysisData?.byLevel || []"
-              :pagination="false"
-              :row-key="(row: WarningCenterApi.AnalysisData['byLevel'][number]) => row.level"
-              size="small"
-            />
+              row-key="level"
+              :pager="false"
+            >
+              <template #levelStatCell="{ row }">
+                <NTag :type="getWarningLevelTagType(row.level)" :bordered="false">
+                  {{ row.levelLabel }}
+                </NTag>
+              </template>
+              <template #rateCell="{ row }">
+                <NProgress type="line" :percentage="row.rate ?? 0" />
+              </template>
+            </HseDataGrid>
           </NCard>
         </div>
       </NTabPane>
@@ -309,15 +435,48 @@
           <!-- 规则表格 -->
           <NCard :bordered="false" class="table-card">
             <template #header>预警规则列表</template>
-            <NDataTable
+            <HseDataGrid
               :columns="ruleColumns"
               :data="ruleList"
               :loading="ruleLoading"
-              :row-key="(row: WarningCenterApi.WarningRule) => row.id"
-              :pagination="rulePagination"
-              size="small"
-              :scroll-x="1400"
-            />
+              row-key="id"
+              :pager="{ pageSizes: [10, 20, 50] }"
+              :total="rulePagination.itemCount"
+              :current-page="rulePagination.page"
+              :page-size="rulePagination.pageSize"
+              @page-change="onRulePageChange"
+            >
+              <template #ruleSourceTypeCell="{ row }">
+                <NTag type="info" :bordered="false">{{ row.sourceTypeLabel }}</NTag>
+              </template>
+              <template #ruleWarningLevelCell="{ row }">
+                <NTag :type="getWarningLevelTagType(row.warningLevel)" :bordered="false">
+                  {{ row.warningLevelLabel }}
+                </NTag>
+              </template>
+              <template #targetTypeCell="{ row }">
+                {{ row.targetType === 'employee' ? '员工' : '组织' }}
+              </template>
+              <template #ruleVersionCell="{ row }">
+                <NTag type="info" :bordered="false">{{ row.version }}</NTag>
+              </template>
+              <template #ruleStatusCell="{ row }">
+                <NSwitch :value="row.status === 'active'" @update:value="handleToggleRule(row)">
+                  <template #checked>启用</template>
+                  <template #unchecked>停用</template>
+                </NSwitch>
+              </template>
+              <template #ruleActionCell="{ row }">
+                <NSpace justify="center" :wrap="false" size="small">
+                  <NButton size="small" text type="primary" @click="openEditRuleModal(row)">
+                    编辑
+                  </NButton>
+                  <NButton size="small" text type="primary" @click="openVersionDrawer(row)">
+                    版本历史
+                  </NButton>
+                </NSpace>
+              </template>
+            </HseDataGrid>
           </NCard>
         </div>
 
@@ -424,7 +583,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import {
   NButton,
@@ -448,15 +607,13 @@ import {
   NUpload,
   NUploadDragger,
   NProgress,
-  NTooltip,
-  type DataTableColumns,
-  NDataTable,
   NTabPane,
   NTabs,
 } from 'naive-ui';
+import type { VxeTableGridColumns } from '@vben/plugins/vxe-table';
 import type { ECOption, EchartsUIType } from '@vben/plugins/echarts';
 import { EchartsUI, useEcharts } from '@vben/plugins/echarts';
-import { HsePageLayout, HseStatCard } from '#/components/hse';
+import { HseDataGrid, HsePageLayout, HseStatCard } from '#/components/hse';
 import { $t } from '#/locales';
 // 离散 dialog/message：app.vue 未挂载 NDialogProvider/NMessageProvider，
 // 故禁止直引 naive-ui 的消息/弹层 composable，统一使用 #/adapter/naive 的离散实例。
@@ -587,85 +744,41 @@ const warningPagination = reactive({
   },
 });
 
-function renderWarningActions(row: WarningCenterApi.WarningRecord) {
-  const btns: any[] = [
-    h(
-      NButton,
-      { size: 'small', text: true, type: 'primary', onClick: () => goWarningDetail(row) },
-      { default: () => '查看详情' },
-    ),
-  ];
-  if (canJumpToSource(row)) {
-    btns.push(
-      h(
-        NButton,
-        { size: 'small', text: true, type: 'primary', onClick: () => goToSourceSystem(row) },
-        { default: () => getJumpButtonText(row) },
-      ),
-    );
-  }
-  if (row.rectificationTaskId) {
-    btns.push(
-      h(
-        NButton,
-        { size: 'small', text: true, type: 'primary', onClick: () => goTaskFromWarning(row) },
-        { default: () => '查看任务' },
-      ),
-    );
-  }
-  return h(NSpace, { justify: 'center', wrap: false, size: 'small' }, { default: () => btns });
-}
-
-const warningColumns = ref<DataTableColumns<WarningCenterApi.WarningRecord>>([
-  { title: '预警编号', key: 'warningCode', width: 140 },
+const warningColumns = ref<VxeTableGridColumns>([
+  { title: '预警编号', field: 'warningCode', width: 140 },
   {
     title: '预警来源',
-    key: 'sourceTypeLabel',
+    field: 'sourceTypeLabel',
     width: 110,
-    render: (row) =>
-      h(NTag, { type: 'info', bordered: false }, { default: () => row.sourceTypeLabel }),
+    slots: { default: 'sourceTypeCell' },
   },
   {
     title: '预警等级',
-    key: 'warningLevelLabel',
+    field: 'warningLevelLabel',
     width: 100,
-    render: (row) =>
-      h(
-        NTag,
-        { type: getColorTagType(row.warningLevelColor), bordered: false },
-        { default: () => row.warningLevelLabel },
-      ),
+    slots: { default: 'warningLevelCell' },
   },
-  { title: '预警对象', key: 'targetName', width: 120 },
-  { title: '责任单位', key: 'orgName', width: 140 },
+  { title: '预警对象', field: 'targetName', width: 120 },
+  { title: '责任单位', field: 'orgName', width: 140 },
   {
     title: '风险原因',
-    key: 'riskReason',
+    field: 'riskReason',
     width: 200,
-    ellipsis: { tooltip: false },
-    render: (row) =>
-      h(
-        NTooltip,
-        {},
-        {
-          trigger: () => h('span', { class: 'ellipsis-cell' }, row.riskReason || '-'),
-          default: () => row.riskReason || '-',
-        },
-      ),
+    showOverflow: false,
   },
   {
     title: '状态',
-    key: 'statusLabel',
+    field: 'statusLabel',
     width: 100,
-    render: (row) => h(NTag, { bordered: false }, { default: () => row.statusLabel }),
+    slots: { default: 'statusCell' },
   },
-  { title: '创建时间', key: 'createdAt', width: 170 },
+  { title: '创建时间', field: 'createdAt', width: 170 },
   {
     title: '操作',
-    key: 'action',
+    field: 'action',
     width: 160,
     fixed: 'right',
-    render: (row) => renderWarningActions(row),
+    slots: { default: 'warningActionCell' },
   },
 ]);
 
@@ -716,6 +829,12 @@ function handleWarningSearch() {
 function handleWarningPageChange(page: number, pageSize: number) {
   warningPagination.page = page;
   warningPagination.pageSize = pageSize;
+  fetchWarningList();
+}
+
+function onWarningPageChange(payload: { currentPage: number; pageSize: number }) {
+  warningPagination.page = payload.currentPage;
+  warningPagination.pageSize = payload.pageSize;
   fetchWarningList();
 }
 
@@ -807,121 +926,47 @@ const taskPagination = reactive({
   },
 });
 
-function renderTaskActions(row: WarningCenterApi.WarningTask) {
-  const btns: any[] = [];
-  if (row.status === 'pending') {
-    btns.push(
-      h(
-        NButton,
-        { size: 'small', text: true, type: 'primary', onClick: () => handleDispatch(row) },
-        { default: () => '下发' },
-      ),
-    );
-  }
-  if (row.status === 'dispatched') {
-    btns.push(
-      h(
-        NButton,
-        { size: 'small', text: true, type: 'primary', onClick: () => handleProcess(row) },
-        { default: () => '处理' },
-      ),
-    );
-  }
-  if (row.status === 'processing') {
-    btns.push(
-      h(
-        NButton,
-        { size: 'small', text: true, type: 'primary', onClick: () => openSubmitProofModal(row) },
-        { default: () => '提交证明' },
-      ),
-    );
-  }
-  if (row.status === 'pending_review') {
-    btns.push(
-      h(
-        NButton,
-        { size: 'small', text: true, type: 'primary', onClick: () => openReviewModal(row) },
-        { default: () => '复核' },
-      ),
-    );
-  }
-  if (row.status === 'rejected') {
-    btns.push(
-      h(
-        NButton,
-        { size: 'small', text: true, type: 'primary', onClick: () => handleProcess(row) },
-        { default: () => '处理' },
-      ),
-    );
-  }
-  return h(NSpace, { justify: 'center', wrap: false, size: 'small' }, { default: () => btns });
-}
-
-const taskColumns = ref<DataTableColumns<WarningCenterApi.WarningTask>>([
-  { title: '任务编号', key: 'taskCode', width: 140 },
-  { title: '任务标题', key: 'taskTitle', width: 180 },
+const taskColumns = ref<VxeTableGridColumns>([
+  { title: '任务编号', field: 'taskCode', width: 140 },
+  { title: '任务标题', field: 'taskTitle', width: 180 },
   {
     title: '预警等级',
-    key: 'warningLevelLabel',
+    field: 'warningLevelLabel',
     width: 100,
-    render: (row) =>
-      h(
-        NTag,
-        { type: getWarningLevelTagType(row.warningLevel), bordered: false },
-        { default: () => row.warningLevelLabel },
-      ),
+    slots: { default: 'taskWarningLevelCell' },
   },
-  { title: '责任人', key: 'responsibleName', width: 110 },
-  { title: '责任单位', key: 'orgName', width: 140 },
+  { title: '责任人', field: 'responsibleName', width: 110 },
+  { title: '责任单位', field: 'orgName', width: 140 },
   {
     title: '整改期限',
-    key: 'deadlineDate',
+    field: 'deadlineDate',
     width: 140,
-    render: (row) => {
-      const children: any[] = [row.deadlineDate];
-      if (row.overdueStatus === 'overdue') {
-        children.push(h('span', { class: 'overdue-tag' }, '逾期'));
-      } else if (row.overdueStatus === 'expiring') {
-        children.push(h('span', { class: 'expiring-tag' }, '即将到期'));
-      }
-      return h('span', { class: getDeadlineClass(row.overdueStatus) }, children);
-    },
+    slots: { default: 'deadlineCell' },
   },
   {
     title: '状态',
-    key: 'statusLabel',
+    field: 'statusLabel',
     width: 110,
-    render: (row) =>
-      h(
-        NTag,
-        { type: getColorTagType(row.statusColor), bordered: false },
-        { default: () => row.statusLabel },
-      ),
+    slots: { default: 'taskStatusCell' },
   },
   {
     title: '优先级',
-    key: 'priorityLabel',
+    field: 'priorityLabel',
     width: 90,
-    render: (row) =>
-      h(
-        NTag,
-        { type: getColorTagType(getPriorityColor(row.priority)), bordered: false },
-        { default: () => row.priorityLabel },
-      ),
+    slots: { default: 'priorityCell' },
   },
   {
     title: '进度',
-    key: 'progress',
+    field: 'progress',
     width: 160,
-    render: (row) =>
-      h(NProgress, { type: 'line', percentage: row.progress ?? 0, showIndicator: true }),
+    slots: { default: 'progressCell' },
   },
   {
     title: '操作',
-    key: 'action',
+    field: 'action',
     width: 130,
     fixed: 'right',
-    render: (row) => renderTaskActions(row),
+    slots: { default: 'taskActionCell' },
   },
 ]);
 
@@ -980,6 +1025,12 @@ function handleTaskSearch() {
 function handleTaskPageChange(page: number, pageSize: number) {
   taskPagination.page = page;
   taskPagination.pageSize = pageSize;
+  fetchTaskList();
+}
+
+function onTaskPageChange(payload: { currentPage: number; pageSize: number }) {
+  taskPagination.page = payload.currentPage;
+  taskPagination.pageSize = payload.pageSize;
   fetchTaskList();
 }
 
@@ -1078,25 +1129,19 @@ const sourceChartRef = ref<EchartsUIType>();
 const { renderEcharts: renderTrendChart, resize: resizeTrendChart } = useEcharts(trendChartRef);
 const { renderEcharts: renderSourceChart, resize: resizeSourceChart } = useEcharts(sourceChartRef);
 
-const levelStatColumns = ref<DataTableColumns<WarningCenterApi.AnalysisData['byLevel'][number]>>([
+const levelStatColumns = ref<VxeTableGridColumns>([
   {
     title: '预警等级',
-    key: 'levelLabel',
+    field: 'levelLabel',
     width: 140,
-    render: (row) =>
-      h(
-        NTag,
-        { type: getWarningLevelTagType(row.level), bordered: false },
-        { default: () => row.levelLabel },
-      ),
+    slots: { default: 'levelStatCell' },
   },
-  { title: '任务数', key: 'total', width: 120 },
-  { title: '完成数', key: 'closed', width: 120 },
+  { title: '任务数', field: 'total', width: 120 },
+  { title: '完成数', field: 'closed', width: 120 },
   {
     title: '完成率',
-    key: 'rate',
-    render: (row) =>
-      h(NProgress, { type: 'line', percentage: row.rate ?? 0, showIndicator: true }),
+    field: 'rate',
+    slots: { default: 'rateCell' },
   },
 ]);
 
@@ -1222,78 +1267,45 @@ const rulePagination = reactive({
   },
 });
 
-function renderRuleActions(row: WarningCenterApi.WarningRule) {
-  const btns: any[] = [
-    h(
-      NButton,
-      { size: 'small', text: true, type: 'primary', onClick: () => openEditRuleModal(row) },
-      { default: () => '编辑' },
-    ),
-    h(
-      NButton,
-      { size: 'small', text: true, type: 'primary', onClick: () => openVersionDrawer(row) },
-      { default: () => '版本历史' },
-    ),
-  ];
-  return h(NSpace, { justify: 'center', wrap: false, size: 'small' }, { default: () => btns });
-}
-
-const ruleColumns = ref<DataTableColumns<WarningCenterApi.WarningRule>>([
-  { title: '规则编号', key: 'ruleCode', width: 140 },
-  { title: '规则名称', key: 'ruleName', width: 200 },
+const ruleColumns = ref<VxeTableGridColumns>([
+  { title: '规则编号', field: 'ruleCode', width: 140 },
+  { title: '规则名称', field: 'ruleName', width: 200 },
   {
     title: '预警来源',
-    key: 'sourceTypeLabel',
+    field: 'sourceTypeLabel',
     width: 110,
-    render: (row) =>
-      h(NTag, { type: 'info', bordered: false }, { default: () => row.sourceTypeLabel }),
+    slots: { default: 'ruleSourceTypeCell' },
   },
   {
     title: '预警等级',
-    key: 'warningLevelLabel',
+    field: 'warningLevelLabel',
     width: 100,
-    render: (row) =>
-      h(
-        NTag,
-        { type: getWarningLevelTagType(row.warningLevel), bordered: false },
-        { default: () => row.warningLevelLabel },
-      ),
+    slots: { default: 'ruleWarningLevelCell' },
   },
   {
     title: '对象类型',
-    key: 'targetType',
+    field: 'targetType',
     width: 100,
-    render: (row) => h('span', row.targetType === 'employee' ? '员工' : '组织'),
+    slots: { default: 'targetTypeCell' },
   },
   {
     title: '版本',
-    key: 'version',
+    field: 'version',
     width: 90,
-    render: (row) => h(NTag, { type: 'info', bordered: false }, { default: () => row.version }),
+    slots: { default: 'ruleVersionCell' },
   },
   {
     title: '状态',
-    key: 'status',
+    field: 'status',
     width: 110,
-    render: (row) =>
-      h(
-        NSwitch,
-        {
-          checked: row.status === 'active',
-          'onUpdate:value': () => handleToggleRule(row),
-        },
-        {
-          checked: () => '启用',
-          unchecked: () => '停用',
-        },
-      ),
+    slots: { default: 'ruleStatusCell' },
   },
   {
     title: '操作',
-    key: 'action',
+    field: 'action',
     width: 160,
     fixed: 'right',
-    render: (row) => renderRuleActions(row),
+    slots: { default: 'ruleActionCell' },
   },
 ]);
 
@@ -1344,6 +1356,12 @@ function handleRuleSearch() {
 function handleRulePageChange(page: number, pageSize: number) {
   rulePagination.page = page;
   rulePagination.pageSize = pageSize;
+  fetchRuleList();
+}
+
+function onRulePageChange(payload: { currentPage: number; pageSize: number }) {
+  rulePagination.page = payload.currentPage;
+  rulePagination.pageSize = payload.pageSize;
   fetchRuleList();
 }
 

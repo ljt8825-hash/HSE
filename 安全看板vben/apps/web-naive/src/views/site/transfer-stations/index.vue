@@ -8,6 +8,7 @@
  * 边界：不改既有 server 模块；列表返回 snake_case 行，提交用 camelCase payload。
  */
 import { computed, onMounted, reactive, ref } from 'vue';
+import { useRoute } from 'vue-router';
 
 import {
   NButton,
@@ -70,6 +71,13 @@ const searchForm = reactive<CheckLedgerApi.TransferStationListParams>({
 /** 当前选中月份（列表按此过滤），下拉选项由台账出现过的月份动态生成、倒序 */
 const selectedMonth = ref('');
 const monthOptions = ref<{ label: string; value: string }[]>([]);
+
+// 支持外部下钻：query 携带 month（YYYY-MM）时，加载后自动定位该月
+// （自动评分页「现场管理-转运站管理」列扣分明细点击下钻使用；无 query 时行为与默认一致）
+const route = useRoute();
+const drillMonth = computed(() =>
+  typeof route.query.month === 'string' ? route.query.month : '',
+);
 
 const currentMonth = computed(() => {
   const now = new Date();
@@ -135,7 +143,15 @@ async function loadData() {
     if (!monthOptions.value.length) {
       monthOptions.value = [{ label: currentMonth.value, value: currentMonth.value }];
     }
-    if (!monthOptions.value.some((o) => o.value === selectedMonth.value)) {
+    // 外部下钻（自动评分页点击下钻）：优先定位 query.month；不在下拉时补入
+    const dm = drillMonth.value;
+    if (dm) {
+      if (!monthOptions.value.some((o) => o.value === dm)) {
+        monthOptions.value.push({ label: dm, value: dm });
+        monthOptions.value.sort((a, b) => b.value.localeCompare(a.value));
+      }
+      selectedMonth.value = dm;
+    } else if (!monthOptions.value.some((o) => o.value === selectedMonth.value)) {
       selectedMonth.value = monthOptions.value[0]?.value ?? currentMonth.value;
     }
     applyFilter();

@@ -167,7 +167,7 @@ const routes: RouteRecordRaw[] = [
             },
             name: 'PortalMirrorViolationAnalysis',
             path: '/objectives/assessment-monthly/mirror/violation-analysis',
-            component: () => import('#/views/site/violation/analysis.vue'),
+            component: () => import('#/views/analysis/violation/index.vue'),
           },
           {
             meta: {
@@ -177,7 +177,7 @@ const routes: RouteRecordRaw[] = [
             },
             name: 'PortalMirrorViolationLedger',
             path: '/objectives/assessment-monthly/mirror/violation-ledger',
-            component: () => import('#/views/site/violation/ledger.vue'),
+            component: () => import('#/views/ledger/violation/index.vue'),
           },
           {
             meta: {
@@ -227,7 +227,7 @@ const routes: RouteRecordRaw[] = [
             },
             name: 'PortalMirrorGridLedger',
             path: '/objectives/assessment-monthly/mirror/grid-ledger',
-            component: () => import('#/views/site/grid-ledger/index.vue'),
+            component: () => import('#/views/ledger/grid/index.vue'),
           },
           {
             meta: {
@@ -237,7 +237,7 @@ const routes: RouteRecordRaw[] = [
             },
             name: 'PortalMirrorTrainingRecords',
             path: '/objectives/assessment-monthly/mirror/training-records',
-            component: () => import('#/views/training/ledger/index.vue'),
+            component: () => import('#/views/ledger/training/index.vue'),
           },
         ],
       },

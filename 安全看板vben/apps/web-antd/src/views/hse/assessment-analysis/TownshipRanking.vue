@@ -1,23 +1,42 @@
 <template>
   <div class="township-ranking">
     <Card :bordered="false" class="ranking-header">
-      <a-radio-group v-model:value="viewMode" @change="handleViewModeChange">
-        <a-radio value="table">列表视图</a-radio>
-        <a-radio value="card">卡片视图</a-radio>
-      </a-radio-group>
+      <div class="ranking-header-row">
+        <a-radio-group v-model:value="viewMode" @change="handleViewModeChange">
+          <a-radio value="table">列表视图</a-radio>
+          <a-radio value="card">卡片视图</a-radio>
+        </a-radio-group>
+        <a-tag v-if="data.cycleName" color="blue">考核周期：{{ data.cycleName }}</a-tag>
+      </div>
     </Card>
 
     <Card v-if="viewMode === 'table'" :bordered="false" class="table-view">
-      <a-table :columns="tableColumns" :data-source="filteredData" :pagination="false" row-key="townshipId">
+      <a-table :columns="tableColumns" :data-source="filteredData" :pagination="false" row-key="targetId">
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'rank'">
-            <span :class="getRankClass(record.overallRank)">{{ record.overallRank }}</span>
+            <span :class="getRankClass(record.overallRank)">{{ record.overallRank ?? '-' }}</span>
           </template>
-          <template v-if="column.key === 'overallScore'">
-            <span :class="getScoreClass(record.overallScore)">{{ record.overallScore.toFixed(1) }}</span>
+          <template v-if="column.key === 'manager'">
+            <span v-if="record.hasData && record.scoreSource === 'manager'">{{ record.managerName }}</span>
+            <a-tooltip
+              v-else-if="record.scoreSource === 'admin_aggregate'"
+              :title="`管理员聚合得分：${record.adminCount}人平均 ${record.adminAvgScore}，最高 ${record.adminMaxScore}`"
+            >
+              <span class="admin-aggregate">管理员（{{ record.adminCount ?? '-' }}人）</span>
+            </a-tooltip>
+            <span v-else>无考核对象</span>
           </template>
-          <template v-if="column.key === 'riskLevel'">
-            <a-tag :color="getRiskLevelColor(record.avgRiskScore)">{{ getRiskLevelText(record.avgRiskScore) }}</a-tag>
+          <template v-if="column.key === 'scoreTotal'">
+            <span :class="getScoreClass(record.scoreTotal)">
+              {{ record.scoreTotal != null ? record.scoreTotal.toFixed(1) : '-' }}
+            </span>
+          </template>
+          <template v-if="column.key === 'grade'">
+            <a-tag v-if="record.grade" :color="getGradeColor(record.grade)">{{ record.grade }}</a-tag>
+            <span v-else>-</span>
+          </template>
+          <template v-if="column.key === 'reviewStatus'">
+            <span>{{ getReviewText(record.reviewStatus) }}</span>
           </template>
         </template>
       </a-table>
@@ -25,35 +44,36 @@
 
     <div v-else class="card-view">
       <Row :gutter="[16, 16]" class="card-grid">
-        <Col v-for="item in filteredData" :key="item.townshipId" :xs="24" :sm="12" :lg="8">
-          <Card :bordered="false" class="township-card" :class="getCardClass(item.overallScore)">
-          <div class="card-header">
-            <span class="card-rank" :class="getRankClass(item.overallRank)">{{ item.overallRank }}</span>
-            <span class="card-name">{{ item.townshipName }}</span>
-            <a-tag :color="getRiskLevelColor(item.avgRiskScore)">{{ getRiskLevelText(item.avgRiskScore) }}</a-tag>
-          </div>
-          <div class="card-score">
-            <span class="score-value">{{ item.overallScore.toFixed(1) }}</span>
-            <span class="score-label">综合得分</span>
-          </div>
-          <div class="card-stats">
-            <div class="stat-item">
-              <span class="stat-value" :class="{ danger: item.accidentCount > 0 }">{{ item.accidentCount }}</span>
-              <span class="stat-label">事故</span>
+        <Col v-for="item in filteredData" :key="item.targetId ?? item.townshipId" :xs="24" :sm="12" :lg="8">
+          <Card :bordered="false" class="township-card" :class="getCardClass(item.scoreTotal)">
+            <div class="card-header">
+              <span class="card-rank" :class="getRankClass(item.overallRank)">{{ item.overallRank ?? '-' }}</span>
+              <span class="card-name">{{ item.townshipName }}</span>
+              <a-tag v-if="item.grade" :color="getGradeColor(item.grade)">{{ item.grade }}</a-tag>
             </div>
-            <div class="stat-item">
-              <span class="stat-value" :class="{ warning: item.violationCount > 0 }">{{ item.violationCount }}</span>
-              <span class="stat-label">三违</span>
+            <div class="card-manager">
+              <span v-if="item.hasData && item.scoreSource === 'manager'" class="manager-name">
+                {{ item.managerName }}（经理）
+              </span>
+              <span v-else-if="item.scoreSource === 'admin_aggregate'" class="manager-name admin-aggregate">
+                管理员聚合（{{ item.adminCount ?? '-' }}人平均）
+              </span>
+              <span v-else class="manager-name">无考核对象</span>
             </div>
-            <div class="stat-item">
-              <span class="stat-value">{{ item.demeritPoints5y }}</span>
-              <span class="stat-label">扣分</span>
+            <div class="card-score">
+              <span class="score-value">{{ item.scoreTotal != null ? item.scoreTotal.toFixed(1) : '-' }}</span>
+              <span class="score-label">综合得分</span>
             </div>
-            <div class="stat-item">
-              <span class="stat-value">{{ item.resolvedHazardCount }}/{{ item.hazardCount }}</span>
-              <span class="stat-label">整改</span>
+            <div v-if="item.hasData" class="card-stats">
+              <div class="stat-item">
+                <span class="stat-label">审核</span>
+                <span class="stat-value">{{ getReviewText(item.reviewStatus) }}</span>
+              </div>
+              <div v-if="item.scoreSource === 'admin_aggregate'" class="stat-item">
+                <span class="stat-label">管理员最高分</span>
+                <span class="stat-value">{{ item.adminMaxScore ?? '-' }}</span>
+              </div>
             </div>
-          </div>
           </Card>
         </Col>
       </Row>
@@ -80,52 +100,56 @@ function handleViewModeChange(e: any) {
   viewMode.value = e.target.value;
 }
 
-function getRankClass(rank: number): string {
+function getRankClass(rank: number | null): string {
+  if (rank == null) return 'rank-normal';
   if (rank === 1) return 'rank-gold';
   if (rank === 2) return 'rank-silver';
   if (rank === 3) return 'rank-bronze';
   return 'rank-normal';
 }
 
-function getScoreClass(score: number): string {
+function getScoreClass(score: number | null): string {
+  if (score == null) return 'score-danger';
   if (score >= 90) return 'score-excellent';
   if (score >= 80) return 'score-good';
   if (score >= 60) return 'score-warning';
   return 'score-danger';
 }
 
-function getCardClass(score: number): string {
+function getCardClass(score: number | null): string {
+  if (score == null) return 'card-danger';
   if (score >= 90) return 'card-excellent';
   if (score >= 80) return 'card-good';
   if (score >= 60) return 'card-warning';
   return 'card-danger';
 }
 
-function getRiskLevelColor(score: number): string {
-  if (score >= 70) return 'red';
-  if (score >= 50) return 'orange';
-  if (score >= 30) return 'gold';
-  return 'green';
+function getGradeColor(grade: string | null): string {
+  if (!grade) return 'default';
+  if (grade === 'A') return 'green';
+  if (grade === 'B') return 'blue';
+  if (grade === 'C') return 'orange';
+  return 'red';
 }
 
-function getRiskLevelText(score: number): string {
-  if (score >= 70) return '重大风险';
-  if (score >= 50) return '高风险';
-  if (score >= 30) return '中风险';
-  return '低风险';
+function getReviewText(status: string | null): string {
+  if (!status) return '-';
+  const map: Record<string, string> = {
+    pending: '待审',
+    approved: '已确认（锁定）',
+    rejected: '已驳回',
+    adjusted: '已调整（锁定）',
+  };
+  return map[status] ?? status;
 }
 
 const tableColumns = [
   { key: 'rank', title: '排名', width: 60, align: 'center' },
   { key: 'townshipName', title: '乡镇/片区', width: 150 },
-  { key: 'unitType', title: '类型', width: 80 },
-  { key: 'overallScore', title: '综合得分', width: 100, align: 'center' },
-  { key: 'riskLevel', title: '风险等级', width: 100, align: 'center' },
-  { key: 'accidentCount', title: '事故起数', width: 80, align: 'center' },
-  { key: 'violationCount', title: '三违次数', width: 80, align: 'center' },
-  { key: 'demeritPoints5y', title: '扣分', width: 80, align: 'center' },
-  { key: 'hazardCount', title: '隐患数', width: 80, align: 'center' },
-  { key: 'resolvedHazardCount', title: '已整改', width: 80, align: 'center' },
+  { key: 'manager', title: '经理', width: 100, align: 'center' },
+  { key: 'scoreTotal', title: '综合得分', width: 100, align: 'center' },
+  { key: 'grade', title: '等级', width: 70, align: 'center' },
+  { key: 'reviewStatus', title: '审核状态', width: 100, align: 'center' },
 ];
 </script>
 
@@ -133,6 +157,12 @@ const tableColumns = [
 .township-ranking {
   .ranking-header {
     margin-bottom: 16px;
+
+    .ranking-header-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
   }
 
   .table-view {
@@ -185,6 +215,12 @@ const tableColumns = [
       font-size: 14px;
     }
 
+    .admin-aggregate {
+      cursor: help;
+      color: hsl(var(--muted-foreground));
+      text-decoration: underline dotted;
+    }
+
     .score-excellent { color: #52c41a; font-weight: 600; }
     .score-good { color: #1890ff; font-weight: 600; }
     .score-warning { color: #faad14; font-weight: 600; }
@@ -215,7 +251,7 @@ const tableColumns = [
         display: flex;
         align-items: center;
         gap: 8px;
-        margin-bottom: 12px;
+        margin-bottom: 8px;
 
         .card-rank {
           width: 28px;
@@ -241,6 +277,15 @@ const tableColumns = [
         }
       }
 
+      .card-manager {
+        margin-bottom: 12px;
+
+        .manager-name {
+          font-size: 13px;
+          color: hsl(var(--muted-foreground));
+        }
+      }
+
       .card-score {
         text-align: center;
         margin-bottom: 16px;
@@ -263,7 +308,7 @@ const tableColumns = [
 
       .card-stats {
         display: grid;
-        grid-template-columns: repeat(4, 1fr);
+        grid-template-columns: repeat(1, 1fr);
         gap: 8px;
 
         .stat-item {
@@ -271,12 +316,9 @@ const tableColumns = [
 
           .stat-value {
             display: block;
-            font-size: 16px;
+            font-size: 14px;
             font-weight: 600;
             color: hsl(var(--foreground));
-
-            &.danger { color: #f5222d; }
-            &.warning { color: #faad14; }
           }
 
           .stat-label {
@@ -289,6 +331,3 @@ const tableColumns = [
   }
 }
 </style>
-
-<!-- 设计系统对齐：保留 :deep(.ant-table-thead>tr>th{background:hsl(var(--muted))}) —— 已用语义变量，主题可跟随 -->
-

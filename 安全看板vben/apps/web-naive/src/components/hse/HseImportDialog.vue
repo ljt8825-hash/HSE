@@ -61,6 +61,8 @@ interface Props {
   previewError?: string | null;
   /** OCR 识别进行中（上传后到出结果期间的加载态） */
   ocrLoading?: boolean;
+  /** AI 识图逐页进度：已识别 / 总页数（识别期间实时展示） */
+  ocrProgress?: { done: number; total: number } | null;
   /** OCR 识别后的引导建议：照片/超大归档等质量受限时提示改用 Excel 模板 */
   ocrAdvice?: string | null;
   /** 确认导入中（loading） */
@@ -80,6 +82,7 @@ const props = withDefaults(defineProps<Props>(), {
   previewError: null,
   ocrLoading: false,
   ocrAdvice: null,
+  ocrProgress: null,
   confirming: false,
   result: null,
 });
@@ -278,6 +281,12 @@ watch(
         <NSpin size="small" />
         <NText depth="3" class="text-sm">
           正在识别文件，扫描件逐页解析可能需要几分钟，请耐心等待…
+        </NText>
+        <NText v-if="ocrProgress" class="text-sm">
+          已识别
+          <span class="font-semibold text-[hsl(158_64%_38%)]">{{ ocrProgress.done }}</span>
+          <template v-if="ocrProgress.total"> / {{ ocrProgress.total }} 页</template>
+          <template v-else> 页</template>
         </NText>
       </div>
 

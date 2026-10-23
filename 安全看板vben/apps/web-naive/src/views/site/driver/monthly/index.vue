@@ -25,7 +25,8 @@ let rosterSyncing = false;
  *    故改为分页拉全（pageSize=200 循环）后在前端按月份过滤。
  * 能力：导入(driver-monthly) / 同步花名册 / 新增·编辑 / 详情 / 删除(二次确认) / 人员匹配校验
  */
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onActivated, onMounted, reactive, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 
 import {
   NAlert,
@@ -85,6 +86,41 @@ const searchForm = reactive({
 /** 当前选中的考核月份（列表按此过滤，替代原「考核月份」列与搜索框） */
 const selectedMonth = ref('');
 const monthOptions = ref<{ label: string; value: string }[]>([]);
+
+// 支持外部下钻：query 携带 month（YYYY-MM）时，加载后自动定位该月
+// （自动评分页「现场管理-驾驶员管理」列扣分明细点击下钻使用；无 query 时行为与默认一致）
+const route = useRoute();
+const router = useRouter();
+const drillMonth = computed(() =>
+  typeof route.query.month === 'string' ? route.query.month : '',
+);
+/** 支持外部下钻：query 携带 driver（驾驶员姓名）时，定位并高亮该驾驶员行 */
+const drillDriver = computed(() => (typeof route.query.driver === 'string' ? route.query.driver.trim() : ''));
+/** 当前高亮定位的驾驶员姓名（空 = 未定位） */
+const locateName = ref('');
+/** 定位的驾驶员行（data 中按姓名精确匹配，供定位横幅展示） */
+const locatedDriver = computed(() =>
+  locateName.value ? data.value.find((r) => String(r.name || '').trim() === locateName.value) : null,
+);
+function driverRowClassName({ row }: { row: any }): string {
+  return locateName.value && String(row?.name || '').trim() === locateName.value ? 'driver-locate-row' : '';
+}
+function applyDriverLocate() {
+  if (!drillDriver.value) return;
+  locateName.value = drillDriver.value;
+  searchForm.keyword = drillDriver.value;
+  if (!monthOptions.value.some((o) => o.value === selectedMonth.value)) {
+    const fd = data.value.find((r) => String(r.name || '').trim() === drillDriver.value);
+    if (fd && fd.month) selectedMonth.value = String(fd.month);
+  }
+  applyFilter();
+}
+function exitLocateDriver() {
+  locateName.value = '';
+  searchForm.keyword = '';
+  void router.replace({ query: { ...(selectedMonth.value ? { month: selectedMonth.value } : {}) } });
+  applyFilter();
+}
 
 /** 当前月（YYYY-MM）：花名册同步 / 新增记录的默认考核月份 */
 const currentMonth = computed(() => {
@@ -160,7 +196,15 @@ async function loadData() {
       .map((m) => ({ label: m, value: m }));
     // 空洞补全：把相邻已存在月份间缺的月份（如 2026-08）补进下拉，使无台账月份也可选
     fillDropdownGaps();
-    if (!monthOptions.value.some((o) => o.value === selectedMonth.value)) {
+    // 外部下钻（自动评分页点击下钻）：优先定位 query.month；不在下拉时补入
+    const dm = drillMonth.value;
+    if (dm) {
+      if (!monthOptions.value.some((o) => o.value === dm)) {
+        monthOptions.value.push({ label: dm, value: dm });
+        monthOptions.value.sort((a, b) => b.value.localeCompare(a.value));
+      }
+      selectedMonth.value = dm;
+    } else if (!monthOptions.value.some((o) => o.value === selectedMonth.value)) {
       selectedMonth.value = monthOptions.value[0]?.value ?? currentMonth.value;
     }
     // 三违列数据：当月三违扣分记录（每条计 1 分）；须在选中月份确定后拉取
@@ -175,11 +219,13 @@ async function loadData() {
   }
 }
 
-/** 当前月份 + 关键字 + 部门 过滤后的集合（列表分页与人员校验共用） */
+/** 当前月份 + 关键字 + 部门 过滤后的集合（列表分页与人员校验共用）；
+ *  修正「人员未去重」：同月同名仅保留一行（优先保留带 personnelId 的行，其次取 id 较大的新行），
+ *  只做展示层去重，不落库、不动重复行的子项数值。 */
 function filteredRows(): SiteApi.DriverMonthly[] {
   const kw = searchForm.keyword.trim();
   const dept = searchForm.department.trim();
-  return allRows.value.filter(
+  const rows = allRows.value.filter(
     (r) =>
       (!selectedMonth.value || (r.month || '') === selectedMonth.value) &&
       // 剔除离职驾驶员：后端 is_driver=true 已排除离职者，凡不在「在职驾驶员」名单中的姓名视为离职/非驾驶员，
@@ -188,6 +234,28 @@ function filteredRows(): SiteApi.DriverMonthly[] {
       (!kw || (r.name || '').includes(kw)) &&
       (!dept || (r.department || '').includes(dept)),
   );
+  // 同人同月去重：优先保留有 personnelId 者，其次 id 较大者
+  const bestByName = new Map<string, SiteApi.DriverMonthly>();
+  for (const r of rows) {
+    const name = (r.name || '').trim();
+    if (!name) continue;
+    const prev = bestByName.get(name);
+    if (!prev) {
+      bestByName.set(name, r);
+      continue;
+    }
+    const rHas = r.personnelId != null;
+    const pHas = prev.personnelId != null;
+    if (rHas !== pHas) {
+      if (rHas) bestByName.set(name, r);
+    } else if (Number(r.id || 0) > Number(prev.id || 0)) {
+      bestByName.set(name, r);
+    }
+  }
+  return rows.filter((r) => {
+    const name = (r.name || '').trim();
+    return !name || bestByName.get(name) === r;
+  });
 }
 
 /** 列表不分页：按当前月份 + 关键字 + 部门过滤后全部展示 */
@@ -359,6 +427,16 @@ function threeViolationCount(row: SiteApi.DriverMonthly): number {
   const name = (row.name || '').trim();
   if (!name) return 0;
   return threeViolationCountMap.value[name] ?? 0;
+}
+
+/** 三违扣分明细：选中考核月份下该驾驶员的三违记录（按时间升序，供悬浮菜单展示哪天/什么原因） */
+function violationDetailsOf(row: SiteApi.DriverMonthly): SiteApi.DriverViolation[] {
+  const name = (row.name || '').trim();
+  const m = selectedMonth.value;
+  if (!name || !m) return [];
+  return threeViolationRows
+    .filter((r) => (r.name || '').trim() === name && monthOf(r.violationTime) === m)
+    .sort((a, b) => String(a.violationTime || '').localeCompare(String(b.violationTime || '')));
 }
 
 /**
@@ -615,6 +693,41 @@ function monthlyScore(row: any): number {
   return sub + threeViolationCount(row);
 }
 
+/**
+ * 扣分明细居中 Modal（对齐「三违管理考核」数字明细样式）：
+ * - 三违：逐条记录（日期/类型/原因/地点/车牌），每条计 1 分
+ * - 手工列（三检/灯牌/灯具/监控/消防）：月度累计计数，暂无逐笔明细，附备注
+ * 数字 >0 时点击弹出；考核分数列不点击（同三违管理考核）。
+ */
+const detailModalShow = ref(false);
+const detailCol = ref<'threeViolation' | 'manual'>('threeViolation');
+const detailRow = ref<SiteApi.DriverMonthly | null>(null);
+const detailManualTitle = ref('');
+const detailManualValue = ref(0);
+
+function openThreeViolationDetail(row: SiteApi.DriverMonthly) {
+  detailCol.value = 'threeViolation';
+  detailRow.value = row;
+  detailModalShow.value = true;
+}
+function openManualDetail(row: SiteApi.DriverMonthly, title: string, value: number) {
+  detailCol.value = 'manual';
+  detailRow.value = row;
+  detailManualTitle.value = title;
+  detailManualValue.value = value;
+  detailModalShow.value = true;
+}
+function detailModalTitle(): string {
+  return detailCol.value === 'threeViolation' ? '三违 · 扣分明细' : `${detailManualTitle.value} · 扣分明细`;
+}
+
+/** 三违明细项下钻：跳转「驾驶员违章记录」页，预选三违 Tab 并预填该驾驶员姓名（对齐交通安全档案累计扣分下钻） */
+function jumpToViolationRecords() {
+  const name = String(detailRow.value?.name || '').trim();
+  if (!name) return;
+  void router.push({ path: '/site/driver/violation', query: { tab: 'threeViolation', name } });
+}
+
 // ===================== 表格列 =====================
 const columns = ref<VxeTableGridColumns>([
   { type: 'checkbox', width: 50, align: 'center', fixed: 'left' },
@@ -660,6 +773,21 @@ onMounted(async () => {
   await onRefresh();
   // 首次进入：按花名册自动生成固定考核人员（后续导入花名册后再次进入会同步更新姓名）
   await syncFromRoster(selectedMonth.value || currentMonth.value);
+  // 外部下钻定位：query.driver 设置关键字并高亮该驾驶员行（须在数据与月份确定后执行）
+  applyDriverLocate();
+});
+
+// Tabbar keep-alive：页面被缓存后 onMounted 不再触发。再次从自动评分页下钻进入
+// （query.month/driver 变化）时，重新定位并高亮目标驾驶员行。
+watch(
+  () => [route.query.month, route.query.driver],
+  () => {
+    applyDriverLocate();
+  },
+);
+// keep-alive：每次标签页被重新激活（再次下钻进入）时，无论 query 是否变化都重新定位高亮
+onActivated(() => {
+  applyDriverLocate();
 });
 </script>
 
@@ -709,6 +837,17 @@ onMounted(async () => {
       </NGi>
     </HseSearchPanel>
 
+    <!-- 定位模式提示条 -->
+    <NAlert v-if="locateName" class="mb-4" :bordered="false" type="info" closable @close="exitLocateDriver">
+      <template #header>
+        <div class="flex items-center gap-2">
+          <span>已定位驾驶员</span>
+          <span v-if="locatedDriver">{{ locatedDriver?.name }}（{{ locatedDriver?.department || '-' }}）· {{ selectedMonth }} · 考核分 {{ monthlyScore(locatedDriver) }}</span>
+          <span v-else>「{{ locateName }}」月内无记录</span>
+        </div>
+      </template>
+    </NAlert>
+
     <!-- 表格 -->
     <HseDataGrid
       :columns="columns"
@@ -716,6 +855,7 @@ onMounted(async () => {
       :loading="loading"
       :pager="false"
       :editable="false"
+      :row-class-name="driverRowClassName"
     >
       <template #action="{ row }">
         <NSpace justify="center" :size="4">
@@ -730,22 +870,38 @@ onMounted(async () => {
         </NSpace>
       </template>
       <template #manual="{ row, column }">
-        <NTag v-if="Number(row?.[column.field]) > 0" :bordered="false" size="small" type="warning">
+        <NTag
+          v-if="Number(row?.[column.field]) > 0"
+          :bordered="false"
+          size="small"
+          type="warning"
+          class="deduc-click"
+          @click="openManualDetail(row as any, String(column?.title || ''), Number(row?.[column.field]) || 0)"
+        >
           {{ row?.[column.field] ?? 0 }}
         </NTag>
-        <span v-else>{{ row?.[column.field] ?? 0 }}</span>
+        <NTag v-else :bordered="false" size="small" type="success">
+          {{ row?.[column.field] ?? 0 }}
+        </NTag>
       </template>
       <template #monthlyScore="{ row }">
-        <NTag v-if="monthlyScore(row) > 0" :bordered="false" size="small" type="warning">
+        <NTag v-if="monthlyScore(row) > 0" :bordered="false" size="small" type="error">
           {{ monthlyScore(row) }}
         </NTag>
-        <span v-else>{{ monthlyScore(row) }}</span>
+        <NTag v-else :bordered="false" size="small" type="success">{{ monthlyScore(row) }}</NTag>
       </template>
       <template #threeViolationCount="{ row }">
-        <NTag v-if="threeViolationCount(row) > 0" :bordered="false" size="small" type="error">
+        <NTag
+          v-if="threeViolationCount(row) > 0"
+          :bordered="false"
+          size="small"
+          type="warning"
+          class="deduc-click"
+          @click="openThreeViolationDetail(row as any)"
+        >
           {{ threeViolationCount(row) }}
         </NTag>
-        <span v-else>{{ threeViolationCount(row) }}</span>
+        <NTag v-else :bordered="false" size="small" type="success">{{ threeViolationCount(row) }}</NTag>
       </template>
     </HseDataGrid>
 
@@ -773,6 +929,59 @@ onMounted(async () => {
         </NSpace>
       </template>
     </NDrawer>
+
+    <!-- 扣分明细居中 Modal（对齐「三违管理考核」明细：分项 + 合计） -->
+    <NModal
+      v-model:show="detailModalShow"
+      preset="card"
+      :title="detailModalTitle()"
+      style="width: 460px; max-width: 92vw"
+      :mask-closable="true"
+    >
+      <div v-if="detailRow" class="driver-monthly-breakdown">
+        <div v-if="detailCol === 'threeViolation'">
+          <div class="breakdown-preamble">
+            {{ detailRow.name }} · {{ selectedMonth || '当月' }} · 共 {{ threeViolationCount(detailRow) }} 起（每条计 1 分）
+          </div>
+          <div v-if="violationDetailsOf(detailRow).length === 0" class="breakdown-empty">
+            暂无明细记录
+          </div>
+          <div
+            v-for="(v, i) in violationDetailsOf(detailRow)"
+            :key="v.id"
+            class="breakdown-item breakdown-item-clickable"
+            title="点击查看该人三违记录"
+            @click="jumpToViolationRecords()"
+          >
+            <div class="breakdown-main">
+              <span class="breakdown-label">{{ i + 1 }}. {{ v.violationType || '未填违章类型' }}</span>
+              <span class="breakdown-sub">{{ v.violationTime || '-' }}{{ v.violationLocation ? ` · 地点：${v.violationLocation}` : '' }}{{ v.plateNo ? ` · 车牌：${v.plateNo}` : '' }}</span>
+              <span v-if="v.violationDesc" class="breakdown-sub">原因：{{ v.violationDesc }}</span>
+            </div>
+            <span class="breakdown-val">1 分</span>
+          </div>
+          <div class="breakdown-tip">点击明细项可查看该驾驶员的三违记录</div>
+          <div class="breakdown-total">
+            <span>合计</span>
+            <span>{{ threeViolationCount(detailRow) }} 分</span>
+          </div>
+        </div>
+        <div v-else>
+          <div class="breakdown-item">
+            <div class="breakdown-main">
+              <span class="breakdown-label">{{ detailManualTitle }} · 月度累计计数</span>
+              <span class="breakdown-sub">该项为月度累计计数，暂无逐笔扣分明细（日期/原因）。</span>
+              <span v-if="detailRow.remark" class="breakdown-sub">备注：{{ detailRow.remark }}</span>
+            </div>
+            <span class="breakdown-val">{{ detailManualValue }} 分</span>
+          </div>
+          <div class="breakdown-total">
+            <span>合计</span>
+            <span>{{ detailManualValue }} 分</span>
+          </div>
+        </div>
+      </div>
+    </NModal>
 
     <!-- 新增 / 编辑 弹窗 -->
     <NModal
@@ -886,3 +1095,96 @@ onMounted(async () => {
     />
   </HsePageLayout>
 </template>
+
+<style scoped>
+/* 外部下钻定位：高亮目标驾驶员行（来自三违考核页「驾驶员三违」列明细点击跳转） */
+:deep(.vxe-body--row.driver-locate-row) {
+  background: rgba(37, 99, 235, 0.14) !important;
+}
+:deep(.vxe-body--row.driver-locate-row .vxe-cell) {
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
+/* 可点击数字标签（对齐「三违管理考核」deduc-click） */
+.deduc-click {
+  cursor: pointer;
+  transition: filter 0.15s;
+  &:hover {
+    filter: brightness(1.15);
+  }
+}
+
+/* 扣分明细弹窗 · 对齐「三违管理考核」分项+合计样式 */
+.driver-monthly-breakdown {
+  min-width: 260px;
+}
+.breakdown-preamble {
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: #4b5563;
+}
+.breakdown-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 5px 6px;
+  border-radius: 4px;
+}
+.breakdown-main {
+  min-width: 0;
+  flex: 1;
+}
+.breakdown-label {
+  display: block;
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+.breakdown-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--v-ben-muted-foreground, #6b7280);
+  line-height: 1.4;
+}
+.breakdown-val {
+  flex-shrink: 0;
+  font-weight: 600;
+  color: #d97706;
+  font-variant-numeric: tabular-nums;
+}
+.breakdown-total {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  border-top: 1px dashed #d0d5dd;
+  margin-top: 6px;
+  padding: 6px 6px 0;
+  font-weight: 600;
+}
+.breakdown-empty {
+  padding: 12px 6px;
+  text-align: center;
+  color: #8a919f;
+  font-size: 13px;
+}
+/* 违章明细项可点击下钻 */
+.breakdown-item-clickable {
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+.breakdown-item-clickable:hover {
+  background: rgba(37, 99, 235, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.35);
+}
+.breakdown-item-clickable:hover .breakdown-label {
+  color: #1d4ed8;
+}
+.breakdown-tip {
+  margin: 6px 6px 0;
+  font-size: 12px;
+  color: #8a919f;
+}
+</style>

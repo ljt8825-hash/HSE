@@ -11,12 +11,13 @@
  *   2. 「导入违章Excel判定」：前端解析「驾驶员五年违章记录汇总.xlsx」后判定（不落违章明细）
  *   两条通道共用 riskRules 引擎 + 同一个预览/写入弹窗，判完可人工在列表下拉复核覆盖。
  */
-import { computed, h, nextTick, onMounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
+import { useRouter } from 'vue-router';
 
 import {
   NButton,
   NCard,
-  NDataTable,
+  NCheckbox,
   NDescriptions,
   NDescriptionsItem,
   NDrawer,
@@ -416,11 +417,15 @@ function dedupeByName(rows: SiteApi.DriverAssessment[]): SiteApi.DriverAssessmen
 //  - 三违评估    → 「驾驶员违章记录 · 三违扣分记录」当前自然年度累计（与三违定级口径一致）
 const licenseCumulativePointsMap = ref<Record<string, number>>({});
 const threeViolationCumulativePointsMap = ref<Record<string, number>>({});
+/** 累计扣分明细弹窗原始数据：驾驶证/三违扣分记录全量（按当前 Tab 取源，时间窗与「累计扣分」列一致） */
+const licenseViolationRows = ref<SiteApi.DriverViolation[]>([]);
+const threeViolationRows = ref<SiteApi.DriverViolation[]>([]);
 
 /** 驾驶证扣分记录加载：拉取「驾驶证扣分记录」表，仅累加「近12个月」内各条违章明细「计分」 */
 async function loadLicenseCumulativePoints() {
   try {
     const res = await getDriverViolationList({ pageSize: 9999 } as any);
+    licenseViolationRows.value = (res.list || []) as SiteApi.DriverViolation[];
     const now = new Date();
     const start = new Date(now.getFullYear(), now.getMonth() - 11, now.getDate()); // 近12个月起始
     const map: Record<string, number> = {};
@@ -444,6 +449,7 @@ async function loadThreeViolationCumulativePoints() {
   const currentYear = new Date().getFullYear();
   try {
     const res = await getDriverThreeViolationList({ pageSize: 9999 } as any);
+    threeViolationRows.value = (res.list || []) as SiteApi.DriverViolation[];
     const map: Record<string, number> = {};
     for (const r of res.list || []) {
       const name = ((r as any).name || '').trim();
@@ -478,6 +484,74 @@ function cumulativePoints(_row: any): number | null {
 function pointsOf(row: any): number {
   const v = cumulativePoints(row);
   return typeof v === 'number' ? v : 0;
+}
+
+/** 数字格式化（整数原样、小数保留2位） */
+function fmtPoints(v: number | null | undefined): string {
+  if (v == null || Number.isNaN(Number(v))) return '0';
+  const n = Number(v);
+  return Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100);
+}
+
+// ===================== 累计扣分明细弹窗（对齐「三违管理考核」：点击数字弹逐条明细 + 合计，明细可下钻） =====================
+const deductModalShow = ref(false);
+const deductRowName = ref('');
+const router = useRouter();
+
+/** 弹窗明细源：按当前 Tab 取对应违章表，时间窗与「累计扣分」列完全一致（驾驶证近12月 / 三违当前自然年度） */
+const deductViolationRows = computed<SiteApi.DriverViolation[]>(() => {
+  const nm = deductRowName.value.trim();
+  if (!nm) return [];
+  const list = activeTab.value === '三违评估' ? threeViolationRows.value : licenseViolationRows.value;
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth() - 11, now.getDate()); // 近12个月起始
+  const currentYear = now.getFullYear();
+  return list.filter((r) => {
+    if ((r.name || '').trim() !== nm) return false;
+    const t = r.violationTime;
+    if (!t) return false;
+    if (activeTab.value === '三违评估') return yearOf(t) === currentYear;
+    const d = new Date(String(t).replace(/-/g, '/'));
+    return !Number.isNaN(d.getTime()) && d >= start && d <= now;
+  });
+});
+
+function openDeductModal(row: SiteApi.DriverAssessment) {
+  if (pointsOf(row) <= 0) return;
+  deductRowName.value = row.name || '';
+  deductModalShow.value = true;
+}
+
+/** 明细行：日期+事由 / 地点·车牌·罚款 / 计分 */
+const deductRows = computed(() =>
+  deductViolationRows.value.map((d) => ({
+    label: `${d.violationTime || '—'}${d.violationDesc || d.violationType ? ` ${d.violationDesc || d.violationType}` : ''}`,
+    sub: [
+      d.violationLocation && `地点：${d.violationLocation}`,
+      d.plateNo && `车牌：${d.plateNo}`,
+      d.fineAmount ? `罚款：${fmtPoints(d.fineAmount)} 元` : '',
+    ]
+      .filter(Boolean)
+      .join('；'),
+    value: `-${fmtPoints(d.demeritPoints)} 分`,
+    driver: d.name || '',
+  })),
+);
+const deductTotal = computed(() =>
+  deductViolationRows.value.reduce((a, d) => a + (Number(d.demeritPoints) || 0), 0),
+);
+
+/** 明细点击下钻「驾驶员违章记录」对应 Tab（驾驶证扣分记录 / 三违扣分记录），并按姓名过滤 */
+function locateDeduct(r?: { driver?: string }) {
+  if (!r) return;
+  deductModalShow.value = false;
+  void router.push({
+    path: '/site/driver/violation',
+    query: {
+      tab: activeTab.value === '三违评估' ? 'threeViolation' : 'license',
+      name: r.driver || '',
+    },
+  });
 }
 
 // —— 表头排序（本地排序：数据一次性全量加载，服务端三态事件在此驱动重排） ——
@@ -1410,64 +1484,52 @@ const swDist = computed(() => {
     .map((k) => ({ level: k, count: d[k] }));
 });
 
-const swColumns: any = [
-  { type: 'selection', width: 46, align: 'center' },
-  { title: '姓名', key: 'name', width: 100, align: 'center' },
+const swColumns: VxeTableGridColumns = [
+  { title: '勾选', field: '__checkbox', width: 46, align: 'center', slots: { default: 'swCheck', header: 'swCheckHeader' } },
+  { title: '姓名', field: 'name', width: 100, align: 'center' },
   {
     title: `${new Date().getFullYear()}年累计`,
-    key: 'yearPoints',
+    field: 'yearPoints',
     width: 100,
     align: 'center',
-    render: (r: SwRow) => `${r.yearPoints} 分`,
+    slots: { default: 'swYearPoints' },
   },
   {
     title: '违章条数',
-    key: 'totalCount',
+    field: 'totalCount',
     width: 90,
     align: 'center',
-    render: (r: SwRow) => `${r.totalCount} 条`,
+    slots: { default: 'swTotalCount' },
   },
   {
     title: '主要三违类型',
-    key: 'topType',
+    field: 'topType',
     minWidth: 150,
     align: 'left',
-    render: (r: SwRow) =>
-      h(NTag, { size: 'small', type: 'default', bordered: false }, { default: () => r.topType }),
+    slots: { default: 'swTopType' },
   },
   {
     title: '判定等级',
-    key: 'level',
+    field: 'level',
     width: 100,
     align: 'center',
-    render: (r: SwRow) =>
-      h(HseStatusTag, { type: RISK_LEVEL_TAG[r.level], size: 'small' }, { default: () => r.level }),
+    slots: { default: 'swLevel' },
   },
   {
     title: '原等级',
-    key: 'prevLevel',
+    field: 'prevLevel',
     width: 90,
     align: 'center',
-    render: (r: SwRow) => r.prevLevel || '-',
+    slots: { default: 'swPrevLevel' },
   },
   {
     title: '状态',
-    key: 'status',
+    field: 'status',
     width: 110,
     align: 'center',
-    render: (r: SwRow) =>
-      !r.hasArchive
-        ? h(NTag, { size: 'small', type: 'warning', bordered: false }, { default: () => '将新建档案' })
-        : r.changed
-          ? h(NTag, { size: 'small', type: 'error', bordered: false }, { default: () => '等级变更' })
-          : h(NTag, { size: 'small', type: 'default', bordered: false }, { default: () => '无变化' }),
+    slots: { default: 'swStatus' },
   },
 ];
-
-/** 三违评估预览表勾选变化（naive 回调给的是 RowKey[]，统一转字符串） */
-function onSwCheckedChange(keys: Array<string | number>) {
-  swCheckedKeys.value = (keys || []).map(String);
-}
 
 /** 判定结果等级分布（预览弹窗顶部概览） */
 const calcDist = computed(() => {
@@ -1479,95 +1541,110 @@ const calcDist = computed(() => {
 });
 
 /** 预览表列定义：仅按记分判定时去掉「命中行为」列 */
-const calcColumns = computed(() => {
-  const base: any = [
-    { type: 'selection', width: 46, align: 'center', disabled: (row: CalcRow) => !row.hasArchive },
-    { title: '姓名', key: 'name', width: 100, align: 'center' },
+const calcColumns = computed<VxeTableGridColumns>(() => {
+  const cols: VxeTableGridColumns = [
+    { title: '勾选', field: '__checkbox', width: 46, align: 'center', slots: { default: 'calcCheck', header: 'calcCheckHeader' } },
+    { title: '姓名', field: 'name', width: 100, align: 'center' },
     {
       title: '近12月记分',
-      key: 'windowScore',
+      field: 'windowScore',
       width: 100,
       align: 'center',
-      render: (r: CalcRow) => `${r.windowScore} 分`,
+      slots: { default: 'calcWindowScore' },
     },
     {
       title: '单次最高',
-      key: 'maxSingle',
+      field: 'maxSingle',
       width: 90,
       align: 'center',
-      render: (r: CalcRow) => (r.maxSingle ? `${r.maxSingle} 分` : '-'),
+      slots: { default: 'calcMaxSingle' },
     },
     {
       title: '近12月/总条数',
-      key: 'count',
+      field: 'count',
       width: 120,
       align: 'center',
-      render: (r: CalcRow) => `${r.windowCount} / ${r.totalCount}`,
+      slots: { default: 'calcCount' },
     },
   ];
   if (!calcScoreOnly.value) {
-    base.push({
+    cols.push({
       title: '命中行为',
-      key: 'hits',
+      field: 'hits',
       minWidth: 160,
       align: 'left',
-      render: (r: CalcRow) =>
-        r.hits.length
-          ? h(
-              NSpace,
-              { size: 4, wrap: true },
-              { default: () => r.hits.map((x) => h(NTag, { size: 'small', type: 'warning', bordered: false }, { default: () => x })) },
-            )
-          : '-',
+      slots: { default: 'calcHits' },
     });
   }
-  base.push(
+  cols.push(
     {
       title: '判定等级',
-      key: 'level',
+      field: 'level',
       width: 100,
       align: 'center',
-      render: (r: CalcRow) =>
-        h(HseStatusTag, { type: RISK_LEVEL_TAG[r.level], size: 'small' }, { default: () => r.level }),
+      slots: { default: 'calcLevel' },
     },
     {
       title: '原等级',
-      key: 'prevLevel',
+      field: 'prevLevel',
       width: 90,
       align: 'center',
-      render: (r: CalcRow) => r.prevLevel || '-',
+      slots: { default: 'calcPrevLevel' },
     },
     {
       title: '状态',
-      key: 'status',
+      field: 'status',
       width: 100,
       align: 'center',
-      render: (r: CalcRow) =>
-        !r.hasArchive
-          ? h(NTag, { size: 'small', type: 'error', bordered: false }, { default: () => '无档案' })
-          : r.changed
-            ? h(NTag, { size: 'small', type: 'warning', bordered: false }, { default: () => '等级变更' })
-            : h(NTag, { size: 'small', type: 'default', bordered: false }, { default: () => '无变化' }),
+      slots: { default: 'calcStatus' },
     },
     {
       title: '判定依据',
-      key: 'basis',
+      field: 'basis',
       width: 70,
       align: 'center',
-      render: (r: CalcRow) =>
-        h(
-          NButton,
-          { size: 'tiny', quaternary: true, type: 'primary', onClick: () => openBasis(r) },
-          { default: () => '查看' },
-        ),
+      slots: { default: 'calcBasis' },
     },
   );
-  return base;
+  return cols;
 });
 
-/** 预览表勾选变化（naive 回调给的是 RowKey[]，统一转字符串） */
-function onCalcCheckedChange(keys: Array<string | number>) {
-  calcCheckedKeys.value = (keys || []).map(String);
+// —— 预览表勾选（模板 NCheckbox 手动维护 calcCheckedKeys / swCheckedKeys） ——
+function toggleSwChecked(key: string, checked: boolean) {
+  if (checked) {
+    if (!swCheckedKeys.value.includes(key)) swCheckedKeys.value = [...swCheckedKeys.value, key];
+  } else {
+    swCheckedKeys.value = swCheckedKeys.value.filter((k) => k !== key);
+  }
+}
+function swAllChecked() {
+  return swRows.value.length > 0 && swRows.value.every((r) => swCheckedKeys.value.includes(r.key));
+}
+function swSomeChecked() {
+  return swRows.value.some((r) => swCheckedKeys.value.includes(r.key));
+}
+function toggleSwAll(checked: boolean) {
+  swCheckedKeys.value = checked ? swRows.value.map((r) => r.key) : [];
+}
+function toggleCalcChecked(key: string, checked: boolean) {
+  if (checked) {
+    if (!calcCheckedKeys.value.includes(key)) calcCheckedKeys.value = [...calcCheckedKeys.value, key];
+  } else {
+    calcCheckedKeys.value = calcCheckedKeys.value.filter((k) => k !== key);
+  }
+}
+function calcAllChecked() {
+  const selectable = calcRows.value.filter((r) => r.hasArchive);
+  return selectable.length > 0 && selectable.every((r) => calcCheckedKeys.value.includes(r.key));
+}
+function calcSomeChecked() {
+  const selectable = calcRows.value.filter((r) => r.hasArchive);
+  return selectable.some((r) => calcCheckedKeys.value.includes(r.key));
+}
+function toggleCalcAll(checked: boolean) {
+  calcCheckedKeys.value = checked
+    ? calcRows.value.filter((r) => r.hasArchive).map((r) => r.key)
+    : [];
 }
 
 // ===================== 判定依据详情 =====================
@@ -1795,11 +1872,18 @@ onMounted(async () => {
       </template>
       <template #department="{ row }">{{ displayDept(row) }}</template>
       <template #cumulativeThreeViolationPoints="{ row }">
-        <!-- 累计扣分：驾驶证评估 =「驾驶证扣分记录」近12月累计；三违评估 =「三违扣分记录」当前自然年度累计；>0 红色标色醒目 -->
-        <NTag v-if="pointsOf(row) > 0" size="small" type="error" :bordered="false" class="font-bold">
+        <!-- 累计扣分：对齐「三违管理考核」数字配色（0=绿色标签；>0=橙色可点击弹明细），点击弹逐条扣分明细 -->
+        <NTag
+          v-if="pointsOf(row) > 0"
+          size="small"
+          type="warning"
+          :bordered="false"
+          class="deduc-click"
+          @click="openDeductModal(row as any)"
+        >
           {{ pointsOf(row) }} 分
         </NTag>
-        <span v-else>{{ pointsOf(row) }} 分</span>
+        <NTag v-else size="small" type="success" :bordered="false">{{ pointsOf(row) }} 分</NTag>
       </template>
       <template #riskLevel-edit="{ row }">
         <NSelect
@@ -2010,17 +2094,55 @@ onMounted(async () => {
           {{ calcUnmatched.length }} 名驾驶员无对应「驾驶证评估」档案（{{ calcUnmatched.slice(0, 10).join('、')
           }}{{ calcUnmatched.length > 10 ? ' 等' : '' }}），已置灰不可勾选。请先点「同步花名册驾驶员」建档后重新判定。
         </NAlert>
-        <NDataTable
+        <HseDataGrid
           :columns="calcColumns"
           :data="calcRows"
-          :row-key="(row: CalcRow) => row.key"
-          :checked-row-keys="calcCheckedKeys"
-          :max-height="460"
-          :bordered="false"
-          :single-line="false"
-          size="small"
-          @update:checked-row-keys="onCalcCheckedChange"
-        />
+          :pager="false"
+          row-key="key"
+          :height="460"
+        >
+          <template #calcCheckHeader>
+            <NCheckbox
+              :checked="calcAllChecked()"
+              :indeterminate="calcSomeChecked() && !calcAllChecked()"
+              @update:checked="toggleCalcAll"
+            />
+          </template>
+          <template #calcCheck="{ row }">
+            <NCheckbox
+              :checked="calcCheckedKeys.includes(row.key)"
+              :disabled="!row.hasArchive"
+              @update:checked="(v: boolean) => toggleCalcChecked(row.key, v)"
+            />
+          </template>
+          <template #calcWindowScore="{ row }">{{ row.windowScore }} 分</template>
+          <template #calcMaxSingle="{ row }">{{ row.maxSingle ? `${row.maxSingle} 分` : '-' }}</template>
+          <template #calcCount="{ row }">{{ row.windowCount }} / {{ row.totalCount }}</template>
+          <template #calcHits="{ row }">
+            <NSpace v-if="row.hits.length" :size="4" wrap>
+              <NTag
+                v-for="(x, i) in row.hits"
+                :key="i"
+                size="small"
+                type="warning"
+                :bordered="false"
+              >{{ x }}</NTag>
+            </NSpace>
+            <span v-else>-</span>
+          </template>
+          <template #calcLevel="{ row }">
+            <HseStatusTag :type="riskTagType(row.level)" size="small">{{ row.level }}</HseStatusTag>
+          </template>
+          <template #calcPrevLevel="{ row }">{{ row.prevLevel || '-' }}</template>
+          <template #calcStatus="{ row }">
+            <NTag v-if="!row.hasArchive" size="small" type="error" :bordered="false">无档案</NTag>
+            <NTag v-else-if="row.changed" size="small" type="warning" :bordered="false">等级变更</NTag>
+            <NTag v-else size="small" type="default" :bordered="false">无变化</NTag>
+          </template>
+          <template #calcBasis="{ row }">
+            <NButton size="tiny" quaternary type="primary" @click="openBasis(row)">查看</NButton>
+          </template>
+        </HseDataGrid>
       </NSpin>
       <template #footer>
         <NSpace justify="end">
@@ -2064,17 +2186,41 @@ onMounted(async () => {
             {{ d.level }} · {{ d.count }} 人
           </NTag>
         </NSpace>
-        <NDataTable
+        <HseDataGrid
           :columns="swColumns"
           :data="swRows"
-          :row-key="(row: SwRow) => row.key"
-          :checked-row-keys="swCheckedKeys"
-          :max-height="460"
-          :bordered="false"
-          :single-line="false"
-          size="small"
-          @update:checked-row-keys="onSwCheckedChange"
-        />
+          :pager="false"
+          row-key="key"
+          :height="460"
+        >
+          <template #swCheckHeader>
+            <NCheckbox
+              :checked="swAllChecked()"
+              :indeterminate="swSomeChecked() && !swAllChecked()"
+              @update:checked="toggleSwAll"
+            />
+          </template>
+          <template #swCheck="{ row }">
+            <NCheckbox
+              :checked="swCheckedKeys.includes(row.key)"
+              @update:checked="(v: boolean) => toggleSwChecked(row.key, v)"
+            />
+          </template>
+          <template #swYearPoints="{ row }">{{ row.yearPoints }} 分</template>
+          <template #swTotalCount="{ row }">{{ row.totalCount }} 条</template>
+          <template #swTopType="{ row }">
+            <NTag size="small" type="default" :bordered="false">{{ row.topType }}</NTag>
+          </template>
+          <template #swLevel="{ row }">
+            <HseStatusTag :type="riskTagType(row.level)" size="small">{{ row.level }}</HseStatusTag>
+          </template>
+          <template #swPrevLevel="{ row }">{{ row.prevLevel || '-' }}</template>
+          <template #swStatus="{ row }">
+            <NTag v-if="!row.hasArchive" size="small" type="warning" :bordered="false">将新建档案</NTag>
+            <NTag v-else-if="row.changed" size="small" type="error" :bordered="false">等级变更</NTag>
+            <NTag v-else size="small" type="default" :bordered="false">无变化</NTag>
+          </template>
+        </HseDataGrid>
       </NSpin>
       <template #footer>
         <NSpace justify="end">
@@ -2128,6 +2274,35 @@ onMounted(async () => {
       </template>
     </NModal>
 
+    <!-- 累计扣分明细（对齐「三违管理考核」：分项 + 合计，明细点击下钻「驾驶员违章记录」对应 Tab） -->
+    <NModal
+      v-model:show="deductModalShow"
+      preset="card"
+      title="累计扣分 · 扣分明细"
+      style="width: 560px; max-width: 92vw"
+      :mask-closable="true"
+    >
+      <div class="assess-breakdown">
+        <div
+          v-for="(r, ri) in deductRows"
+          :key="ri"
+          class="assess-breakdown-item assess-locate-link"
+          @click="locateDeduct(r)"
+        >
+          <div class="assess-breakdown-main">
+            <span class="assess-breakdown-label">{{ r.label }}</span>
+            <span v-if="r.sub" class="assess-breakdown-sub">{{ r.sub }}</span>
+          </div>
+          <span class="assess-breakdown-val">{{ r.value }}</span>
+        </div>
+        <div v-if="deductRows.length === 0" class="assess-breakdown-empty">暂无扣分明细</div>
+        <div class="assess-breakdown-total">
+          <span>合计</span>
+          <span>{{ fmtPoints(deductTotal) }} 分</span>
+        </div>
+      </div>
+    </NModal>
+
     <!-- 通用导入（driver-assessment 模块） -->
     <HseImportDialog
       v-model:open="importOpen"
@@ -2160,6 +2335,76 @@ onMounted(async () => {
 :deep(.n-statistic-value__prefix) {
   display: inline-flex;
   align-items: center;
+}
+
+/* 累计扣分数字：可点击（对齐「三违管理考核」数字交互） */
+.deduc-click {
+  cursor: pointer;
+  transition: filter 0.15s;
+}
+.deduc-click:hover {
+  filter: brightness(1.15);
+}
+
+/* 累计扣分明细弹窗 · 对齐「三违管理考核」分项 + 合计样式 */
+.assess-breakdown {
+  min-width: 320px;
+}
+.assess-breakdown-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 5px 6px;
+  border-radius: 4px;
+}
+.assess-breakdown-item:hover {
+  background: rgba(245, 158, 11, 0.14);
+}
+.assess-breakdown-item.assess-locate-link {
+  cursor: pointer;
+}
+.assess-breakdown-item.assess-locate-link:hover {
+  background: rgba(37, 99, 235, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.35);
+}
+.assess-breakdown-main {
+  min-width: 0;
+  flex: 1;
+}
+.assess-breakdown-label {
+  display: block;
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+.assess-breakdown-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--v-ben-muted-foreground, #6b7280);
+  line-height: 1.4;
+}
+.assess-breakdown-val {
+  flex-shrink: 0;
+  font-weight: 600;
+  color: #d97706;
+  font-variant-numeric: tabular-nums;
+}
+.assess-breakdown-total {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  border-top: 1px dashed #d0d5dd;
+  margin-top: 6px;
+  padding: 6px 6px 0;
+  font-weight: 600;
+}
+.assess-breakdown-empty {
+  padding: 12px 6px;
+  text-align: center;
+  color: #8a919f;
+  font-size: 13px;
 }
 
 /* 图表卡片：标题字号统一 */

@@ -29,7 +29,12 @@ function respond(req, res, r) {
   }
   if (r.__t === 'csv') {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', 'attachment; filename=三违记录.csv');
+    // Node http 头校验不允许 header 值含非 Latin-1 字符；filename 用 ASCII 回退名，
+    // 中文名经 RFC 5987 filename* 百分号编码（ERR_INVALID_CHAR 防御）。
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="sanwei_records.csv"; filename*=UTF-8''${encodeURIComponent('三违记录.csv')}`,
+    );
     return res.send(r.csv);
   }
   return res.json(success(r.payload ?? null, r.message));

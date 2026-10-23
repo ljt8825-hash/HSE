@@ -167,16 +167,26 @@ async function mobileApi(path, body, method) {
 }
 
 // 照片上传（multipart；employee_code 由 Worker 从 Session 注入，前端不传）
+// CF-WPS-103：原实现用裸 fetch 且无超时，乡镇弱网下上传会悬挂几分钟，
+// 把补传队列整个堵死（单飞锁在途、40s 兜底轮询进不来）→ 用户以为失败、关页面走人。
+// 现在统一走 fetchWithTimeout（60s：照片较大，宁可多等也不能无限悬挂）；
+// 超时/断网按 {status:0} 返回（与 mobileApi 同口径），调用方交给补传队列重试。
+const H5_UPLOAD_TIMEOUT_MS = 60000;
 async function mobileUpload(file, clientRequestId) {
   const token = getToken();
   const fd = new FormData();
   fd.append('file', file, file.name);
   if (clientRequestId) fd.append('client_request_id', clientRequestId);
-  const res = await fetch(API_BASE + '/api/mobile/upload', {
-    method: 'POST',
-    headers: token ? { 'Authorization': 'Bearer ' + token } : {},
-    body: fd,
-  });
+  let res;
+  try {
+    res = await fetchWithTimeout(API_BASE + '/api/mobile/upload', {
+      method: 'POST',
+      headers: token ? { 'Authorization': 'Bearer ' + token } : {},
+      body: fd,
+    }, H5_UPLOAD_TIMEOUT_MS);
+  } catch (e) {
+    return { status: 0, body: {}, timeout: true };
+  }
   let json = null;
   try { json = await res.json(); } catch { /* ignore */ }
   if (res.status === 401) {

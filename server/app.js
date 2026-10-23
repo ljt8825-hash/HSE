@@ -88,6 +88,7 @@ const { initHealthCheckScheduler } = require('./services/employeeHealthCheckSche
 const { initAssessmentScheduler } = require('./services/assessmentScheduler'); // 新增：月度自动考核调度
 const { initWpsGridSyncScheduler } = require('./services/wpsGridSyncScheduler'); // WPS 多维表格 ↔ 网格长巡查台账同步调度
 const { initMonthlyLedgerImportScheduler } = require('./services/monthlyLedgerImportScheduler'); // 每月1号自动导入上月台账（安全文化/三违）
+const { initTrainingLedgerAutoInitScheduler } = require('./services/trainingLedgerAutoInitScheduler'); // 每月1号自动生成上月培训台账（默认都完成）
 
 // 演示数据管理
 const demoDataRoutes = require('./routes/demo-data');
@@ -98,6 +99,7 @@ const aiRoutes = require('./routes/ai');
 const aiEnhancedRoutes = require('./routes/ai-enhanced');
 const aiV2Routes = require('./routes/ai-v2'); // AI-03：统一 AI API（/api/hse/ai/v2）
 const aiKnowledgeRoutes = require('./routes/ai-knowledge'); // AI-05：知识库 API（/api/hse/ai/v2/knowledge）
+const companyAiRoutes = require('./routes/company-ai'); // AI-Phase-01-02：公司级 AI Skill API（/api/company/ai，SK-005 企业知识问答）
 const iotRoutes = require('./routes/iot');
 const vbenCompatRoutes = require('./routes/vben-compat');
 // V2 Sprint 1: 安全资料中心
@@ -470,6 +472,7 @@ app.use('/api/hse/ai', aiRoutes);
 app.use('/api/hse/ai', aiEnhancedRoutes);
 app.use('/api/hse/ai/v2', aiV2Routes); // AI-03：挂载 v2 统一 API
 app.use('/api/hse/ai/v2/knowledge', aiKnowledgeRoutes); // AI-05：知识库 API（写操作限 admin/safety_manager）
+app.use('/api/company/ai', companyAiRoutes); // AI-Phase-01-02：公司级 AI Skill API（SK-005 企业知识问答；不修改 HSE AI 既有路由）
 app.use('/api/hse/iot', iotRoutes);
 
 // V2 Sprint 1: 安全资料中心
@@ -538,6 +541,8 @@ app.use('/api/hse/risk/profile', hseRiskProfileDetailRoutes);
 // Sprint6.4-B: 驾驶员专项风险中心
 const hseDriverRiskCenterRoutes = require('./routes/hse-driver-risk-center');
 app.use('/api/hse/driver-risk-center', hseDriverRiskCenterRoutes);
+const riskSnapshotAdminRoutes = require('./routes/risk-snapshot-admin');
+app.use('/api/hse/risk-snapshot-admin', authMiddleware, requireRole('admin'), riskSnapshotAdminRoutes);
 
 // Sprint6.4-C: 事故分析中心
 const hseAccidentAnalysisRoutes = require('./routes/hse-accident-analysis');
@@ -575,6 +580,9 @@ app.use('/api/hse/sanwei-analysis', require('./routes/hse-sanwei-analysis'));
 // Sprint6.5-C: 集团HSE智能驾驶舱
 const hseExecutiveCockpitRoutes = require('./routes/hse-executive-cockpit');
 app.use('/api/hse/executive-cockpit', hseExecutiveCockpitRoutes);
+
+// 领导视角统一看板（组织维度数据总线，全部只读）
+app.use('/api/hse/leader-dashboard', require('./routes/hse-leader-dashboard'));
 
 // Sprint7: HSE智能预警与整改闭环中心
 const hseWarningCenterRoutes = require('./routes/hse-warning-center');
@@ -635,6 +643,8 @@ if (process.env.NODE_ENV !== 'test') {
       initWpsGridSyncScheduler();
       // 每月1号自动导入上月台账（安全文化建设 / 三违分析）
       initMonthlyLedgerImportScheduler();
+      // 每月1号自动生成上月培训台账（沿用现有培训人，默认都完成）
+      initTrainingLedgerAutoInitScheduler();
     });
   })();
 }

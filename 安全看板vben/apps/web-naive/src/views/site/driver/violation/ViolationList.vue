@@ -20,12 +20,11 @@
  * 数据契约：server/routes/site-mgmt.js `/site-mgmt/driver-violations`
  * （单条 CRUD；每条违章=一条 DriverViolation record）
  */
-import { computed, h, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 
 import {
   NButton,
   NCheckbox,
-  NDataTable,
   NDescriptions,
   NDescriptionsItem,
   NDrawer,
@@ -42,9 +41,11 @@ import {
 import { IconifyIcon } from '@vben/icons';
 
 import {
+  HseDataGrid,
   HseImportDialog,
   HseSearchPanel,
 } from '#/components/hse';
+import type { VxeTableGridColumns } from '#/adapter/vxe-table';
 import {
   createDriverViolation,
   deleteDriverViolation,
@@ -65,7 +66,11 @@ defineOptions({ name: 'SiteDriverViolationList' });
 
 // nameOnly=true（三违扣分记录 tab）：数据源为独立表 driver_three_violation，
 // 与"驾驶证扣分记录"（driver_violation）完全隔离；两者字段结构一致。
-const props = withDefaults(defineProps<{ nameOnly?: boolean }>(), { nameOnly: false });
+// initKeyword（外部下钻预填姓名过滤）：来自「交通安全档案 · 累计扣分」明细点击跳转。
+const props = withDefaults(defineProps<{ nameOnly?: boolean; initKeyword?: string }>(), {
+  nameOnly: false,
+  initKeyword: '',
+});
 
 // ===================== 数据结构 =====================
 type VItem = {
@@ -330,138 +335,47 @@ function confirmAddRow() {
   message.success('已新增驾驶员行，请填写违章明细后保存');
 }
 
-// ===================== 行子表渲染器 =====================
-function markDirty(item: VItem) {
-  item._dirty = true;
+// ===================== 行子表渲染器（VXE slot 版） =====================
+/** 行子表输入同步：写入字段值并按需标脏（NInput/NInputNumber @update:value 统一入口） */
+function setViolationValue(
+  it: VItem,
+  field: 'violationTime' | 'violationDesc' | 'fineAmount' | 'demeritPoints',
+  v: any,
+) {
+  (it as any)[field] = v;
+  it._dirty = true;
 }
 
-function makeRuleItemsEditor(g: VGroup) {
-  const refresh = () => {
-    groups.value = groups.value.slice();
-  };
-  const header = h('div', { class: 'dv-rule-grid dv-rule-header' }, [
-    h('span', { class: 'dv-rule-col-idx' }, '#'),
-    h('span', { class: 'dv-rule-col-time' }, '违章日期'),
-    h('span', { class: 'dv-rule-col-desc' }, '违章事由'),
-    h('span', { class: 'dv-rule-col-fine' }, '罚款（元）'),
-    h('span', { class: 'dv-rule-col-score' }, '计分'),
-    h('span', { class: 'dv-rule-col-op' }, '操作'),
-  ]);
-  const rows = g.items.map((it, i) => {
-    const deleted = !!it._deleted;
-    // 已标记删除的行：灰显 + 输入禁用，直观反馈「待删除」；点右上角「保存」后才真正落库删除，可再点按钮撤销
-    return h(
-      'div',
-      {
-        class: ['dv-rule-grid', 'dv-rule-row', deleted ? 'dv-rule-row--deleted' : ''].filter(Boolean).join(' '),
-        key: `ri-${g.name}-${i}-${it._id ?? 'n'}`,
-      },
-      [
-        h('span', { class: 'dv-rule-col-idx' }, String(it.seq)),
-        h(NInput, {
-          class: 'dv-rule-col-time',
-          value: it.violationTime,
-          size: 'small',
-          placeholder: 'YYYY-MM-DD HH:mm',
-          disabled: deleted,
-          'onUpdate:value': (v: string) => {
-            it.violationTime = v;
-            markDirty(it);
-          },
-        }),
-        h(NInput, {
-          class: 'dv-rule-col-desc',
-          value: it.violationDesc,
-          type: 'textarea',
-          autosize: { minRows: 1, maxRows: 4 },
-          size: 'small',
-          placeholder: '如 超速、闯红灯',
-          disabled: deleted,
-          'onUpdate:value': (v: string) => {
-            it.violationDesc = v;
-            markDirty(it);
-          },
-        }),
-        h(NInputNumber, {
-          class: 'dv-rule-col-fine',
-          value: it.fineAmount,
-          min: 0,
-          size: 'small',
-          placeholder: '罚款',
-          disabled: deleted,
-          'onUpdate:value': (v: number | null) => {
-            it.fineAmount = v == null ? null : v;
-            markDirty(it);
-          },
-        }),
-        h(NInputNumber, {
-          class: 'dv-rule-col-score',
-          value: it.demeritPoints,
-          min: 0,
-          size: 'small',
-          placeholder: '记分',
-          disabled: deleted,
-          'onUpdate:value': (v: number | null) => {
-            it.demeritPoints = v == null ? null : v;
-            markDirty(it);
-          },
-        }),
-        h(
-          NButton,
-          {
-            class: 'dv-rule-col-op',
-            size: 'tiny',
-            quaternary: true,
-            type: deleted ? 'default' : 'error',
-            title: deleted ? '撤销删除' : '删除该条违章',
-            onClick: () => {
-              if (deleted) {
-                // 撤销删除：恢复该条，保存时不再删除
-                it._deleted = false;
-                it._dirty = true;
-              } else if (it._new && !it._id) {
-                // 尚未保存的全新行：直接从 items 中移除
-                g.items.splice(i, 1);
-              } else {
-                it._deleted = true;
-                it._dirty = true;
-              }
-              recountGroup(g);
-              refresh();
-            },
-          },
-          { default: () => (deleted ? '↺' : '×') },
-        ),
-      ],
-    );
+/** 行子表操作列：撤销删除 / 移除未保存新行 / 标记待删除 */
+function toggleViolationDelete(g: VGroup, it: VItem, index: number) {
+  if (it._deleted) {
+    // 撤销删除：恢复该条，保存时不再删除
+    it._deleted = false;
+    it._dirty = true;
+  } else if (it._new && !it._id) {
+    // 尚未保存的全新行：直接从 items 中移除
+    g.items.splice(index, 1);
+  } else {
+    it._deleted = true;
+    it._dirty = true;
+  }
+  recountGroup(g);
+}
+
+/** 行子表底部「＋ 添加违章」 */
+function addViolationItem(g: VGroup) {
+  g.items.push({
+    _id: null,
+    _new: true,
+    _dirty: true,
+    seq: g.items.filter((x) => !x._deleted).length + 1,
+    violationTime: '',
+    violationDesc: '',
+    fineAmount: null,
+    demeritPoints: null,
+    handleStatus: '待处理',
   });
-  const addBtn = h(
-    NButton,
-    {
-      size: 'small',
-      secondary: true,
-      block: true,
-      class: 'dv-rule-add-btn',
-      onClick: () => {
-        g.items.push({
-          _id: null,
-          _new: true,
-          _dirty: true,
-          seq: g.items.filter((x) => !x._deleted).length + 1,
-          violationTime: '',
-          violationDesc: '',
-          fineAmount: null,
-          demeritPoints: null,
-          handleStatus: '待处理',
-        });
-        recountGroup(g);
-        refresh();
-      },
-    },
-    { default: () => '＋ 添加违章' },
-  );
-  const add = h('div', { class: 'dv-rule-add' }, addBtn);
-  return h('div', { class: 'dv-rule-editor' }, [header, ...rows, add]);
+  recountGroup(g);
 }
 
 // ===================== 整组删除 =====================
@@ -580,123 +494,63 @@ function openViewGroup(g: VGroup | undefined) {
   detailDrawerVisible.value = true;
 }
 
-// ===================== 拖拽排序 =====================
-let dragFrom: number | null = null;
-function rowProps(row: any) {
-  return {
-    class: 'dv-drag-row',
-    ondragover: (e: DragEvent) => {
-      e.preventDefault();
-    },
-    ondrop: (e: DragEvent) => {
-      e.preventDefault();
-      if (dragFrom == null) return;
-      const to = groups.value.indexOf(row as VGroup);
-      if (to < 0 || to === dragFrom) {
-        dragFrom = null;
-        return;
-      }
-      const arr = groups.value.slice();
-      const [moved] = arr.splice(dragFrom, 1);
-      if (!moved) {
-        dragFrom = null;
-        return;
-      }
-      arr.splice(to, 0, moved);
-      groups.value = arr;
-      dragFrom = null;
-    },
-  };
+// ===================== 拖拽排序（VXE rowDrag 内置） =====================
+// VXE 拖拽结束后已按其内部顺序交换，这里用 dragRow/newRow 引用在源数组重排以保持一致。
+function onRowDragend(payload: { dragRow: VGroup; newRow: VGroup; dragPos: string }) {
+  const { dragRow, newRow, dragPos } = payload;
+  if (!dragRow || !newRow || dragRow === newRow) return;
+  const arr = groups.value.slice();
+  const from = arr.indexOf(dragRow);
+  if (from < 0) return;
+  arr.splice(from, 1);
+  let to = arr.indexOf(newRow);
+  if (to < 0) return;
+  // dragPos=bottom 表示落在 newRow 下方 → 插到其后；否则插到其前
+  if (dragPos === 'bottom') to += 1;
+  arr.splice(to, 0, dragRow);
+  groups.value = arr;
 }
 
-// ===================== 主表列 =====================
-// 注：NDataTable 的 TableColumn 泛型擦除会让各 render 回调实参被推导为 VGroup | undefined，
-// 在此采用 any[] 标注彻底避免列相关的类型污染（运行时 row 必为 VGroup）。
+// ===================== 主表列（VXE） =====================
+// 注：VXE 不再使用 render 函数，单元格一律走 slot；列字段仅为占位 key，展示由 slot 决定。
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const columns: any = [
+const vxeColumns: VxeTableGridColumns = [
   {
-    key: 'checked',
-    width: 46,
     title: ' ',
+    field: '_checked',
+    width: 46,
     align: 'center',
-    renderHeader: () => h(NCheckbox, { checked: false, disabled: true }),
-    render: () => h(NCheckbox, { checked: false, disabled: true }),
+    slots: { header: 'checkedHeader', default: 'checkedCell' },
   },
-  {
-    title: '序号',
-    key: 'index',
-    width: 60,
-    align: 'center',
-    render: (_r: any, i: number) => String(i + 1),
-  },
-  {
-    title: '姓名',
-    key: 'name',
-    width: 170,
-    align: 'center',
-    render: (g: any) => {
-      const grp = g as VGroup;
-      return h('div', { class: 'dv-name-cell' }, [
-        h('span', { class: 'dv-name-text' }, grp.name),
-        grp.dept ? h('span', { class: 'dv-name-dept' }, grp.dept) : null,
-      ]);
-    },
-  },
+  { title: '序号', field: '_index', width: 60, align: 'center', slots: { default: 'indexCell' } },
+  { title: '姓名', field: 'name', width: 170, align: 'center', slots: { default: 'nameCell' } },
   {
     title: '违章明细',
-    key: 'items',
+    field: 'items',
     minWidth: 780,
     align: 'left',
-    // 仅表头文字居中；单元格内为行子表编辑器，保持左对齐以便输入
-    titleAlign: 'center',
-    render: (g: any) => makeRuleItemsEditor(g as VGroup),
+    // 仅表头居中；单元格内为行子表编辑器，保持左对齐以便输入
+    headerAlign: 'center',
+    showOverflow: false,
+    slots: { default: 'itemsCell' },
   },
   {
-    key: 'drag',
-    width: 50,
     title: '排序',
+    field: '_drag',
+    width: 50,
     align: 'center',
-    render: (g: any) =>
-      h('span', {
-        class: 'dv-drag-handle',
-        title: '拖动调整顺序',
-        draggable: 'true',
-        onDragstart: () => {
-          dragFrom = groups.value.indexOf(g as VGroup);
-        },
-      }, '⠿'),
+    // dragSort:true 使该列作为行拖拽手柄（配合 rowDrag:{ trigger:'cell' }）
+    dragSort: true,
+    slots: { default: 'dragCell' },
   },
-  {
-    title: '操作',
-    key: 'op',
-    width: 140,
-    align: 'center',
-    render: (g: any) => {
-      const grp = g as VGroup;
-      return h(NSpace, { justify: 'center', size: 4, wrap: false }, {
-        default: () => [
-          h(
-            NButton,
-            { size: 'small', type: 'primary', quaternary: true, onClick: () => openViewGroup(grp) },
-            { default: () => '查看' },
-          ),
-          h(
-            NPopconfirm,
-            { onPositiveClick: () => removeGroupRow(grp) },
-            {
-              trigger: () =>
-                h(
-                  NButton,
-                  { size: 'small', type: 'error', quaternary: true },
-                  { default: () => '删除整组' },
-                ),
-              default: () => `确认删除「${grp.name}」的全部 ${grp.total} 条违章记录？此操作不可恢复。`,
-            },
-          ),
-        ],
-      });
-    },
-  },
+  { title: '操作', field: 'op', width: 140, align: 'center', slots: { default: 'opCell' } },
+];
+
+// 人员匹配弹窗内「不匹配清单」小表
+const mismatchColumns: VxeTableGridColumns = [
+  { title: '姓名', field: 'name', width: 180, align: 'center' },
+  { title: '违章条数', field: 'items', width: 120, align: 'center' },
+  { title: '状态', field: 'status', width: 100, align: 'center' },
 ];
 
 // ===================== 导入 =====================
@@ -889,6 +743,7 @@ onMounted(async () => {
   // 手动「刷新」按钮才会强制从库重拉。花名册按版本决定用缓存或重拉。
   await loadDriverOptions();
   await loadData();
+  if (props.initKeyword) searchForm.keyword = props.initKeyword;
 });
 </script>
 
@@ -942,19 +797,107 @@ onMounted(async () => {
       />
     </HseSearchPanel>
 
-    <NDataTable
+    <HseDataGrid
       class="dv-table"
-      :remote="false"
+      :columns="vxeColumns"
       :data="kwFilteredGroups"
-      :columns="columns"
       :loading="loading"
-      :pagination="false"
-      :max-height="640"
-      :bordered="false"
-      :single-line="false"
-      :row-key="(row: VGroup) => row.name"
-      :row-props="rowProps"
-    />
+      :row-key="'name'"
+      :height="640"
+      :row-drag="{ trigger: 'cell' }"
+      @row-dragend="onRowDragend"
+    >
+      <template #checkedHeader><NCheckbox :checked="false" disabled /></template>
+      <template #checkedCell><NCheckbox :checked="false" disabled /></template>
+      <template #indexCell="{ rowIndex }">{{ rowIndex + 1 }}</template>
+      <template #nameCell="{ row }">
+        <div class="dv-name-cell">
+          <span class="dv-name-text">{{ row.name }}</span>
+          <span v-if="row.dept" class="dv-name-dept">{{ row.dept }}</span>
+        </div>
+      </template>
+      <template #itemsCell="{ row }">
+        <div class="dv-rule-editor">
+          <div class="dv-rule-grid dv-rule-header">
+            <span class="dv-rule-col-idx">#</span>
+            <span class="dv-rule-col-time">违章日期</span>
+            <span class="dv-rule-col-desc">违章事由</span>
+            <span class="dv-rule-col-fine">罚款（元）</span>
+            <span class="dv-rule-col-score">计分</span>
+            <span class="dv-rule-col-op">操作</span>
+          </div>
+          <div
+            v-for="(it, i) in row.items"
+            :key="`ri-${row.name}-${i}-${it._id ?? 'n'}`"
+            class="dv-rule-grid dv-rule-row"
+            :class="{ 'dv-rule-row--deleted': it._deleted }"
+          >
+            <span class="dv-rule-col-idx">{{ it.seq }}</span>
+            <NInput
+              class="dv-rule-col-time"
+              :value="it.violationTime"
+              size="small"
+              placeholder="YYYY-MM-DD HH:mm"
+              :disabled="!!it._deleted"
+              @update:value="setViolationValue(it, 'violationTime', $event)"
+            />
+            <NInput
+              class="dv-rule-col-desc"
+              :value="it.violationDesc"
+              type="textarea"
+              :autosize="{ minRows: 1, maxRows: 4 }"
+              size="small"
+              placeholder="如 超速、闯红灯"
+              :disabled="!!it._deleted"
+              @update:value="setViolationValue(it, 'violationDesc', $event)"
+            />
+            <NInputNumber
+              class="dv-rule-col-fine"
+              :value="it.fineAmount"
+              :min="0"
+              size="small"
+              placeholder="罚款"
+              :disabled="!!it._deleted"
+              @update:value="setViolationValue(it, 'fineAmount', $event)"
+            />
+            <NInputNumber
+              class="dv-rule-col-score"
+              :value="it.demeritPoints"
+              :min="0"
+              size="small"
+              placeholder="记分"
+              :disabled="!!it._deleted"
+              @update:value="setViolationValue(it, 'demeritPoints', $event)"
+            />
+            <NButton
+              class="dv-rule-col-op"
+              size="tiny"
+              quaternary
+              :type="it._deleted ? 'default' : 'error'"
+              :title="it._deleted ? '撤销删除' : '删除该条违章'"
+              @click="toggleViolationDelete(row, it, i)"
+            >{{ it._deleted ? '↺' : '×' }}</NButton>
+          </div>
+          <div class="dv-rule-add">
+            <NButton size="small" secondary block class="dv-rule-add-btn" @click="addViolationItem(row)">
+              ＋ 添加违章
+            </NButton>
+          </div>
+        </div>
+      </template>
+      <template #dragCell><span class="dv-drag-handle" title="拖动调整顺序">⠿</span></template>
+      <template #opCell="{ row }">
+        <NSpace :size="4" wrap="false" justify="center">
+          <NButton size="small" type="primary" quaternary @click="openViewGroup(row)">查看</NButton>
+          <NPopconfirm @positive-click="removeGroupRow(row)">
+            <template #trigger>
+              <NButton size="small" type="error" quaternary>删除整组</NButton>
+            </template>
+            确认删除「{{ row.name }}」的全部 {{ row.total }} 条违章记录？此操作不可恢复。
+          </NPopconfirm>
+        </NSpace>
+      </template>
+    </HseDataGrid>
     <div class="dv-tip">
       行=驾驶员（进入页面自动按花名册带出全部驾驶员姓名，无违章者显示空行，点「＋ 添加违章」补录）；行内字段编辑后点右上角「保存」批量落库（POST 新建 / PUT 修改 / DELETE 删除）。拖动「⠿」手柄调整大行顺序。删除整组会删该驾驶员下所有违章（不可恢复，属「人工删除」）。花名册外已存在的姓名不会被自动删除。导入仍按单条 7 列入库后自动按姓名聚合。
     </div>
@@ -1021,17 +964,11 @@ onMounted(async () => {
           >
             匹配 {{ matchResult.matched }} 个驾驶员姓名，不匹配 {{ matchResult.mismatches.length }} 个（共 {{ matchResult.total }} 个大行）。
           </NAlert>
-          <NDataTable
+          <HseDataGrid
             v-if="matchResult.mismatches.length > 0"
             class="dv-table"
-            :remote="false"
-            :columns="[
-              { title: '姓名', key: 'name', width: 180, align: 'center' },
-              { title: '违章条数', key: 'items', width: 120, align: 'center' },
-              { title: '状态', key: 'status', width: 100, align: 'center' },
-            ]"
+            :columns="mismatchColumns"
             :data="matchResult.mismatches"
-            :pagination="false"
           />
           <NAlert v-else type="success" title="全部匹配">所有驾驶员均在花名册中。</NAlert>
         </template>

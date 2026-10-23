@@ -5,10 +5,11 @@
  * 「扫描（产出意图）」+「引擎统一钳制与落库」两段。阶段1 铁律：零行为变化，
  * source_detail 结构、deductKey、kind、summary 文案与迁移前逐字段一致。
  *
- * 业务口径（2026-08-30 拍板）：
- *   缺次 = max(0, 应巡 − 实巡)；每缺 1 次扣规则库「未检查」deduct_score 分（默认 1）
+ * 业务口径（2026-09-25 收口，替代此前误用「公司人员查处 R000001 5分/次」）：
+ *   缺次 = max(0, 应巡 − 实巡)；每缺 1 次扣规则库「网格长巡查考核·扣1分/次」deduct_score 分
  *   应巡/实巡复用 gridCompletionService.getGridPatrolStats（当前月按今天截止、过去月按整月）
- *   计入「三违管理」类别，受 hse_assessment_category_limit.max_deduct 钳制（由引擎统一处理）
+ *   计入「三违管理」类别，受 hse_assessment_category_limit.max_deduct 钳制（由引擎统一处理，经理15/管理员40）
+ *   「公司人员查处」语义=公司管理（总/一级网格长）查处各乡镇各班组三违，与网格长缺巡无关（由 GRIDVIOL001 通路承担）
  *   当月无 grid_inspection_records 台账 → 整月跳过（noLedger）
  */
 
@@ -17,7 +18,7 @@ const engine = require('../../assessmentScoringEngine');
 const gridCompletion = require('../../gridCompletionService');
 
 const KEY = 'grid_unchecked';
-const RULE_CODE = 'R000001';
+const RULE_CODE = 'GRIDCHECK001';
 const SOURCE_TABLE = 'grid_inspection_records';
 const KIND = 'grid_unchecked_monthly';
 const EVENT_TYPE = 'GRID_UNCHECKED';
@@ -95,6 +96,8 @@ async function scan({ cycle, year, month, rule, dryRun }) {
   ).rows;
   const hireDateByGrid = await gridCompletion.getHireDateMap(grids.map((g) => g.id));
   const statMap = await gridCompletion.getGridPatrolStats(grids, { year, month, hireDateByGrid });
+  // 逐日缺巡日期（仅可按天定位频率的网格参与；非按天频率不逐日标记）
+  const missedDatesMap = await gridCompletion.getMissedDatesMap(grids, { year, month, hireDateByGrid });
 
   const perPerson = new Map(); // personnel_id -> { name, expected, actual }
   for (const g of grids) {
@@ -139,6 +142,8 @@ async function scan({ cycle, year, month, rule, dryRun }) {
       rawScore,
       year,
       month,
+      // 逐日缺巡日期（YYYY-MM-DD 升序；无可定位日期时空数组）
+      missedDates: missedDatesMap.get(personnelId) || [],
     };
 
     if (missing <= 0 || rawScore <= 0) {
@@ -181,6 +186,7 @@ function buildDetail(intent, capRes) {
     otherCatScore: capRes.otherCatScore,
     year: intent.year,
     month: intent.month,
+    missedDates: intent.missedDates || [],
     summary: `未检查（本月应巡${intent.expected}次/实巡${intent.actual}次/缺${intent.missing}次）`,
   };
 }
@@ -196,6 +202,7 @@ function buildReportDetail(intent, outcome) {
     actual: intent.actual,
     actualZero: intent.actualZero,
     missing: intent.missing,
+    missedDates: intent.missedDates || [],
     rawScore: intent.rawScore,
   };
   if (outcome.type === 'revoke') {

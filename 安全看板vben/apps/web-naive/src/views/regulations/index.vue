@@ -4,12 +4,11 @@
  * 统一使用 HseDataGrid + HseSearchPanel + HseActionBar
  * 接入真实 API，支持导入/导出/增删改查
  */
-import { computed, h, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 
 import {
   NButton,
   NCard,
-  NDataTable,
   NDescriptions,
   NDescriptionsItem,
   NDivider,
@@ -29,7 +28,6 @@ import {
   NTabs,
   NText,
   NUpload,
-  type DataTableColumns,
   type UploadFileInfo,
 } from 'naive-ui';
 import { $t } from '#/locales';
@@ -431,59 +429,36 @@ async function fetchVersions(id: number) {
   }
 }
 
-const attachmentColumns: DataTableColumns<RegulationsApi.Attachment> = [
+const attachmentColumns: VxeTableGridColumns = [
   {
     title: '文件名',
-    key: 'originalName',
-    ellipsis: { tooltip: true },
-    render: (row) =>
-      h('div', { class: 'flex items-center gap-1' }, [
-        h(
-          'a',
-          { href: row.fileUrl, target: '_blank', rel: 'noopener', class: 'text-primary' },
-          row.originalName,
-        ),
-        row.isLatest
-          ? h(NTag, { size: 'small', type: 'success', bordered: false }, { default: () => '最新' })
-          : null,
-      ]),
+    field: 'originalName',
+    showOverflow: 'tooltip',
+    slots: { default: 'fileName' },
   },
-  { title: '大小', key: 'fileSize', width: 90, render: (row) => formatFileSize(row.fileSize) },
-  { title: '上传时间', key: 'createdAt', width: 160, render: (row) => formatDateTime(row.createdAt) },
+  { title: '大小', field: 'fileSize', width: 90, align: 'center', slots: { default: 'fileSize' } },
+  { title: '上传时间', field: 'createdAt', width: 160, align: 'center', slots: { default: 'fileTime' } },
   {
     title: '操作',
-    key: 'action',
+    field: 'action',
     width: 140,
-    render: (row) =>
-      h('div', { class: 'flex items-center gap-2' }, [
-        h(
-          'a',
-          { href: row.fileUrl, target: '_blank', rel: 'noopener', class: 'text-primary' },
-          '下载',
-        ),
-        h(
-          NButton,
-          { size: 'small', type: 'error', quaternary: true, onClick: () => handleDeleteAttachment(row) },
-          { default: () => '删除' },
-        ),
-      ]),
+    align: 'center',
+    slots: { default: 'fileAction' },
   },
 ];
 
-const versionColumns: DataTableColumns<RegulationsApi.VersionRecord> = [
-  { title: '版本', key: 'version', width: 90 },
+const versionColumns: VxeTableGridColumns = [
+  { title: '版本', field: 'version', width: 90, align: 'center' },
   {
     title: '变更类型',
-    key: 'changeType',
+    field: 'changeType',
     width: 100,
-    render: (row) =>
-      h(NTag, { size: 'small', bordered: false, type: CHANGE_TYPE_TAG[row.changeType] ?? 'default' }, {
-        default: () => CHANGE_TYPE_LABEL[row.changeType] || row.changeType || '-',
-      }),
+    align: 'center',
+    slots: { default: 'changeType' },
   },
-  { title: '变更摘要', key: 'changeSummary', ellipsis: { tooltip: true } },
-  { title: '变更人', key: 'changedBy', width: 110 },
-  { title: '时间', key: 'createdAt', width: 160, render: (row) => formatDateTime(row.createdAt) },
+  { title: '变更摘要', field: 'changeSummary', showOverflow: 'tooltip' },
+  { title: '变更人', field: 'changedBy', width: 110, align: 'center' },
+  { title: '时间', field: 'createdAt', width: 160, align: 'center', slots: { default: 'verTime' } },
 ];
 
 async function onSubmit() {
@@ -816,27 +791,61 @@ onMounted(() => {
                   </NButton>
                 </NUpload>
               </div>
-              <NDataTable
+              <HseDataGrid
                 v-if="attachmentList.length"
                 :columns="attachmentColumns"
                 :data="attachmentList"
                 :loading="attachmentLoading"
-                size="small"
-                :bordered="false"
-                :pagination="false"
-              />
+                :pager="false"
+                row-key="id"
+                :height="320"
+              >
+                <template #fileName="{ row }">
+                  <div class="flex items-center gap-1">
+                    <a
+                      :href="row.fileUrl"
+                      target="_blank"
+                      rel="noopener"
+                      class="text-primary"
+                    >{{ row.originalName }}</a>
+                    <NTag v-if="row.isLatest" size="small" type="success" :bordered="false">最新</NTag>
+                  </div>
+                </template>
+                <template #fileSize="{ row }">{{ formatFileSize(row.fileSize) }}</template>
+                <template #fileTime="{ row }">{{ formatDateTime(row.createdAt) }}</template>
+                <template #fileAction="{ row }">
+                  <div class="flex items-center gap-2">
+                    <a
+                      :href="row.fileUrl"
+                      target="_blank"
+                      rel="noopener"
+                      class="text-primary"
+                    >下载</a>
+                    <NButton size="small" type="error" quaternary @click="handleDeleteAttachment(row)">
+                      删除
+                    </NButton>
+                  </div>
+                </template>
+              </HseDataGrid>
               <NText v-else depth="3">暂无附件</NText>
             </NTabPane>
             <NTabPane name="versions" :tab="`历史版本 (${versionList.length})`">
-              <NDataTable
+              <HseDataGrid
                 v-if="versionList.length"
                 :columns="versionColumns"
                 :data="versionList"
                 :loading="versionLoading"
-                size="small"
-                :bordered="false"
-                :pagination="false"
-              />
+                :pager="false"
+                row-key="id"
+                :height="320"
+              >
+                <template #changeType="{ row }">
+                  <NTag :size="'small'" :bordered="false" :type="CHANGE_TYPE_TAG[row.changeType] ?? 'default'">
+                    {{ CHANGE_TYPE_LABEL[row.changeType] || row.changeType || '-' }}
+                  </NTag>
+                </template>
+                <template #verTime="{ row }">{{ formatDateTime(row.createdAt) }}</template>
+              </HseDataGrid>
               <NText v-else depth="3">暂无版本记录</NText>
             </NTabPane>
           </NTabs>

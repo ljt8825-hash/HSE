@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 /**
- * 风险等级分布（web-naive 迁移）
- * 环形图 + 等级明细列表；图表配置与 antd 版本保持一致
+ * 风险等级分布（web-naive 迁移，2026-09-30 重设计）
+ * 环形图 + 等级明细列表；图表高度自适应撑满卡片
  */
 import { computed, onMounted, ref, watch } from 'vue';
 
@@ -19,17 +19,6 @@ const props = defineProps<{
 const chartRef = ref<EchartsUIType>();
 const { renderEcharts } = useEcharts(chartRef);
 
-// Canvas 无法解析 CSS 变量，图表配色使用固定色值
-const tokens = {
-  colorTextBase: '#1f1f1f',
-  colorPrimary: '#1890ff',
-  colorError: '#f5222d',
-  colorWarning: '#faad14',
-  colorSuccess: '#52c41a',
-  colorBgElevated: '#ffffff',
-  colorBorder: '#f0f0f0',
-};
-
 const levelList = computed(() => props.data || []);
 const total = computed(() =>
   levelList.value.reduce((sum, item) => sum + item.count, 0),
@@ -43,7 +32,7 @@ const chartOption = computed<ECOption>(() => {
         left: 'center',
         top: 'center',
         textStyle: {
-          color: tokens.colorTextBase,
+          color: '#1f1f1f',
           fontSize: 14,
           fontWeight: 'normal',
         },
@@ -61,19 +50,18 @@ const chartOption = computed<ECOption>(() => {
   return {
     tooltip: {
       trigger: 'item',
-      backgroundColor: tokens.colorBgElevated,
-      textStyle: { color: tokens.colorTextBase },
+      backgroundColor: 'rgba(255, 255, 255, 0.92)',
+      textStyle: { color: '#1f1f1f' },
       formatter: '{b}: {c} ({d}%)',
     },
     series: [
       {
         type: 'pie',
-        radius: ['55%', '75%'],
+        radius: ['55%', '78%'],
         center: ['50%', '50%'],
         avoidLabelOverlap: false,
-        label: {
-          show: false,
-        },
+        label: { show: false },
+        emphasis: { scaleSize: 4 },
         data,
       },
     ],
@@ -97,12 +85,12 @@ onMounted(() => {
   <div class="level-distribution">
     <div
       v-if="total > 0"
-      class="grid grid-cols-1 items-center gap-4 md:grid-cols-2"
+      class="flex h-full min-h-0 gap-4"
     >
-      <div>
-        <EchartsUI ref="chartRef" height="220px" width="100%" />
+      <div class="min-h-0 min-w-0 flex-1">
+        <EchartsUI ref="chartRef" height="100%" width="100%" />
       </div>
-      <div>
+      <div class="flex w-40 shrink-0 flex-col justify-center">
         <NList>
           <NListItem v-for="item in levelList" :key="item.levelCode">
             <div class="flex items-center gap-2">
@@ -110,10 +98,10 @@ onMounted(() => {
                 class="level-dot"
                 :style="{ backgroundColor: item.colorCode }"
               />
-              <span>{{ item.levelName }}</span>
+              <span class="level-name">{{ item.levelName }}</span>
             </div>
             <template #suffix>
-              <span>
+              <span class="level-count">
                 {{ item.count }}（{{
                   ((item.count / total) * 100).toFixed(1)
                 }}%）
@@ -128,10 +116,25 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.level-distribution {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
 .level-dot {
   display: inline-block;
   width: 8px;
   height: 8px;
   border-radius: 50%;
+}
+.level-name {
+  font-size: 13px;
+  color: hsl(var(--foreground));
+}
+.level-count {
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+  white-space: nowrap;
 }
 </style>

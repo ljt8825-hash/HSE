@@ -6,14 +6,13 @@
  *     + 启停 + 查看 + 删除。
  * 契约：server/routes/hse-assessment-rule.js + api/hse/assessment-rule.ts。
  */
-import { computed, h, onMounted, reactive, ref } from 'vue';
+import { computed, defineComponent, h, onMounted, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { $t } from '#/locales';
 import type { VxeTableGridColumns } from '#/adapter/vxe-table';
 
 import {
   NButton,
-  NCascader,
   NCheckbox,
   NDrawer,
   NDrawerContent,
@@ -35,7 +34,6 @@ import {
   NTabs,
   NTag,
   NTooltip,
-  NDataTable,
   NTreeSelect,
 } from 'naive-ui';
 
@@ -73,12 +71,18 @@ interface CatStore {
   saving: boolean;
   editingKey: number;
   editBackup: any;
-  dragFrom: number | null;
 }
 function makeCatStore(): CatStore {
-  return { list: [], checked: new Set(), loading: false, saving: false, editingKey: -1, editBackup: null, dragFrom: null };
+  return { list: [], checked: new Set(), loading: false, saving: false, editingKey: -1, editBackup: null };
 }
 const catStores = reactive<Record<CatRole, CatStore>>({ manager: makeCatStore(), admin: makeCatStore() });
+
+// 客户端唯一键：VXE row-key 需唯一字段；行编辑还原(JSON 深拷贝)会丢失原 id，
+// 用模块级自增保证 manager/admin 两套 store 的所有行键互不冲突。
+let catRowUidSeq = 0;
+function catRowUid() {
+  return `c${++catRowUidSeq}`;
+}
 
 // 当前可见岗位：按顶层 tab 推导（categories=乡镇作业中心经理 / categories-admin=管理员）
 const activeRole = computed<CatRole>(() => (activeTab.value === 'categories-admin' ? 'admin' : 'manager'));
@@ -102,10 +106,12 @@ const isEditing = (index: number) => index === catStore.value.editingKey;
 function startEdit(index: number) {
   const s = catStore.value;
   if (index < 0 || index >= s.list.length) return;
-  s.editBackup = JSON.parse(JSON.stringify(s.list[index]));
+  const row = s.list[index]!;
+  s.editBackup = JSON.parse(JSON.stringify(row));
+  s.editBackup._key = row._key; // 还原副本需保留客户端唯一键（VXE row-key）
   s.editingKey = index;
-  ensureRuleItems(s.list[index]);
-  s.list = s.list.slice(); // 触发 NDataTable 重渲染
+  ensureRuleItems(row);
+  s.list = s.list.slice(); // 触发 VXE 表格重渲染（数据 prop 变化 → loadData）
 }
 function cancelEdit() {
   const s = catStore.value;
@@ -173,7 +179,7 @@ function makeRuleItemsEditor(row: any) {
     h('span', { class: 'cat-rule-col-op' }, '操作'),
   ]);
   const refresh = () => {
-    catStore.value.list = catStore.value.list.slice(); // 触发 NDataTable 重渲染
+    catStore.value.list = catStore.value.list.slice(); // 触发 VXE 表格重渲染
   };
   const rows = items.map((it, i) =>
     h('div', { class: 'cat-rule-grid cat-rule-row', key: `ri-${i}` }, [
@@ -286,152 +292,85 @@ function normalizeDeductTarget(v: string | null | undefined, toSel: boolean): st
   return s;
 }
 
-const catColumns = [
+const catVxeColumns: VxeTableGridColumns = [
   {
-    key: 'checked',
+    field: '_checked',
     width: 46,
     title: ' ',
     align: 'center',
-    renderHeader: () =>
-      h(NCheckbox, {
-        checked: allCatChecked.value,
-        indeterminate: partCatChecked.value,
-        onUpdateChecked: (v: boolean) => toggleAllCat(v),
-      }),
-    render: (row: any) =>
-      h(NCheckbox, {
-        checked: catChecked.value.has(row),
-        onUpdateChecked: (v: boolean) => {
-          if (v) catChecked.value.add(row);
-          else catChecked.value.delete(row);
-        },
-      }),
+    slots: { header: 'catCheckedHeader', default: 'catCheckedCell' },
   },
   {
     title: '序号',
-    key: 'index',
+    field: '_index',
     width: 60,
     align: 'center',
-    render: (_row: any, index: number) => String(index + 1),
+    slots: { default: 'catIndexCell' },
   },
   {
     title: '类别',
-    key: 'category',
+    field: 'category',
     width: 190,
     align: 'center',
-    render: (row: any, index: number) =>
-      isEditing(index)
-        ? h(NInput, {
-            value: row.category,
-            placeholder: '请输入类别（可新增）',
-            'onUpdate:value': (v: string) => {
-              row.category = v;
-            },
-          })
-        : h('span', { class: 'cat-cell-text' }, row.category || ''),
+    slots: { default: 'catCategoryCell' },
   },
   {
     title: '扣分上限（分）',
-    key: 'maxDeduct',
+    field: 'maxDeduct',
     width: 190,
     align: 'center',
-    render: (row: any, index: number) =>
-      isEditing(index)
-        ? h(NInputNumber, {
-            value: row.maxDeduct,
-            min: 0,
-            step: 0.5,
-            placeholder: '不设上限',
-            style: 'width: 76px',
-            'onUpdate:value': (v: number | null) => {
-              row.maxDeduct = v == null ? null : v;
-            },
-          })
-        : h('span', { class: 'cat-cell-text' }, row.maxDeduct ?? '不设上限'),
+    showOverflow: true,
+    slots: { default: 'catMaxDeductCell' },
   },
   {
     title: '规则名称',
-    key: 'ruleNames',
+    field: 'ruleNames',
     minWidth: 500,
-    align: 'center',
-    render: (row: any) => makeRuleItemsEditor(row),
+    headerAlign: 'center',
+    // 行子表编辑器自身横向排布，禁用单元格省略以免子表被截断
+    showOverflow: false,
+    slots: { default: 'catRuleNamesCell' },
   },
   {
     title: '扣分对象',
-    key: 'deductTarget',
+    field: 'deductTarget',
     width: 200,
     align: 'center',
-    render: (row: any, index: number) => {
-      if (!isEditing(index)) {
-        return h(
-          'span',
-          { class: 'cat-cell-text' },
-          DEDUCT_TARGET_TEXT[String(row.deductTarget || 'self')] || row.deductTarget || '本人',
-        );
-      }
-      return h(NSelect, {
-        value: normalizeDeductTarget(row.deductTarget, true),
-        options: DEDUCT_TARGET_OPTIONS.value,
-        tag: true,
-        filterable: false,
-        placeholder: activeRole.value === 'admin' ? '本人 / 管理员 / 自定义' : '本人 / 经理 / 自定义',
-        style: 'width: 176px',
-        'onUpdate:value': (v: string | null) => {
-          row.deductTarget = normalizeDeductTarget(v, false);
-        },
-      });
-    },
+    showOverflow: true,
+    slots: { default: 'catDeductTargetCell' },
   },
   {
-    key: 'drag',
+    field: '_drag',
     width: 60,
     title: '排序',
     align: 'center',
-    render: (row: any) =>
-      h('span', {
-        class: 'cat-drag-handle',
-        title: '拖动调整顺序',
-        draggable: 'true',
-        onDragstart: () => {
-          catStore.value.dragFrom = catStore.value.list.indexOf(row);
-        },
-      }, '⠿'),
+    // 配合 rowDrag:{ trigger:'cell' } 作为行拖拽手柄（仅手柄区可拖）
+    dragSort: true,
+    slots: { default: 'catDragCell' },
   },
   {
     title: '操作',
-    key: 'op',
+    field: 'op',
     width: 150,
-    render: (row: any, index: number) => {
-      if (isEditing(index)) {
-        return h(NSpace, { justify: 'center', size: 4, wrap: false }, {
-          default: () => [
-            h(NButton, { size: 'small', type: 'primary', quaternary: true, onClick: () => saveRowEdit() }, { default: () => '保存' }),
-            h(NButton, { size: 'small', quaternary: true, onClick: () => cancelEdit() }, { default: () => '取消' }),
-          ],
-        });
-      }
-      return h(NSpace, { justify: 'center', size: 4, wrap: false }, {
-        default: () => [
-          h(NButton, { size: 'small', type: 'primary', quaternary: true, onClick: () => startEdit(index) }, { default: () => '编辑' }),
-          h(
-            NPopconfirm,
-            { onPositiveClick: () => removeCategoryRow(row) },
-            {
-              trigger: () =>
-                h(NButton, { size: 'small', type: 'error', quaternary: true }, { default: () => '删除' }),
-              default: () => `确认删除「${row.category || '未命名类别'}」的类别扣分上限？删除后不可恢复。`,
-            },
-          ),
-        ],
-      });
-    },
+    align: 'center',
+    slots: { default: 'catOpCell' },
   },
 ];
+
+// 规则名称子表编辑器：沿用原 makeRuleItemsEditor render 逻辑，包成组件供 VXE slot 使用
+const CatRuleItemsEditor = defineComponent({
+  name: 'CatRuleItemsEditor',
+  props: { row: { type: Object, required: true } },
+  setup(props) {
+    return () => makeRuleItemsEditor(props.row);
+  },
+});
 
 function addCategoryRow() {
   const s = catStore.value;
   s.list.push({
     id: null,
+    _key: catRowUid(),
     category: '',
     maxDeduct: null,
     deductTarget: 'self',
@@ -459,28 +398,20 @@ async function removeCategoryRow(row: any) {
   await saveCatLimits();
 }
 
-function catRowProps(_row: any) {
+function onRowDragend(payload: { dragRow: any; newRow: any; dragPos: string }) {
   const s = catStore.value;
-  return {
-    class: 'cat-drag-row',
-    ondragover: (e: DragEvent) => {
-      e.preventDefault();
-    },
-    ondrop: (e: DragEvent) => {
-      e.preventDefault();
-      if (s.dragFrom == null) return;
-      const to = s.list.indexOf(_row);
-      if (to < 0 || to === s.dragFrom) {
-        s.dragFrom = null;
-        return;
-      }
-      const arr = s.list.slice();
-      const [moved] = arr.splice(s.dragFrom, 1);
-      arr.splice(to, 0, moved);
-      s.list = arr;
-      s.dragFrom = null;
-    },
-  };
+  const { dragRow, newRow, dragPos } = payload;
+  if (!dragRow || !newRow || dragRow === newRow) return;
+  const arr = s.list.slice();
+  const from = arr.indexOf(dragRow);
+  if (from < 0) return;
+  arr.splice(from, 1);
+  let to = arr.indexOf(newRow);
+  if (to < 0) return;
+  // dragPos=bottom 表示落在 newRow 下方 → 插到其后；否则插到其前
+  if (dragPos === 'bottom') to += 1;
+  arr.splice(to, 0, dragRow);
+  s.list = arr;
 }
 
 async function batchDeleteCategoryRows() {
@@ -502,6 +433,7 @@ async function loadCategoryLimits() {
     const res = await getCategoryLimits(activeRole.value);
     s.list = (Array.isArray(res) ? res : []).map((r) => ({
       ...r,
+      _key: catRowUid(),
       ruleCount: r.ruleCount ?? (r.ruleTotal > 0 ? r.ruleTotal : null),
       ruleNames: r.ruleNames ?? (r.ruleNamesDerived && r.ruleNamesDerived.length ? r.ruleNamesDerived.join('、') : null),
       originalCategory: r.category,
@@ -1163,6 +1095,8 @@ async function showEdit(index: number) {
     }
     details.value = (res.details || []).map((d: any) => ({
       ...d,
+      // 客户端唯一键：VXE row-key；DB 行用 id 派生，无 id 时回退时间戳（基本不会进入该分支）
+      _t: d.id != null ? `d${d.id}` : `n${Date.now()}${details.value.length}`,
       // pg 驱动把 NUMERIC 返回为字符串（如 "1.00"），统一转数字避免 InputNumber 类型警告
       deductScore: d.deductScore != null ? Number(d.deductScore) : d.deductScore,
     }));
@@ -1243,20 +1177,14 @@ const detailPageData = computed(() => {
   const start = (detailPage.value - 1) * detailPageSize.value;
   return filteredDetails.value.slice(start, start + detailPageSize.value);
 });
-const detailPagination = computed(() => ({
-  page: detailPage.value,
-  pageSize: detailPageSize.value,
-  itemCount: filteredDetails.value.length,
-  showSizePicker: true,
-  pageSizes: [10, 20, 50, 100],
-  onUpdatePage: (p: number) => {
-    detailPage.value = p;
-  },
-  onUpdatePageSize: (s: number) => {
-    detailPageSize.value = s;
-    detailPage.value = 1;
-  },
-}));
+let prevDetailPageSize = 10;
+function onDetailPageChange(payload: { currentPage: number; pageSize: number }) {
+  const sizeChanged = payload.pageSize !== prevDetailPageSize;
+  detailPageSize.value = payload.pageSize;
+  // 分页 size 变化时回到第 1 页（沿用原 onUpdatePageSize 行为）
+  detailPage.value = sizeChanged ? 1 : payload.currentPage;
+  prevDetailPageSize = payload.pageSize;
+}
 
 function openDetailEditor() {
   detailSearch.value = '';
@@ -1271,90 +1199,50 @@ function removeDetailRow(row: any) {
   if (detailPage.value > maxPage) detailPage.value = maxPage;
 }
 
-const detailColumns = computed(() => [
+const detailVxeColumns: VxeTableGridColumns = [
   {
     title: '序号',
-    key: 'index',
+    field: '_index',
     width: 60,
     align: 'center',
-    render: (_r: any, index: number) => String((detailPage.value - 1) * detailPageSize.value + index + 1),
+    slots: { default: 'detailIndexCell' },
   },
   {
     title: '子项名称',
-    key: 'detailName',
+    field: 'detailName',
     minWidth: 220,
     align: 'center',
-    render: (row: any) =>
-      h(NInput, {
-        value: row.detailName,
-        size: 'small',
-        placeholder: '子项名称',
-        'onUpdate:value': (v: string) => {
-          row.detailName = v;
-        },
-      }),
+    slots: { default: 'detailNameCell' },
   },
   {
     title: '编码',
-    key: 'detailCode',
+    field: 'detailCode',
     width: 130,
     align: 'center',
-    render: (row: any) =>
-      h(NInput, {
-        value: row.detailCode,
-        size: 'small',
-        placeholder: '可空',
-        'onUpdate:value': (v: string) => {
-          row.detailCode = v;
-        },
-      }),
+    slots: { default: 'detailCodeCell' },
   },
   {
     title: '扣分',
-    key: 'deductScore',
+    field: 'deductScore',
     width: 110,
     align: 'center',
-    render: (row: any) =>
-      h(NInputNumber, {
-        value: row.deductScore,
-        min: 0,
-        step: 0.5,
-        size: 'small',
-        placeholder: '扣分',
-        style: 'width: 86px',
-        'onUpdate:value': (v: number | null) => {
-          row.deductScore = v ?? 0;
-        },
-      }),
+    slots: { default: 'detailScoreCell' },
   },
   {
     title: '单位',
-    key: 'unit',
+    field: 'unit',
     width: 90,
     align: 'center',
-    render: (row: any) =>
-      h(NInput, {
-        value: row.unit,
-        size: 'small',
-        placeholder: '单位',
-        'onUpdate:value': (v: string) => {
-          row.unit = v;
-        },
-      }),
+    slots: { default: 'detailUnitCell' },
   },
   {
     title: '操作',
-    key: 'op',
+    field: 'op',
     width: 70,
     align: 'center',
-    render: (row: any) =>
-      h(
-        NButton,
-        { size: 'small', type: 'error', quaternary: true, onClick: () => removeDetailRow(row) },
-        { default: () => '删' },
-      ),
+    slots: { default: 'detailOpCell' },
   },
-]);
+];
 
 function addCondition() {
   conditions.value.push({ logic: 'and', field: '', operator: 'eq', value: '' });
@@ -1666,19 +1554,96 @@ async function handleTabChange(name: string) {
             <span class="text-gray-400" style="font-size: 12px">点某行「编辑」进入行编辑（改完点「保存」；「取消」还原），或「＋ 增加行」新增；勾选行后点「批量删除」。留空上限 = 不设上限；「类别 / 规则名称」保存后自动同步到「扣分规则」。此页为「乡镇作业中心经理」岗位的类别上限。</span>
           </div>
 
-          <NDataTable
+          <HseDataGrid
             class="cat-table"
-            :remote="false"
+            :columns="catVxeColumns"
             :data="catLimits"
-            :columns="catColumns"
             :loading="catLoading"
-            :pagination="false"
-            :max-height="520"
-            :bordered="false"
-            :single-line="false"
-            :row-key="(row: any, index: number) => index"
-            :row-props="catRowProps"
-          />
+            :height="520"
+            :row-key="'_key'"
+            :row-drag="{ trigger: 'cell' }"
+            @row-dragend="onRowDragend"
+          >
+            <template #catCheckedHeader>
+              <NCheckbox
+                :checked="allCatChecked"
+                :indeterminate="partCatChecked"
+                @update:checked="(checked: boolean) => toggleAllCat(checked)"
+              />
+            </template>
+            <template #catCheckedCell="{ row }">
+              <NCheckbox
+                :checked="catChecked.has(row)"
+                @update:checked="(checked: boolean) => {
+                  if (checked) catChecked.add(row);
+                  else catChecked.delete(row);
+                }"
+              />
+            </template>
+            <template #catIndexCell="{ rowIndex }">{{ rowIndex + 1 }}</template>
+            <template #catCategoryCell="{ row, rowIndex }">
+              <template v-if="isEditing(rowIndex)">
+                <NInput
+                  :value="row.category"
+                  placeholder="请输入类别（可新增）"
+                  @update:value="(v: string) => { row.category = v; }"
+                />
+              </template>
+              <span v-else class="cat-cell-text">{{ row.category || '' }}</span>
+            </template>
+            <template #catMaxDeductCell="{ row, rowIndex }">
+              <template v-if="isEditing(rowIndex)">
+                <NInputNumber
+                  :value="row.maxDeduct"
+                  :min="0"
+                  :step="0.5"
+                  placeholder="不设上限"
+                  style="width: 76px"
+                  @update:value="(v: number | null) => { row.maxDeduct = v == null ? null : v; }"
+                />
+              </template>
+              <span v-else class="cat-cell-text">{{ row.maxDeduct ?? '不设上限' }}</span>
+            </template>
+            <template #catRuleNamesCell="{ row }">
+              <CatRuleItemsEditor :row="row" />
+            </template>
+            <template #catDeductTargetCell="{ row, rowIndex }">
+              <template v-if="isEditing(rowIndex)">
+                <NSelect
+                  :value="normalizeDeductTarget(row.deductTarget, true)"
+                  :options="DEDUCT_TARGET_OPTIONS"
+                  tag
+                  :filterable="false"
+                  :placeholder="activeRole === 'admin' ? '本人 / 管理员 / 自定义' : '本人 / 经理 / 自定义'"
+                  style="width: 176px"
+                  @update:value="(v: string | null) => { row.deductTarget = normalizeDeductTarget(v, false); }"
+                />
+              </template>
+              <span v-else class="cat-cell-text">{{ DEDUCT_TARGET_TEXT[String(row.deductTarget || 'self')] || row.deductTarget || '本人' }}</span>
+            </template>
+            <template #catDragCell>
+              <span class="cat-drag-handle" title="拖动调整顺序">⠿</span>
+            </template>
+            <template #catOpCell="{ row, rowIndex }">
+              <template v-if="isEditing(rowIndex)">
+                <NSpace :size="4" justify="center" :wrap="false">
+                  <NButton size="small" type="primary" quaternary @click="saveRowEdit">保存</NButton>
+                  <NButton size="small" quaternary @click="cancelEdit">取消</NButton>
+                </NSpace>
+              </template>
+              <template v-else>
+                <NSpace :size="4" justify="center" :wrap="false">
+                  <NButton size="small" type="primary" quaternary @click="startEdit(rowIndex)">编辑</NButton>
+                  <NPopconfirm @positive-click="removeCategoryRow(row)">
+                    <template #trigger>
+                      <NButton size="small" type="error" quaternary>删除</NButton>
+                    </template>
+                    确认删除「{{ row.category || '未命名类别' }}」的类别扣分上限？删除后不可恢复。
+                  </NPopconfirm>
+                </NSpace>
+              </template>
+            </template>
+          </HseDataGrid>
           <div class="text-gray-400" style="font-size: 12px; margin-top: 4px">拖动行首的「⠿」手柄可在行与行之间调整顺序，保存后按此顺序持久化。</div>
         </div>
       </NTabPane>
@@ -1697,19 +1662,96 @@ async function handleTabChange(name: string) {
             <span class="text-gray-400" style="font-size: 12px">点某行「编辑」进入行编辑（改完点「保存」；「取消」还原），或「＋ 增加行」新增；勾选行后点「批量删除」。留空上限 = 不设上限；「类别 / 规则名称」保存后自动同步到「扣分规则」。此页为「管理员」岗位的类别上限。</span>
           </div>
 
-          <NDataTable
+          <HseDataGrid
             class="cat-table"
-            :remote="false"
+            :columns="catVxeColumns"
             :data="catLimits"
-            :columns="catColumns"
             :loading="catLoading"
-            :pagination="false"
-            :max-height="520"
-            :bordered="false"
-            :single-line="false"
-            :row-key="(row: any, index: number) => index"
-            :row-props="catRowProps"
-          />
+            :height="520"
+            :row-key="'_key'"
+            :row-drag="{ trigger: 'cell' }"
+            @row-dragend="onRowDragend"
+          >
+            <template #catCheckedHeader>
+              <NCheckbox
+                :checked="allCatChecked"
+                :indeterminate="partCatChecked"
+                @update:checked="(checked: boolean) => toggleAllCat(checked)"
+              />
+            </template>
+            <template #catCheckedCell="{ row }">
+              <NCheckbox
+                :checked="catChecked.has(row)"
+                @update:checked="(checked: boolean) => {
+                  if (checked) catChecked.add(row);
+                  else catChecked.delete(row);
+                }"
+              />
+            </template>
+            <template #catIndexCell="{ rowIndex }">{{ rowIndex + 1 }}</template>
+            <template #catCategoryCell="{ row, rowIndex }">
+              <template v-if="isEditing(rowIndex)">
+                <NInput
+                  :value="row.category"
+                  placeholder="请输入类别（可新增）"
+                  @update:value="(v: string) => { row.category = v; }"
+                />
+              </template>
+              <span v-else class="cat-cell-text">{{ row.category || '' }}</span>
+            </template>
+            <template #catMaxDeductCell="{ row, rowIndex }">
+              <template v-if="isEditing(rowIndex)">
+                <NInputNumber
+                  :value="row.maxDeduct"
+                  :min="0"
+                  :step="0.5"
+                  placeholder="不设上限"
+                  style="width: 76px"
+                  @update:value="(v: number | null) => { row.maxDeduct = v == null ? null : v; }"
+                />
+              </template>
+              <span v-else class="cat-cell-text">{{ row.maxDeduct ?? '不设上限' }}</span>
+            </template>
+            <template #catRuleNamesCell="{ row }">
+              <CatRuleItemsEditor :row="row" />
+            </template>
+            <template #catDeductTargetCell="{ row, rowIndex }">
+              <template v-if="isEditing(rowIndex)">
+                <NSelect
+                  :value="normalizeDeductTarget(row.deductTarget, true)"
+                  :options="DEDUCT_TARGET_OPTIONS"
+                  tag
+                  :filterable="false"
+                  :placeholder="activeRole === 'admin' ? '本人 / 管理员 / 自定义' : '本人 / 经理 / 自定义'"
+                  style="width: 176px"
+                  @update:value="(v: string | null) => { row.deductTarget = normalizeDeductTarget(v, false); }"
+                />
+              </template>
+              <span v-else class="cat-cell-text">{{ DEDUCT_TARGET_TEXT[String(row.deductTarget || 'self')] || row.deductTarget || '本人' }}</span>
+            </template>
+            <template #catDragCell>
+              <span class="cat-drag-handle" title="拖动调整顺序">⠿</span>
+            </template>
+            <template #catOpCell="{ row, rowIndex }">
+              <template v-if="isEditing(rowIndex)">
+                <NSpace :size="4" justify="center" :wrap="false">
+                  <NButton size="small" type="primary" quaternary @click="saveRowEdit">保存</NButton>
+                  <NButton size="small" quaternary @click="cancelEdit">取消</NButton>
+                </NSpace>
+              </template>
+              <template v-else>
+                <NSpace :size="4" justify="center" :wrap="false">
+                  <NButton size="small" type="primary" quaternary @click="startEdit(rowIndex)">编辑</NButton>
+                  <NPopconfirm @positive-click="removeCategoryRow(row)">
+                    <template #trigger>
+                      <NButton size="small" type="error" quaternary>删除</NButton>
+                    </template>
+                    确认删除「{{ row.category || '未命名类别' }}」的类别扣分上限？删除后不可恢复。
+                  </NPopconfirm>
+                </NSpace>
+              </template>
+            </template>
+          </HseDataGrid>
           <div class="text-gray-400" style="font-size: 12px; margin-top: 4px">拖动行首的「⠿」手柄可在行与行之间调整顺序，保存后按此顺序持久化。</div>
         </div>
       </NTabPane>
@@ -1911,15 +1953,59 @@ async function handleTabChange(name: string) {
         <div style="color: #909399; font-size: 12px; margin-bottom: 8px">
           支持导入 Excel(.xlsx/.xls/.csv) 或文本(.txt)。首行列名须含「名称/子项/考核内容」「扣分/分值」「单位」「编码」中的任一关键词以自动识别列；扣分值缺省时按 1 分计。
         </div>
-        <NDataTable
-          :columns="detailColumns"
+        <HseDataGrid
+          :columns="detailVxeColumns"
           :data="detailPageData"
-          :pagination="detailPagination"
-          :row-key="(row: any) => String(row._t || row.id)"
-          :max-height="440"
-          :bordered="false"
-          :single-line="false"
-        />
+          :pager="{ pageSizes: [10, 20, 50, 100] }"
+          :current-page="detailPage"
+          :page-size="detailPageSize"
+          :total="filteredDetails.length"
+          :height="440"
+          :row-key="'_t'"
+          @page-change="onDetailPageChange"
+        >
+          <template #detailIndexCell="{ rowIndex }">
+            {{ (detailPage - 1) * detailPageSize + rowIndex + 1 }}
+          </template>
+          <template #detailNameCell="{ row }">
+            <NInput
+              :value="row.detailName"
+              size="small"
+              placeholder="子项名称"
+              @update:value="(v: string) => { row.detailName = v; }"
+            />
+          </template>
+          <template #detailCodeCell="{ row }">
+            <NInput
+              :value="row.detailCode"
+              size="small"
+              placeholder="可空"
+              @update:value="(v: string) => { row.detailCode = v; }"
+            />
+          </template>
+          <template #detailScoreCell="{ row }">
+            <NInputNumber
+              :value="row.deductScore"
+              :min="0"
+              :step="0.5"
+              size="small"
+              placeholder="扣分"
+              style="width: 86px"
+              @update:value="(v: number | null) => { row.deductScore = v ?? 0; }"
+            />
+          </template>
+          <template #detailUnitCell="{ row }">
+            <NInput
+              :value="row.unit"
+              size="small"
+              placeholder="单位"
+              @update:value="(v: string) => { row.unit = v; }"
+            />
+          </template>
+          <template #detailOpCell="{ row }">
+            <NButton size="small" type="error" quaternary @click="removeDetailRow(row)">删</NButton>
+          </template>
+        </HseDataGrid>
       </NDrawerContent>
     </NDrawer>
 
@@ -2044,9 +2130,6 @@ async function handleTabChange(name: string) {
   line-height: 1.45;
   padding-right: 2px;
 }
-.cat-drag-row:hover {
-  background: rgba(24, 160, 88, 0.04);
-}
 .cat-drag-handle {
   display: inline-flex;
   align-items: center;
@@ -2063,7 +2146,7 @@ async function handleTabChange(name: string) {
 .cat-drag-handle:active {
   cursor: grabbing;
 }
-.cat-drag-row:hover .cat-drag-handle {
+.vxe-body--row:hover .cat-drag-handle {
   color: #18a058;
   background: rgba(24, 160, 88, 0.08);
 }
@@ -2158,18 +2241,17 @@ async function handleTabChange(name: string) {
   border-style: dashed;
   border-width: 1px;
 }
-/* 类别扣分上限：表格/表单各项内容居中 */
-.cat-table .n-data-table-td,
-.cat-table .n-data-table-th {
+/* 类别扣分上限：单元格/行子表输入内容居中（VXE 表体列） */
+.cat-table .vxe-body--column {
   text-align: center;
 }
-.cat-table .n-data-table-td .n-input__input-el,
-.cat-table .n-data-table-td .n-input-number .n-input__input-el,
+.cat-table .vxe-body--column .n-input__input-el,
+.cat-table .vxe-body--column .n-input-number .n-input__input-el,
 .cat-rule-grid .n-input__input-el,
 .cat-rule-grid .n-input-number .n-input__input-el {
   text-align: center;
 }
-.cat-table .n-data-table-td .cat-rule-grid {
+.cat-table .vxe-body--column .cat-rule-grid {
   text-align: center;
 }
 </style>

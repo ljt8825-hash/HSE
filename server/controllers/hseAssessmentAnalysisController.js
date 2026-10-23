@@ -28,7 +28,7 @@ async function run(req, res, fn) {
 // ---- 5 个公开只读统计端点（无鉴权） ----
 const overview = (req, res) => run(req, res, () => service.overview());
 const departmentRanking = (req, res) => run(req, res, () => service.departmentRanking());
-const townshipRanking = (req, res) => run(req, res, () => service.townshipRanking());
+const townshipRanking = (req, res) => run(req, res, () => service.townshipRanking(req.query.cycleId));
 const goals = (req, res) => run(req, res, () => service.goals());
 const deduction = (req, res) => run(req, res, () => service.deduction());
 

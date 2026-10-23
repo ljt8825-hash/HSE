@@ -99,7 +99,13 @@ router.get('/overview', async (req, res) => {
               COUNT(*) as inspection_total_count,
               COUNT(*) FILTER (WHERE vr.result = '不合格') as failed_count
        FROM hse_driver_inspection_records vr
-       WHERE vr.is_deleted = false`
+       WHERE vr.is_deleted = false
+         AND vr.employee_id IN (
+           SELECT ea.employee_id FROM employee_assignment ea
+           LEFT JOIN position p ON p.id = ea.position_id AND p.is_deleted = false
+           WHERE ea.is_current = true AND ea.is_deleted = false
+             AND (${driverCondition})
+         )`
     );
 
     const trainingResult = await pool.query(

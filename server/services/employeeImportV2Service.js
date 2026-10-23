@@ -894,7 +894,7 @@ async function createImportBatchFromWorkbook({ filePath, fileName, username, ip,
  * 正式入库：将批次中所有 approved 记录写入 employee + employee_assignment。
  * 供「手动入库」路由与「目录自动入库」共用同一份写库逻辑。
  */
-async function performBatchImport(batchId, { username, ip } = {}) {
+async function performBatchImport(batchId, { userId, username, ip } = {}) {
   if (!isConnected()) throw new Error('数据库未连接');
 
   const batchResult = await pool.query(
@@ -995,9 +995,9 @@ async function performBatchImport(batchId, { username, ip } = {}) {
                phone = COALESCE(phone, $5),
                person_type = COALESCE(person_type, $6),
                person_category = COALESCE(person_category, $7),
-               direct_supervisor = COALESCE($8, direct_supervisor),
+               direct_supervisor = COALESCE($8::varchar, direct_supervisor),
                updated_at = CURRENT_TIMESTAMP
-             WHERE id = $1 AND (gender IS NULL OR birth_date IS NULL OR id_card IS NULL OR phone IS NULL OR $8 IS NOT NULL)`,
+             WHERE id = $1 AND (gender IS NULL OR birth_date IS NULL OR id_card IS NULL OR phone IS NULL OR $8::varchar IS NOT NULL)`,
             [employeeId, p.gender || null, p.birth_date || null,
              p.id_card_encrypted || null, p.phone_encrypted || null,
              p.person_type || null,
@@ -1010,11 +1010,11 @@ async function performBatchImport(batchId, { username, ip } = {}) {
         // 花名册三列同步（roster_department/roster_position/roster_work_area）：导入即有值即联动刷新
         await client.query(
           `UPDATE employee SET
-             roster_department = COALESCE($2, roster_department),
-             roster_position = COALESCE($3, roster_position),
-             roster_work_area = COALESCE($4, roster_work_area),
+             roster_department = COALESCE($2::varchar, roster_department),
+             roster_position = COALESCE($3::varchar, roster_position),
+             roster_work_area = COALESCE($4::varchar, roster_work_area),
              updated_at = CURRENT_TIMESTAMP
-           WHERE id = $1 AND ($2 IS NOT NULL OR $3 IS NOT NULL OR $4 IS NOT NULL)`,
+           WHERE id = $1 AND ($2::varchar IS NOT NULL OR $3::varchar IS NOT NULL OR $4::varchar IS NOT NULL)`,
           [employeeId, normalizeRosterDept(p.raw_dept), p.raw_position || null, p.raw_work_area || null]
         );
 
@@ -1085,7 +1085,7 @@ async function performBatchImport(batchId, { username, ip } = {}) {
     // 记录审计日志
     try {
       await auditLog({
-        userId: null,
+        userId: userId || null,
         username: username || null,
         module: 'employee_import_v2',
         action: 'import',
@@ -1346,6 +1346,7 @@ async function pendingResolve(id, body, user, ip) {
 async function batchImport(batchId, user, ip) {
   try {
     const result = await performBatchImport(batchId, {
+      userId: user?.id,
       username: user?.username,
       ip,
     });

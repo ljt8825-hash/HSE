@@ -1,0 +1,684 @@
+{
+  "__elapsed_s": 290.3,
+  "__http": 200,
+  "response": {
+    "success": true,
+    "skill": {
+      "id": "SK-003",
+      "name": "检查数据分析",
+      "key": "company.inspection.analysis",
+      "version": "v1.0.0",
+      "domain": "company",
+      "type": "inspection_analysis",
+      "status": "Active"
+    },
+    "request_id": "3cbe0acc-3b72-4e30-a8b7-29c295862227",
+    "result": {
+      "dataset": {
+        "source": "HSE 网格检查记录（grid_inspection_records · 只读）（2026-09-01 ~ 2026-09-30）",
+        "row_count": 1504,
+        "total_rows_in_input": 1504,
+        "valid_rows": 1504,
+        "invalid_rows": 0,
+        "time_span": {
+          "from": "2026-09-01",
+          "to": "2026-09-27",
+          "days": 26
+        },
+        "parsed_at": "2026-10-14T14:53:35.404Z",
+        "engine": "sk003-deterministic-v1（程序统计：总量/分组/排名/趋势/同比环比/占比/极值/异常，AI 未参与计算）"
+      },
+      "mapping": {
+        "resolved": {
+          "date": "inspection_date",
+          "inspector": "personnel_name",
+          "subject": "violator_name",
+          "organization": "area_team",
+          "location": "grid_name",
+          "category": "violation_type_result",
+          "status": "report_status",
+          "description": "violation_behavior"
+        },
+        "unresolved": [
+          "project",
+          "type"
+        ],
+        "labels": {
+          "date": "检查日期",
+          "organization": "组织/片区",
+          "project": "项目",
+          "inspector": "检查人",
+          "subject": "被检查对象",
+          "type": "检查类型",
+          "status": "状态",
+          "category": "类别",
+          "description": "描述",
+          "location": "地点",
+          "metric": "数值指标"
+        }
+      },
+      "quality": {
+        "checks": [
+          {
+            "check": "empty_data",
+            "status": "pass",
+            "detail": "共 1504 行"
+          },
+          {
+            "check": "empty_table",
+            "status": "pass",
+            "detail": "非空行 1504 行"
+          },
+          {
+            "check": "no_valid_records",
+            "status": "pass",
+            "detail": "有效记录 1504 行"
+          },
+          {
+            "check": "missing_required_fields",
+            "status": "pass",
+            "detail": "未映射语义字段: project(项目)、type(检查类型)——相关维度分析不可用"
+          },
+          {
+            "check": "unparseable_dates",
+            "status": "pass",
+            "detail": "日期列「inspection_date」无法解析 0 个"
+          },
+          {
+            "check": "field_type_anomaly",
+            "status": "pass",
+            "detail": "未指定数值指标列（仅做记录条数统计）"
+          },
+          {
+            "check": "empty_metric_fields",
+            "status": "pass",
+            "detail": "未指定数值指标列"
+          },
+          {
+            "check": "duplicates",
+            "status": "warn",
+            "detail": "完全重复行 6 行（样例: 第undefined行≈第undefined行、第undefined行≈第undefined行、第undefined行≈第undefined行、第undefined行≈第undefined行、第undefined行≈第undefined行）"
+          },
+          {
+            "check": "high_null_fields",
+            "status": "warn",
+            "detail": "高空值字段（空值率≥30%）: 状态(100.0%)、类别(100.0%)"
+          },
+          {
+            "check": "time_range_anomaly",
+            "status": "pass",
+            "detail": "超出合理时间范围（<2000-01-01 或未来日期）的记录 0 条；请求时间范围 2026-09-01 ~ 2026-09-30 之外记录 0 条（已排除）"
+          },
+          {
+            "check": "empty_dimension_fields",
+            "status": "warn",
+            "detail": "分析维度空值: 组织/片区(0.0%)、状态(100.0%)"
+          },
+          {
+            "check": "metric_anomaly",
+            "status": "pass",
+            "detail": "未指定数值指标列"
+          }
+        ],
+        "duplicates": 6,
+        "duplicate_samples": [
+          {},
+          {},
+          {},
+          {},
+          {}
+        ],
+        "unparseable_dates": 0,
+        "unparseable_samples": [],
+        "outside_time_range": 0,
+        "null_rates": {
+          "date": 0,
+          "organization": 0,
+          "inspector": 0,
+          "subject": 0,
+          "status": 1,
+          "category": 1,
+          "description": 0,
+          "location": 0
+        },
+        "high_null_fields": [
+          {
+            "field": "status",
+            "label": "状态",
+            "null_rate": 1
+          },
+          {
+            "field": "category",
+            "label": "类别",
+            "null_rate": 1
+          }
+        ],
+        "metric_type_invalid": {},
+        "metric_empty": {}
+      },
+      "totals": {
+        "total": 1504,
+        "valid": 1504,
+        "invalid": 0,
+        "outside_time_range": 0
+      },
+      "groups": [
+        {
+          "dimension": "organization",
+          "label": "组织/片区",
+          "source_field": "area_team",
+          "distinct": 14,
+          "truncated": false,
+          "items": [
+            {
+              "value": "杜集镇",
+              "count": 242,
+              "share": 0.1609
+            },
+            {
+              "value": "柴胡店镇",
+              "count": 168,
+              "share": 0.1117
+            },
+            {
+              "value": "时集镇",
+              "count": 133,
+              "share": 0.0884
+            },
+            {
+              "value": "保店镇",
+              "count": 128,
+              "share": 0.0851
+            },
+            {
+              "value": "长官镇",
+              "count": 126,
+              "share": 0.0838
+            },
+            {
+              "value": "刘营伍乡",
+              "count": 109,
+              "share": 0.0725
+            },
+            {
+              "value": "张大庄镇",
+              "count": 108,
+              "share": 0.0718
+            },
+            {
+              "value": "大柳镇",
+              "count": 106,
+              "share": 0.0705
+            },
+            {
+              "value": "大曹镇",
+              "count": 105,
+              "share": 0.0698
+            },
+            {
+              "value": "相衙镇",
+              "count": 102,
+              "share": 0.0678
+            },
+            {
+              "value": "津城街道",
+              "count": 81,
+              "share": 0.0539
+            },
+            {
+              "value": "宁城街道",
+              "count": 53,
+              "share": 0.0352
+            },
+            {
+              "value": "公司管理",
+              "count": 34,
+              "share": 0.0226
+            },
+            {
+              "value": "公司管理员",
+              "count": 9,
+              "share": 0.006
+            }
+          ]
+        }
+      ],
+      "rankings": [
+        {
+          "dimension": "organization",
+          "label": "组织/片区",
+          "top_n": 10,
+          "truncated": true,
+          "items": [
+            {
+              "rank": 1,
+              "value": "杜集镇",
+              "count": 242,
+              "share": 0.1609
+            },
+            {
+              "rank": 2,
+              "value": "柴胡店镇",
+              "count": 168,
+              "share": 0.1117
+            },
+            {
+              "rank": 3,
+              "value": "时集镇",
+              "count": 133,
+              "share": 0.0884
+            },
+            {
+              "rank": 4,
+              "value": "保店镇",
+              "count": 128,
+              "share": 0.0851
+            },
+            {
+              "rank": 5,
+              "value": "长官镇",
+              "count": 126,
+              "share": 0.0838
+            },
+            {
+              "rank": 6,
+              "value": "刘营伍乡",
+              "count": 109,
+              "share": 0.0725
+            },
+            {
+              "rank": 7,
+              "value": "张大庄镇",
+              "count": 108,
+              "share": 0.0718
+            },
+            {
+              "rank": 8,
+              "value": "大柳镇",
+              "count": 106,
+              "share": 0.0705
+            },
+            {
+              "rank": 9,
+              "value": "大曹镇",
+              "count": 105,
+              "share": 0.0698
+            },
+            {
+              "rank": 10,
+              "value": "相衙镇",
+              "count": 102,
+              "share": 0.0678
+            }
+          ]
+        }
+      ],
+      "trend": {
+        "dimension": "date",
+        "label": "检查日期",
+        "source_field": "inspection_date",
+        "granularity": "day",
+        "span": {
+          "from": "2026-09-01",
+          "to": "2026-09-27",
+          "days": 26
+        },
+        "invalid_dates": 0,
+        "truncated": false,
+        "points": [
+          {
+            "period": "2026-09-01",
+            "period_start": "2026-09-01",
+            "count": 56,
+            "sums": {}
+          },
+          {
+            "period": "2026-09-02",
+            "period_start": "2026-09-02",
+            "count": 63,
+            "sums": {}
+          },
+          {
+            "period": "2026-09-03",
+            "period_start": "2026-09-03",
+            "count": 56,
+            "sums": {}
+          },
+          {
+            "period": "2026-09-04",
+            "period_start": "2026-09-04",
+            "count": 56,
+            "sums": {}
+          },
+          {
+            "period": "2026-09-05",
+            "period_start": "2026-09-05",
+            "count": 53,
+            "sums": {}
+          },
+          {
+            "period": "2026-09-06",
+            "period_start": "2026-09-06",
+            "count": 55,
+            "sums": {}
+          },
+          {
+            "period": "2026-09-07",
+            "period_start": "2026-09-07",
+            "count": 58,
+            "sums": {}
+          },
+          {
+            "period": "2026-09-08",
+            "period_start": "2026-09-08",
+            "count": 55,
+            "sums": {}
+          },
+          {
+            "period": "2026-09-09",
+            "period_start": "2026-09-09",
+            "count": 59,
+            "sums": {}
+          },
+          {
+            "period": "2026-09-10",
+            "period_start": "2026-09-10",
+            "count": 61,
+            "sums": {}
+          },
+          {
+            "period": "2026-09-11",
+            "period_start": "2026-09-11",
+            "count": 55,
+            "sums": {}
+          },
+          {
+            "period": "2026-09-12",
+            "period_start": "2026-09-12",
+            "count": 56,
+            "sums": {}
+          },
+          {
+            "period": "2026-09-13",
+            "period_start": "2026-09-13",
+            "count": 54,
+            "sums": {}
+          },
+          {
+            "period": "2026-09-14",
+            "period_start": "2026-09-14",
+            "count": 57,
+            "sums": {}
+          },
+          {
+            "period": "2026-09-15",
+            "period_start": "2026-09-15",
+            "count": 55,
+            "sums": {}
+          },
+          {
+            "period": "2026-09-16",
+            "period_start": "2026-09-16",
+            "count": 54,
+            "sums": {}
+          },
+          {
+            "period": "2026-09-17",
+            "period_start": "2026-09-17",
+            "count": 53,
+            "sums": {}
+          },
+          {
+            "period": "2026-09-18",
+            "period_start": "2026-09-18",
+            "count": 55,
+            "sums": {}
+          },
+          {
+            "period": "2026-09-19",
+            "period_start": "2026-09-19",
+            "count": 61,
+            "sums": {}
+          },
+          {
+            "period": "2026-09-20",
+            "period_start": "2026-09-20",
+            "count": 56,
+            "sums": {}
+          },
+          {
+            "period": "2026-09-21",
+            "period_start": "2026-09-21",
+            "count": 53,
+            "sums": {}
+          },
+          {
+            "period": "2026-09-22",
+            "period_start": "2026-09-22",
+            "count": 50,
+            "sums": {}
+          },
+          {
+            "period": "2026-09-23",
+            "period_start": "2026-09-23",
+            "count": 54,
+            "sums": {}
+          },
+          {
+            "period": "2026-09-24",
+            "period_start": "2026-09-24",
+            "count": 59,
+            "sums": {}
+          },
+          {
+            "period": "2026-09-25",
+            "period_start": "2026-09-25",
+            "count": 53,
+            "sums": {}
+          },
+          {
+            "period": "2026-09-26",
+            "period_start": "2026-09-26",
+            "count": 56,
+            "sums": {}
+          },
+          {
+            "period": "2026-09-27",
+            "period_start": "2026-09-27",
+            "count": 51,
+            "sums": {}
+          }
+        ],
+        "missing_periods": []
+      },
+      "compare": {
+        "granularity": "day",
+        "mom": {
+          "available": true,
+          "base": {
+            "period": "2026-09-27",
+            "count": 51
+          },
+          "against": {
+            "period": "2026-09-26",
+            "count": 56
+          },
+          "change": -5,
+          "change_pct": -0.0893,
+          "basis": "2026-09-27 为 51 次，2026-09-26 为 56 次，减少 8.93%"
+        },
+        "yoy": {
+          "available": false,
+          "reason": "数据中不存在去年同期（2025-09-27）的有效数据，无法计算同比"
+        },
+        "latest": {
+          "period": "2026-09-27",
+          "count": 51
+        }
+      },
+      "extremes": [
+        {
+          "dimension": "organization",
+          "label": "组织/片区",
+          "max": {
+            "value": "杜集镇",
+            "count": 242,
+            "tied": false
+          },
+          "min": {
+            "value": "公司管理员",
+            "count": 9,
+            "tied": false
+          }
+        }
+      ],
+      "anomalies": [],
+      "metric_columns": [],
+      "sample_rows": [
+        {
+          "date": "2026-09-01",
+          "organization": "柴胡店镇",
+          "project": null,
+          "inspector": "王臣祥",
+          "subject": "--",
+          "type": null,
+          "status": null,
+          "category": null,
+          "description": "无三违行为",
+          "location": "王臣祥"
+        },
+        {
+          "date": "2026-09-01",
+          "organization": "柴胡店镇",
+          "project": null,
+          "inspector": "李春福",
+          "subject": "--",
+          "type": null,
+          "status": null,
+          "category": null,
+          "description": "无三违行为",
+          "location": "李春福"
+        },
+        {
+          "date": "2026-09-01",
+          "organization": "柴胡店镇",
+          "project": null,
+          "inspector": "鲍明新",
+          "subject": "--",
+          "type": null,
+          "status": null,
+          "category": null,
+          "description": "无三违行为",
+          "location": "鲍明新"
+        }
+      ]
+    },
+    "answer": "一、主要发现：\n- 2026年9月1日至2026年9月27日共记录检查1504条，均为有效记录。\n- 检查活动主要集中在杜集镇，占比16.09%，其次是柴胡店镇（11.17%）、时集镇（8.84%）等。\n- 9月27日检查记录最少，为51条，环比下降5条，下降率为-8.93%。\n- 无数据期和异常记录。\n\n二、分组与排名解读：\n- 按组织/片区分组，杜集镇检查记录最多，占比16.09%，其次是柴胡店镇（11.17%）、时集镇（8.84%）等。\n- 排名前五的组织/片区分别为：杜集镇、柴胡店镇、时集镇、保店镇、长官镇。\n\n三、趋势与同比环比解读：\n- 9月检查记录总体呈波动状态，无明显上升或下降趋势。\n- 9月26日检查记录为56条，9月27日检查记录为51条，环比下降5条，下降率为-8.93%。\n- 由于数据中不存在去年同期的有效数据，无法进行同比分析。\n\n四、异常与数据质量说明：\n- 未发现异常记录。\n- 数据存在完全重复行6条，状态和类别字段为空值率100%。\n- 建议进一步核查重复记录和空值字段的原因。\n\n五、建议：\n- 建议对重复记录进行核实，确认是否为误录或数据录入错误。\n- 建议进一步调查状态和类别字段为空值的原因，确保数据完整性和准确性。\n- 建议持续监控检查记录趋势，关注波动较大的时期，及时采取措施。",
+    "evidence": [
+      {
+        "source_type": "business_record",
+        "source_id": "grid_inspection_records",
+        "source_domain": "company.inspection.analysis",
+        "source_field": "dataset",
+        "evidence_text": "数据来源：HSE 网格检查记录（grid_inspection_records · 只读）（2026-09-01 ~ 2026-09-30）；记录 1504 条（有效 1504 条），时间跨度 2026-09-01 ~ 2026-09-27。",
+        "evidence_strength": "high",
+        "created_at": "2026-10-14T14:53:35.417Z"
+      },
+      {
+        "source_type": "business_record",
+        "source_id": "grid_inspection_records",
+        "source_domain": "company.inspection.analysis",
+        "source_field": "mapping",
+        "evidence_text": "字段映射：检查日期←inspection_date、检查人←personnel_name、被检查对象←violator_name、组织/片区←area_team、地点←grid_name、类别←violation_type_result、状态←report_status、描述←violation_behavior；未映射: project、type",
+        "evidence_strength": "high",
+        "created_at": "2026-10-14T14:53:35.417Z"
+      },
+      {
+        "source_type": "business_record",
+        "source_id": "grid_inspection_records",
+        "source_domain": "company.inspection.analysis",
+        "source_field": "quality",
+        "evidence_text": "数据质量：重复行 6，无法解析日期 0，高空值字段: 状态(100.0%)、类别(100.0%)。",
+        "evidence_strength": "high",
+        "created_at": "2026-10-14T14:53:35.417Z"
+      },
+      {
+        "source_type": "business_record",
+        "source_id": "grid_inspection_records",
+        "source_domain": "company.inspection.analysis",
+        "source_field": "group_by:organization",
+        "evidence_text": "按「组织/片区」分组（distinct=14，口径=记录条数）：1.杜集镇=242（16.1%）；2.柴胡店镇=168（11.2%）；3.时集镇=133（8.8%）；4.保店镇=128（8.5%）；5.长官镇=126（8.4%）；6.刘营伍乡=109（7.2%）；7.张大庄镇=108（7.2%）；8.大柳镇=106（7.0%）",
+        "evidence_strength": "high",
+        "created_at": "2026-10-14T14:53:35.417Z"
+      },
+      {
+        "source_type": "business_record",
+        "source_id": "grid_inspection_records",
+        "source_domain": "company.inspection.analysis",
+        "source_field": "ranking:organization",
+        "evidence_text": "排名（按记录条数降序 TOP10）：1.杜集镇=242；2.柴胡店镇=168；3.时集镇=133；4.保店镇=128；5.长官镇=126；6.刘营伍乡=109；7.张大庄镇=108；8.大柳镇=106…",
+        "evidence_strength": "high",
+        "created_at": "2026-10-14T14:53:35.417Z"
+      },
+      {
+        "source_type": "business_record",
+        "source_id": "grid_inspection_records",
+        "source_domain": "company.inspection.analysis",
+        "source_field": "trend",
+        "evidence_text": "趋势（检查日期，粒度=day，跨度 2026-09-01~2026-09-27）：2026-09-01:56、2026-09-02:63、2026-09-03:56、2026-09-04:56、2026-09-05:53、2026-09-06:55 …",
+        "evidence_strength": "high",
+        "created_at": "2026-10-14T14:53:35.417Z"
+      },
+      {
+        "source_type": "business_record",
+        "source_id": "grid_inspection_records",
+        "source_domain": "company.inspection.analysis",
+        "source_field": "compare",
+        "evidence_text": "环比（2026-09-26→2026-09-27）：2026-09-27 为 51 次，2026-09-26 为 56 次，减少 8.93%；同比不可用：数据中不存在去年同期（2025-09-27）的有效数据，无法计算同比",
+        "evidence_strength": "high",
+        "created_at": "2026-10-14T14:53:35.417Z"
+      }
+    ],
+    "confidence": "high",
+    "warnings": [],
+    "suggestions": [
+      "数据存在完全重复行，建议先清洗数据再做正式统计口径分析",
+      "统计数字以 result 确定性计算结果为准，AI 文字仅为解读"
+    ],
+    "metadata": {
+      "skill_key": "company.inspection.analysis",
+      "skill_id": "SK-003",
+      "skill_version": "v1.0.0",
+      "model_policy": "inspection_analysis",
+      "prompt_key": "company.inspection.analysis",
+      "prompt_version": "v1.0.0",
+      "provider": "ollama",
+      "model": "qwen2.5:7b",
+      "duration_ms": 289470,
+      "record_id": "174",
+      "record_saved": true,
+      "gateway_request_id": "3cbe0acc-3b72-4e30-a8b7-29c295862227",
+      "trace_id": "ai-3cbe0acc",
+      "usage": {
+        "input_tokens": 2451,
+        "output_tokens": 411
+      },
+      "source": {
+        "type": "hse_grid",
+        "description": "HSE 网格检查记录（grid_inspection_records · 只读）（2026-09-01 ~ 2026-09-30）",
+        "row_count": 1504,
+        "access_mode": "read_only_select",
+        "filters": {
+          "time_range": {
+            "from": "2026-09-01",
+            "to": "2026-09-30"
+          }
+        }
+      },
+      "permission_model": "role_allowlist（数据来源为用户提供的行数据或只读 Adapter；无行级数据范围收敛，scope 保留字段）",
+      "disclaimer": "本分析由 AI 基于程序确定性统计结果生成，仅为 AI 辅助数据解读，不构成正式管理决定，不含 HSE 专业判定（风险等级/隐患等级/三违定性/责任认定/事故定责/合规最终结论/考核结论）；统计数字以 result 确定性计算结果为准，最终结论以人工审核为准。",
+      "ai_called": true,
+      "ai_context_chars": 2960
+    }
+  }
+}

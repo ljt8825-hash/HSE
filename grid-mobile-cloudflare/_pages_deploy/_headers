@@ -6,3 +6,27 @@
 # （304 命中则复用，内容有变则拉新），既保证永远拿到最新逻辑，又不重复下载整包。
 /*
   Cache-Control: no-cache
+
+# CF-WPS-CSP：内容安全策略（2026-10-21 新增）。
+# 设计前提（已逐文件核实，收紧不会打挂功能）：
+#   - 全站零外链资源（无 CDN / 无 Google Fonts / 无地图瓦片），默认同源即可；
+#     唯一例外是 Cloudflare 边缘自动注入的 Web Analytics（static.cloudflareinsights.com），
+#     不放行会在控制台报脚本加载失败（不影响业务，但会干扰真机诊断）。
+#   - 业务代码无内联事件属性（onclick= / onerror= 等），全部走 .onclick= 与 addEventListener。
+#   - 所有 fetch 均为同源相对路径（./app.js、/config.js、/version.json、/check?probe=），
+#     connect-src 'self' 足够；*.workers.dev 仅由 Pages Functions 服务端反代使用，不经浏览器。
+#   - 照片压缩后为 dataURL、预览用 blob:，故 img-src 放行 data:/blob:。
+#   - 业务用 innerHTML 写 style="..."，故 style-src 必须留 'unsafe-inline'（CSS 不可执行 JS，风险极低）。
+# ⚠️ 2026-10-21 事故（CF-WPS-110）：原方案用 10 个 sha256 白名单内联脚本，
+# 上线后登录页内联脚本被判定不匹配、整段不执行 → window.doLogin 不存在、点「登录」无任何反应。
+# 同一批部署还把 app.js/check.app.js 换成了压缩产物（3894B/182765B），排查中先后被误判为根因。
+# 结论：内联脚本哈希白名单在「HTML 随时改 + 多页多段内联」场景下极易打挂整页，且失效时页面看起来正常。
+# 处置：改为 script-src 'self' 'unsafe-inline'（保留同源限制，去掉哈希维护陷阱）。
+# 注意：CSP 规范里只要出现 hash 或 nonce，'unsafe-inline' 就会被忽略——两者不可并存，
+# 所以必须把 10 个 sha256 全部删掉，不能只追加 'unsafe-inline'。
+# ⚠️ 2026-10-21 二次修正（CF-WPS-111）：同批还加了 frame-ancestors 'none' + X-Frame-Options: DENY。
+# 该站点会被现场从微信/钉钉/门户菜单里以嵌入方式打开，禁止嵌入会把整页变成白屏，
+# 且手机端症状与「登录点不动」难以区分。这两项属于无功能收益的加固，予以回滚，恢复上线前行为。
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://cloudflareinsights.com; worker-src 'self' blob:; manifest-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin

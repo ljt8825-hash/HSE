@@ -22,6 +22,8 @@ if (!PYTHON_PATH) {
 const PARSER_SCRIPT = path.join(__dirname, '..', '..', 'scripts', 'import_parser.py');
 const EXTRACT_IMG_SCRIPT = path.join(__dirname, '..', '..', 'scripts', 'extract_violation_images.py');
 const EXTRACT_GRID_IMG_SCRIPT = path.join(__dirname, '..', '..', 'scripts', 'extract_embedded_images.py');
+// WPS 单元格内嵌图片(cellimages) → 标准 drawing 转换脚本（导入前先探测/转换，见 attachGridImages）
+const CONVERT_WPS_CELLIMG_SCRIPT = path.join(__dirname, '..', '..', 'scripts', 'convert_wps_cellimages_to_drawings.py');
 
 // ============================================================
 // 冲突键规范化（date/时间戳 → 'YYYY-MM-DD'，保证 库内 Date 与导入行字符串 可比）
@@ -263,6 +265,16 @@ function fixDateValue(value) {
       const y = parseInt(slashMatch[1], 10);
       const m = parseInt(slashMatch[2], 10);
       const d = parseInt(slashMatch[3], 10);
+      if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+        return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      }
+    }
+    // 中文日期格式：2026年09月19日 / 2026年09月19日08:00 等
+    const cjkMatch = cleaned.match(/^(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
+    if (cjkMatch) {
+      const y = parseInt(cjkMatch[1], 10);
+      const m = parseInt(cjkMatch[2], 10);
+      const d = parseInt(cjkMatch[3], 10);
       if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
         return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
       }
@@ -1873,19 +1885,77 @@ function attachViolationImages(filePath, data) {
 // 依赖 extract_embedded_images.py：按物理行号锚点落盘并输出 row→{threeViolation,rectification}
 // 与源解析行的 _imp_row（源 Excel 物理行号，1 基）对齐。
 // ============================================================
-function attachGridImages(filePath, data) {
+
+// 探测源文件是否 WPS cellimages 格式（xl/cellimages.xml + DISPIMG 公式）。
+// 返回 true 表示需先用 convert_wps_cellimages_to_drawings.py 转成标准 drawing 再抽取。
+function isWpsCellimagesFile(filePath) {
+  return new Promise((resolve) => {
+    const probe = `import sys,zipfile
+p = sys.argv[1]
+try:
+    names = zipfile.ZipFile(p).namelist()
+    has_cell = 'xl/cellimages.xml' in names
+    has_draw = any('/drawings/' in n for n in names)
+    print('CELLIMG' if (has_cell and not has_draw) else 'NONE')
+except Exception as e:
+    print('NONE')
+`;
+    execFile(PYTHON_PATH, ['-c', probe, filePath], { timeout: 30000 }, (err, stdout, stderr) => {
+      if (!err && String(stdout || '').trim() === 'CELLIMG') return resolve(true);
+      return resolve(false);
+    });
+  });
+}
+
+// 把 WPS cellimages 文件转换为标准 drawing 文件（返回新临时文件名；失败返回 null）
+function convertWpsCellimages(filePath) {
+  const outPath = path.join(os.tmpdir(), `wps_cell_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.xlsx`);
+  return new Promise((resolve) => {
+    execFile(
+      PYTHON_PATH,
+      [CONVERT_WPS_CELLIMG_SCRIPT, '--xlsx', filePath, '--out', outPath],
+      { timeout: 300000, maxBuffer: 64 * 1024 * 1024 },
+      (err, stdout, stderr) => {
+        if (err) {
+          console.warn('[Import] WPS cellimages 转换失败，回退原文件抽取:', (stderr || err.message || '').slice(0, 300));
+          return resolve(null);
+        }
+        resolve(outPath);
+      }
+    );
+  });
+}
+
+async function attachGridImages(filePath, data) {
   if (!data || data.length === 0) return Promise.resolve({ attached: 0, skipped: true });
+
+  // —— WPS cellimages 文件先转换为标准 drawing，保证照片可被抽取 ——
+  let srcFile = filePath;
+  let cleanupPath = null;
+  try {
+    if (await isWpsCellimagesFile(filePath)) {
+      console.log('[Import] 检测到 WPS cellimages 格式，先转换为标准 drawing 再抽取图片');
+      const conv = await convertWpsCellimages(filePath);
+      if (conv) {
+        srcFile = conv;
+        cleanupPath = conv;
+      }
+    }
+  } catch (detectErr) {
+    console.warn('[Import] WPS cellimages 探测异常，按原文件抽取:', detectErr.message);
+  }
+
   const runId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   const mapPath = path.join(os.tmpdir(), `grid_img_map_${Date.now()}_${Math.random().toString(36).slice(2)}.json`);
   return new Promise((resolve) => {
     const uploadsRoot = path.join(__dirname, '..', 'uploads');
     const child = execFile(
       PYTHON_PATH,
-      [EXTRACT_GRID_IMG_SCRIPT, '--xlsx', filePath, '--out', uploadsRoot, '--map', mapPath, '--run', runId],
+      [EXTRACT_GRID_IMG_SCRIPT, '--xlsx', srcFile, '--out', uploadsRoot, '--map', mapPath, '--run', runId],
       { timeout: 180000, maxBuffer: 64 * 1024 * 1024 },
       (err, stdout, stderr) => {
-        try { fs.unlinkSync(mapPath); } catch (e) { /* ignore */ }
         if (err) {
+          try { fs.unlinkSync(mapPath); } catch (e) { /* ignore */ }
           console.warn('[Import] 网格内嵌图片抽取失败（不影响数据导入）:', err.message);
           if (stderr) console.warn('[Import] grid extract stderr:', stderr.slice(0, 500));
           return resolve({ attached: 0, error: err.message, runId });
@@ -1913,9 +1983,18 @@ function attachGridImages(filePath, data) {
         } catch (parseErr) {
           console.warn('[Import] 网格图片映射解析失败（不影响数据导入）:', parseErr.message);
           resolve({ attached: 0, error: parseErr.message, runId });
+        } finally {
+          try { fs.unlinkSync(mapPath); } catch (e) { /* ignore */ }
         }
       }
     );
+    if (child && typeof child.on === 'function') {
+      child.on('close', () => {
+        if (cleanupPath) {
+          try { fs.unlinkSync(cleanupPath); } catch (e) { /* ignore */ }
+        }
+      });
+    }
   });
 }
 

@@ -19,7 +19,6 @@ const dynamicRouteFiles = import.meta.glob([
   './modules/hse-workflow.ts',
   './modules/hse-employee-profile-detail.ts',
   './modules/hse-violations.ts',
-  './modules/todos.ts',
 ], {
   eager: true,
 });

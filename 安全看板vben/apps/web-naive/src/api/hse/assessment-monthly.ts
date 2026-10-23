@@ -73,6 +73,12 @@ export namespace AssessmentMonthlyApi {
     createdAt: string | null;
     sourceTable: string | null;
     summary?: string | null;
+    /** 源指标明细（HSE教育培训「培训台账」通路携带 missing 缺少人数 / incomplete 资料不完整份数 / unit 单份扣分，供拆分明细展示） */
+    sourceDetail?: {
+      missing?: number;
+      incomplete?: number;
+      unit?: number;
+    } | null;
   }
 
   /** 考核对象扣分明细响应 */

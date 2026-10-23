@@ -305,6 +305,121 @@ async function recalculateAllCompletionRates(year, month) {
   return { updated };
 }
 
+/**
+ * 按「网格长（人）」粒度把逐日缺巡日期算出来，供网格缺巡引擎逐日落库/前端展示"哪一天没巡查"。
+ *
+ * 定义（2026-09-26 收口）：
+ *   - 只有巡查频率可按天定位（patrolsPerDayOfFreq 非空，即"每日N次/N天N次"等）的网格，
+ *     才能把应巡精确定位到具体某天；周/月/季等非按天频率无法定位具体日，不参与逐日标记。
+ *   - 某日"应巡次数" = 该网格长名下、当天已任职（hire_date ≤ 当日）的所有可定位网格
+ *     每天应巡次数之和；"实巡次数" = 当天该网格长台账（personnel_name 命中其网格名）
+ *     记录条数。当 应巡>实巡 时该日判定为缺巡。
+ *   - 返回 Map<personnel_id, string[] missingDates>（YYYY-MM-DD，升序）。
+ *
+ * @param {Array<{id,name,personnel_id,patrol_frequency}>} grids
+ * @param {object} [options] { year, month, hireDateByGrid }
+ * @returns {Promise<Map<number,string[]>>}
+ */
+async function getMissedDatesMap(grids, options = {}) {
+  const result = new Map();
+  if (!isConnected() || !grids || !grids.length) return result;
+
+  const now = new Date();
+  const y = options.year ? parseInt(options.year, 10) : now.getFullYear();
+  const hasMonth = !!(options.month && parseInt(options.month, 10) >= 1 && parseInt(options.month, 10) <= 12);
+  const m = hasMonth ? parseInt(options.month, 10) : now.getMonth() + 1;
+  const pad = (n) => String(n).padStart(2, '0');
+  const mStartStr = `${y}-${pad(m)}-01`;
+  const mEndBefore = m === 12 ? `${y + 1}-01-01` : `${y}-${pad(m + 1)}-01`;
+  const isTargetMonth = y === now.getFullYear() && m === now.getMonth() + 1;
+  // 当前月按「今天」截止，与 getGridPatrolStats 口径一致；过去月按整月
+  const endDate = isTargetMonth ? now : new Date(y, m, 0);
+
+  // 按人收集"可按天定位"的网格（含其任职起始日 start 与每天应巡次数）
+  const perPerson = new Map(); // personnel_id -> { groups:[{start,ppd}], names:Set }
+  const nameToPersonnel = new Map(); // 网格名 -> Set<personnel_id>，把台账记名归并到其名下网格长
+  for (const g of grids) {
+    if (!g || g.personnel_id == null) continue;
+    const ppd = patrolsPerDayOfFreq(g.patrol_frequency);
+    if (ppd == null) continue; // 非按天频率，无法逐日标记
+    let start = new Date(y, m - 1, 1);
+    const hire = options.hireDateByGrid && options.hireDateByGrid.get(g.id);
+    if (hire) {
+      const hireD = new Date(`${String(hire).slice(0, 10)}T00:00:00`);
+      if (!isNaN(hireD.getTime()) && hireD.getTime() > start.getTime()) start = hireD;
+    }
+    let pp = perPerson.get(g.personnel_id);
+    if (!pp) {
+      pp = { groups: [], names: new Set() };
+      perPerson.set(g.personnel_id, pp);
+    }
+    pp.groups.push({ start, ppd });
+    const nm = String(g.name || '').trim();
+    if (nm) {
+      pp.names.add(nm);
+      if (!nameToPersonnel.has(nm)) nameToPersonnel.set(nm, new Set());
+      nameToPersonnel.get(nm).add(g.personnel_id);
+    }
+  }
+  if (!perPerson.size) return result;
+
+  // 台账按"网格长名字 + 天"聚合实巡次数，再归并到各网格长（personnel）名下逐日累计
+  // （按人逐日比对；若仅按天聚合，会把全体网格长当天记录合计当某单人实巡，掩盖个别缺巡日）
+  const dayCountByPerson = new Map(); // personnel_id -> Map<date, 实巡次数>
+  const allNames = Array.from(new Set([...perPerson.values()].flatMap((pp) => [...pp.names]))).filter(Boolean);
+  if (allNames.length) {
+    try {
+      const r = await pool.query(
+        `SELECT personnel_name, to_char(inspection_date, 'YYYY-MM-DD') AS d, COUNT(*)::int AS c
+           FROM grid_inspection_records
+          WHERE personnel_name = ANY($1)
+            AND inspection_date >= $2 AND inspection_date < $3
+          GROUP BY personnel_name, d`,
+        [allNames, mStartStr, mEndBefore],
+      );
+      for (const row of r.rows) {
+        const owners = nameToPersonnel.get(row.personnel_name);
+        if (!owners) continue;
+        for (const pid of owners) {
+          let mm = dayCountByPerson.get(pid);
+          if (!mm) {
+            mm = new Map();
+            dayCountByPerson.set(pid, mm);
+          }
+          mm.set(row.d, (mm.get(row.d) || 0) + row.c);
+        }
+      }
+    } catch (e) {
+      console.warn('[gridCompletion] getMissedDatesMap 台账聚合失败:', e.message);
+    }
+  }
+
+  const walk = new Date(`${mStartStr}T00:00:00`);
+  while (walk.getTime() <= endDate.getTime()) {
+    const ds = `${walk.getFullYear()}-${pad(walk.getMonth() + 1)}-${pad(walk.getDate())}`;
+    const walkMs = walk.getTime();
+    for (const [personnelId, pp] of perPerson) {
+      let expect = 0;
+      for (const gr of pp.groups) {
+        if (gr.start.getTime() <= walkMs) expect += gr.ppd;
+      }
+      if (expect <= 0) continue; // 当日无人任职应巡
+      const mm = dayCountByPerson.get(personnelId);
+      const actual = mm ? mm.get(ds) || 0 : 0;
+      if (actual >= expect) continue;
+      const arr = result.get(personnelId) || [];
+      arr.push(ds);
+      result.set(personnelId, arr);
+    }
+    walk.setDate(walk.getDate() + 1);
+  }
+
+  // 升序排序
+  for (const [k, v] of result) v.sort();
+
+  return result;
+}
+
 module.exports = {
   FREQ_MONTHLY,
   getMonthlyExpected,
@@ -316,5 +431,6 @@ module.exports = {
   calculateCompletionRate,
   getGridPatrolStats,
   getHireDateMap,
+  getMissedDatesMap,
   recalculateAllCompletionRates,
 };

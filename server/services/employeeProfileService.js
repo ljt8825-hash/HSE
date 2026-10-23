@@ -52,9 +52,16 @@ async function getProfileList(query) {
     conditions.push(`(ev.position_name IS NULL OR (ev.position_name NOT ILIKE '%驾驶员%' AND ev.position_name NOT ILIKE '%司机%'))`);
   }
   if (status) {
-    conditions.push(`ev.assignment_status = $${paramIdx}`);
-    params.push(status);
-    paramIdx++;
+    // 在职/离职以花名册用工关系为权威（与统计卡一致）；其余按任职状态
+    if (status === 'active') {
+      conditions.push(`e.employment_relation = '正式员工'`);
+    } else if (status === 'left') {
+      conditions.push(`e.employment_relation IN ('辞职','死亡')`);
+    } else {
+      conditions.push(`ev.assignment_status = $${paramIdx}`);
+      params.push(status);
+      paramIdx++;
+    }
   }
 
   const whereClause = conditions.join(' AND ');

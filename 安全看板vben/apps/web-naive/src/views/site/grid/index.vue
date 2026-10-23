@@ -285,10 +285,13 @@ const {
 } = useGenericImport('grid');
 bindImportRefresh(onRefresh);
 
-// 网格导出：复用 HseDataGrid 内置 CSV 导出
+// 网格导出：复用 HseDataGrid 内置 CSV 导出，文件名带上菜单名便于识别
 const gridRef = ref<any>(null);
 function handleExport() {
-  gridRef.value?.gridApi?.grid?.exportData({ type: 'csv' });
+  gridRef.value?.gridApi?.grid?.exportData({
+    type: 'csv',
+    filename: $t('page.hse.siteGridPatrolMgmt'),
+  });
 }
 
 // ===================== 批量删除 =====================

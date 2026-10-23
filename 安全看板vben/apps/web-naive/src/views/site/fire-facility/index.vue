@@ -7,6 +7,7 @@
  * 边界：不改服务端；表格无列宽/顺序拖动；若站点关联等旧版行为依赖不存在接口，将如实记录阻断。
  */
 import { computed, onMounted, reactive, ref } from 'vue';
+import { useRoute } from 'vue-router';
 
 import {
   NButton,
@@ -86,6 +87,20 @@ const searchForm = reactive({
   month: undefined as string | undefined,
   expiryRange: null as [number, number] | null,
 });
+
+// 支持外部下钻：query 携带 month（YYYY-MM）时，加载后自动定位年月筛选
+// （自动评分页「现场管理-消防管理」列扣分明细点击下钻使用；无 query 时行为与默认一致）
+const route = useRoute();
+function applyDrillQuery() {
+  const qm = typeof route.query.month === 'string' ? route.query.month : '';
+  if (!qm) return;
+  const [y, m] = qm.split('-');
+  if (y && m) {
+    searchForm.year = y;
+    searchForm.month = m;
+  }
+}
+applyDrillQuery();
 
 async function loadData() {
   loading.value = true;
@@ -237,13 +252,13 @@ const {
 } = useGenericImport('fire-facility');
 // 导入确认成功后：刷新列表 + 执行负责人-花名册匹配校验（旧版行为恢复）
 async function onImportSuccess() {
-  await Promise.all([loadData(), loadStats(), loadRosterByStation()]);
+  await Promise.all([loadData(), loadStats(), loadEmployees()]);
   await checkPersonnelMatch();
 }
 bindImportRefresh(onImportSuccess);
 
 async function onRefresh() {
-  await Promise.all([loadData(), loadStats(), loadTransferStations(), loadRosterByStation()]);
+  await Promise.all([loadData(), loadStats(), loadTransferStations(), loadEmployees()]);
 }
 
 // ===================== 站点关联 / 花名册（旧版行为恢复） =====================
@@ -278,49 +293,72 @@ async function loadTransferStations() {
   }
 }
 
-// 从转运站名提取乡镇（兼容：web-naive EmployeeListParams 无 township 参数，
-// 采用全量拉取 + org_path 二级部门过滤方案，不改后端）
-function getTownshipFromStation(stationName: string): string {
-  return stationName.replace('转运站', '').trim();
-}
-function getSecondaryDept(orgPath?: string): string {
-  if (!orgPath) return '';
-  const parts = orgPath.split('/').filter(Boolean);
-  return parts[1] || '';
-}
-
+// ===================== 负责人关联花名册（转运站操作员） =====================
+// 业务口径（用户确认）：消防设施负责人 = 该转运站所属乡镇作业中心中「职位=转运站操作员」的在岗人员。
+// 操作员发生替换（xx辞职/离职 → xx正式员工接替）时，负责人应随现任在岗操作员更新。
 const managerOptions = ref<{ label: string; value: string; phone?: string }[]>([]);
-const rosterEmployees = ref<EmployeeApi.EmployeeItem[]>([]);
 const rosterTip = ref('');
 
-// 按安装位置加载花名册人员（过滤 org_path 二级部门 === 转运站名）
-async function fetchRosterForLocation(location: string) {
+const employees = ref<EmployeeApi.EmployeeItem[]>([]);
+
+function isTransferStationOperator(emp: EmployeeApi.EmployeeItem): boolean {
+  return emp.position_name === '转运站操作员';
+}
+// 在岗：org_status=active（后端已将「辞职/死亡」等映射为 left）
+function isInService(emp: EmployeeApi.EmployeeItem): boolean {
+  return emp.org_status === 'active';
+}
+// 归一化乡镇键：去掉子位置(值班室1等)/转运站/作业中心/乡镇后缀，用于「安装位置」与操作员部门对齐
+function normTownKey(input: string): string {
+  return String(input || '')
+    .replace(/-.*$/, '')
+    .replace(/转运站$/g, '')
+    .replace(/作业中心$/g, '')
+    .replace(/乡镇$/g, '')
+    .replace(/[镇乡]$/g, '')
+    .trim();
+}
+// 负责人可能为多名，以 /、中文顿号等分隔
+function splitManagerNames(manager?: string): string[] {
+  return String(manager || '')
+    .split(/[\/、,，;；\s]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+const transferOperators = computed<EmployeeApi.EmployeeItem[]>(() =>
+  (employees.value || []).filter((e) => isTransferStationOperator(e) && isInService(e)),
+);
+function operatorsOfStation(location?: string): EmployeeApi.EmployeeItem[] {
+  const key = normTownKey(location || '');
+  if (!key) return [];
+  return transferOperators.value.filter((op) => normTownKey(op.dept_name || '') === key);
+}
+// 按职位筛选，仅拉取转运站操作员（后端 positionName 精确过滤）
+async function loadEmployees() {
+  try {
+    const res = await getEmployeeList({ pageSize: 9999, positionName: '转运站操作员' } as any);
+    employees.value = res.list ?? [];
+  } catch {
+    employees.value = [];
+  }
+}
+
+// 负责人下拉候选：该安装位置的现任在岗转运站操作员
+function fetchRosterForLocation(location: string) {
   if (!location) {
     managerOptions.value = [];
-    rosterEmployees.value = [];
     rosterTip.value = '';
     return;
   }
-  try {
-    const township = getTownshipFromStation(location);
-    const res = await getEmployeeList({ township: township as any, pageSize: 9999 } as any);
-    const employees = (res.list || []).filter((emp) => getSecondaryDept(emp.org_path) === location);
-    rosterEmployees.value = employees;
-    managerOptions.value = employees.map((e) => ({
-      label: `${e.name || ''}（${e.employee_code || ''}）`,
-      value: e.name || '',
-      phone: e.phone || '',
-    }));
-    if (employees.length === 0) {
-      rosterTip.value = `未找到 ${location} 的花名册人员，可手动输入`;
-    } else {
-      rosterTip.value = `已关联 ${location} 花名册 ${employees.length} 人`;
-    }
-  } catch {
-    managerOptions.value = [];
-    rosterEmployees.value = [];
-    rosterTip.value = '花名册加载失败，可手动输入';
-  }
+  const ops = operatorsOfStation(location);
+  managerOptions.value = ops.map((e) => ({
+    label: `${e.name || ''}（${e.employee_code || ''}）`,
+    value: e.name || '',
+    phone: e.phone || '',
+  }));
+  rosterTip.value = ops.length
+    ? `已关联 ${location} 转运站操作员 ${ops.length} 人`
+    : `未找到 ${location} 的在岗转运站操作员，可手动输入`;
 }
 
 function handleLocationChange(value: string | null) {
@@ -341,8 +379,7 @@ function handleManagerSelect(
   }
 }
 
-// ===================== 导入后人员匹配校验（旧版行为恢复） =====================
-const rosterByStation = ref<Record<string, EmployeeApi.EmployeeItem[]>>({});
+// ===================== 人员匹配校验（转运站操作员口径） =====================
 const personnelMatchVisible = ref(false);
 const personnelMatchLoading = ref(false);
 const personnelMatchResult = ref<{
@@ -351,42 +388,27 @@ const personnelMatchResult = ref<{
   mismatches: Array<{ id: number; name: string; location: string; manager: string; rosterNames: string[] }>;
 } | null>(null);
 
+// 负责人（含多名）需全部命中该站的现任在岗转运站操作员，否则判不匹配
 function isManagerMismatch(record: SiteApi.FireEquipment): boolean {
-  if (!record.manager || !record.location) return false;
-  const roster = rosterByStation.value[record.location];
-  if (!roster) return false;
-  return !roster.some((emp) => emp.name === record.manager);
-}
-
-async function loadRosterByStation() {
-  try {
-    const res = await getEmployeeList({ pageSize: 9999 } as any);
-    const grouped: Record<string, EmployeeApi.EmployeeItem[]> = {};
-    for (const emp of res.list || []) {
-      const station = getSecondaryDept(emp.org_path);
-      if (station && station.includes('转运站')) {
-        if (!grouped[station]) grouped[station] = [];
-        grouped[station].push(emp);
-      }
-    }
-    rosterByStation.value = grouped;
-  } catch {
-    rosterByStation.value = {};
-  }
+  const names = splitManagerNames(record.manager);
+  if (!names.length || !record.location) return false;
+  const opsAtStation = operatorsOfStation(record.location);
+  return names.some((n) => !opsAtStation.some((op) => op.name === n));
 }
 
 async function checkPersonnelMatch() {
   personnelMatchLoading.value = true;
   personnelMatchVisible.value = true;
   try {
-    await loadRosterByStation();
+    await loadEmployees();
     const mismatches: Array<{ id: number; name: string; location: string; manager: string; rosterNames: string[] }> = [];
     let matched = 0;
     for (const facility of data.value) {
-      if (!facility.manager) continue;
+      const names = splitManagerNames(facility.manager);
+      if (!names.length) continue;
       const station = facility.location || '';
-      const roster = rosterByStation.value[station] || [];
-      const found = roster.some((emp) => emp.name === facility.manager);
+      const opsAtStation = operatorsOfStation(station);
+      const found = names.every((n) => opsAtStation.some((op) => op.name === n));
       if (found) {
         matched++;
       } else {
@@ -395,7 +417,7 @@ async function checkPersonnelMatch() {
           name: facility.name,
           location: station || '-',
           manager: facility.manager,
-          rosterNames: roster.map((e) => e.name),
+          rosterNames: opsAtStation.map((e) => e.name),
         });
       }
     }
@@ -428,8 +450,6 @@ function handleDownloadMatchErrors() {
   document.body.removeChild(link);
   window.URL.revokeObjectURL(url);
 }
-
-// ===================== 负责人选择（站点花名册为主选） =====================
 
 // ===================== 新增 / 编辑 / 查看 =====================
 const formOpen = ref(false);

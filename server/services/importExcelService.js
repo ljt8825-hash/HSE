@@ -19,6 +19,7 @@ const shared = require('./importShared');
 const {
   NATIVE_IMPORT_MODULES, PARSER_SCRIPT, parseExcelNative, callPython, buildFrontendPreview,
   fixDateValue, attachViolationImages, attachGridImages, cleanModel, repairMojibakeFileName,
+  buildConflictKey,
 } = shared;
 const { confirmImportMemory } = require('./importMemoryService');
 
@@ -182,6 +183,10 @@ async function template({ module, format }) {
       drill: [
         { 预案名称: '火灾应急预案', 演练类型: 'tabletop', 演练日期: '2026-01-15', 演练地点: '厂区A区', 参加人数: 50, 时长分钟: 60, 演练结果: 'excellent', 评估人: '评估组-张组长', 总结: '演练组织有序，达到预期目标', 改进建议: '建议加强初期处置训练' },
       ],
+      // 应急演练页由 useGenericImport('emergency-drill') 请求模板，列名对齐应急演练列表/导入字段。
+      'emergency-drill': [
+        { 演练名称: '火灾应急演练', 关联预案: '火灾应急预案', 演练类型: '实战演练', 演练级别: '二级', 演练日期: '2026-01-15', 演练地点: '厂区A区', 组织单位: '安全管理部', 参演人数: 50, 时长: 60, 演练结果: '合格', 演练状态: '已完成', 备注: '' },
+      ],
       insurance: [
         { 姓名: '张三', 身份证号: '110101199001011234', 部门: '市政部', 岗位: '司机', 保险状态: '已参保', 保险类型: '意外险', 保单号: 'POL001', 保险起期: '2026-01-01', 保险到期: '2027-01-01', 保费: 500 },
       ],
@@ -240,6 +245,27 @@ async function template({ module, format }) {
       ],
       ledger: [
         { 姓名: '王五', 身份证号: '371422199001011234', 部门: '市政部', 岗位: '司机', 网格层级: '三级', 培训频次: '年度', 培训类型: '安全培训', 培训日期: '2026-01-05', 培训时长: 120, 培训内容: '交通安全知识', 考核结果: '合格', 分数: 90, 讲师: '赵六', 备注: '' },
+      ],
+      // 培训记录页（web-naive ledger）实际以 module='training-ledger' 请求模板，
+      // 此前不在本表导致落到兜底「字段1/字段2」。列名对齐 ledger/training fieldMapping 中文表头，保证可按模板填表后正确导入。
+      'training-ledger': [
+        { 姓名: '王五', 身份证号: '371422199001011234', 部门: '市政部', 岗位: '司机', 网格层级: '三级', 培训频次: '年度', 培训类型: '安全培训', 培训日期: '2026-01-05', 培训时长: 120, 培训内容: '交通安全知识', 考核结果: '合格', 分数: 90, 讲师: '赵六', 备注: '' },
+      ],
+      // 培训系列各页面由 useGenericImport('training-*') 请求模板，列名对齐各实体列表/导入字段中文表头。
+      'training-requirements': [
+        { 岗位名称: '司机', 培训名称: '交通安全培训', 培训周期: '年度', 是否必须: '必须', 培训时长: 120, 备注: '' },
+      ],
+      'training-plans': [
+        { 培训名称: '年度安全培训', 培训时间: '2026-01-15', 培训对象: '全体员工', 培训内容: '交通安全知识', 责任部门: '安全管理部', 培训学时: 8, 计划类型: '年度培训计划', 培训类型: '安全培训', 培训师: '赵六', 计划人数: 50, 培训地点: '会议室', 状态: '已审批', 备注: '' },
+      ],
+      'training-new-employee': [
+        { 姓名: '王五', 身份证号: '371422199001011234', 部门: '市政部', 岗位: '司机', 培训日期: '2026-01-05', 培训时长: 120, 培训内容: '交通安全知识', 成绩: 90, 培训结果: '合格', 备注: '' },
+      ],
+      'training-driver': [
+        { 姓名: '赵六', 驾驶证类型: 'A2', 驾驶证号: '371422199001011234', 培训车辆: '鲁ND1021', 实操项目: '倒车入库', 培训日期: '2026-01-10', 培训时长: 120, 教练员: '张教练', 成绩: 95, 培训结果: '合格', 培训内容: '叉车实操' },
+      ],
+      'training-records': [
+        { 姓名: '王五', 培训类型: '安全培训', 所属部门: '市政部', 职位: '司机', 人员类型: '在岗', 考试日期: '2026-01-05', 有效期: '2027-01-05', 培训结果: '合格' },
       ],
       'new-employee': [
         { 姓名: '王五', 部门: '运营一部', 岗位: '保洁员', 入职日期: '2026-01-01', 培训完成: '是', 考试分数: 92, 师傅姓名: '张师傅', 考核结果: '合格' },
@@ -313,6 +339,10 @@ async function template({ module, format }) {
       reports: [
         { 报表名称: '月度安全报告', 报表类型: '定期报告', 统计周期: '2026年1月', 生成日期: '2026-02-01', 状态: '已生成', 负责人: '李四', 备注: '' },
       ],
+      // 标准化条款页由 useGenericImport('standard-clauses') 请求模板，列名对齐条款导入字段。
+      'standard-clauses': [
+        { 条款编码: 'HSE-01-01-001', 层级: '三级（条款）', 父级条款: 'HSE-01-01', 要素名称: '安全生产责任制', 条款标题: '责任落实', 条款要求内容: '明确各级岗位安全生产责任', 检查方法: '现场检查资料', 分值权重: 10, 排序: 1, 状态: '启用' },
+      ],
     };
     const templateData = moduleTemplates[module] || [
       { 字段1: '', 字段2: '', 字段3: '', 字段4: '', 字段5: '' },
@@ -340,8 +370,15 @@ async function template({ module, format }) {
       const hdr = {};
       hdr['Content-Type'] = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
       const tplDateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-      const tplFileName = module === 'grid' ? `网格管理导入模板_${tplDateStr}.xlsx` : `${module}_template.xlsx`;
-      hdr['Content-Disposition'] = `attachment; filename="${tplFileName}"`;
+      const tplFileName =
+        module === 'grid'
+          ? `网格管理导入模板_${tplDateStr}.xlsx`
+          : module === 'training-ledger' || module === 'ledger'
+            ? `培训台账导入模板_${tplDateStr}.xlsx`
+            : `${module}_template.xlsx`;
+      // Node http 头校验不允许 header 值含非 Latin-1 字符（ERR_INVALID_CHAR）。
+      // filename 用 ASCII 回退名，中文名经 RFC 5987 filename* 百分号编码，浏览器仍显示中文名。
+      hdr['Content-Disposition'] = `attachment; filename="${module}_template.xlsx"; filename*=UTF-8''${encodeURIComponent(tplFileName)}`;
       return { __t: 'file', headers: hdr, buffer };
     }
 }
@@ -528,12 +565,15 @@ async function confirmImportNative(fileRecordId, moduleType, operator, insurance
   if (moduleType === 'grid') {
     data = data.map((row) => {
       let inspectionDate = null;
-      if (row.upload_time) {
+      // 优先取「日期」列映射的 inspection_date，兼容 Excel 日期序列号(如 46276)与各类日期字符串
+      const direct = fixDateValue(row.inspection_date);
+      if (direct && direct !== 'Invalid Date') inspectionDate = direct;
+      // 无有效「日期」列时才回退回 upload_time 派生（取日期部分）
+      if (!inspectionDate && row.upload_time) {
         const d = fixDateValue(row.upload_time);
         if (d && d !== 'Invalid Date') inspectionDate = String(d).slice(0, 10);
       }
-      // 优先保留「日期」列直接映射的 inspection_date；无映射时才回退回 upload_time 派生
-      return { ...row, inspection_date: row.inspection_date || inspectionDate };
+      return { ...row, inspection_date: inspectionDate };
     });
 
     // —— 清洗内嵌图片公式 ——
