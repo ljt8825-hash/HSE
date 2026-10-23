@@ -40,6 +40,7 @@ import {
   HsePageLayout,
   HseSearchPanel,
   HseStatusTag,
+  COMMITTEE_STATUS_TAG as STATUS_TAG,
 } from '#/components/hse';
 import type { VxeTableGridColumns } from '#/adapter/vxe-table';
 import { getEmployeeList, type EmployeeApi } from '#/api/hse/employee';
@@ -76,18 +77,7 @@ const STATUS_VALUE: Record<string, string> = {
   退休: 'retired',
   返聘: 'rehire',
 };
-const STATUS_TAG: Record<string, 'success' | 'danger' | 'warning' | 'neutral'> = {
-  active: 'success',
-  在职: 'success',
-  left: 'danger',
-  离职: 'danger',
-  pending: 'warning',
-  待岗: 'warning',
-  retired: 'neutral',
-  退休: 'neutral',
-  rehire: 'neutral',
-  返聘: 'neutral',
-};
+// 注：STATUS_TAG 已迁移至 statusColors.ts（COMMITTEE_STATUS_TAG，保留中英双键）
 
 const personnelLoading = ref(false);
 const personnelList = ref<EmployeeApi.EmployeeItem[]>([]);

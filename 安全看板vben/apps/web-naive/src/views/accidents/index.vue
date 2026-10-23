@@ -41,7 +41,9 @@ import {
   HseSearchPanel,
   HseStatusTag,
   type HseActionKey,
+  ACCIDENT_CHANGE_TYPE_TAG as CHANGE_TYPE_TAG,
   ACCIDENT_LEVEL_TAG as LEVEL_TAG,
+  ACCIDENT_ROLE_TAG as ROLE_TAG,
   ACCIDENT_STATUS_LABEL as STATUS_LABEL,
   ACCIDENT_STATUS_TAG as STATUS_TAG,
   EXPIRY_TAG,
@@ -230,14 +232,7 @@ const PERSON_ROLE_OPTIONS = [
   { label: '当事人', value: '当事人' },
   { label: '其他', value: '其他' },
 ];
-
-const ROLE_TAG: Record<string, 'warning' | 'error' | 'info' | 'default'> = {
-  肇事者: 'warning',
-  伤者: 'error',
-  患者: 'info',
-  当事人: 'default',
-  其他: 'default',
-};
+// 注：ROLE_TAG 已迁移至 statusColors.ts（ACCIDENT_ROLE_TAG，NTag 原生类型）
 
 // ===================== 年份选项 =====================
 const currentYear = new Date().getFullYear();
@@ -857,13 +852,7 @@ const uploadVersion = ref('');
 const versionList = ref<AccidentApi.VersionRecord[]>([]);
 const versionLoading = ref(false);
 
-const CHANGE_TYPE_TAG: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'neutral'> = {
-  create: 'success',
-  update: 'info',
-  import: 'warning',
-  revise: 'warning',
-};
-
+// 注：CHANGE_TYPE_TAG 已迁移至 statusColors.ts（ACCIDENT_CHANGE_TYPE_TAG）
 const CHANGE_TYPE_LABEL: Record<string, string> = {
   create: '创建',
   update: '更新',

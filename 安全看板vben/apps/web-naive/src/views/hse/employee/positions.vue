@@ -31,6 +31,7 @@ import {
   HseSearchPanel,
   HseStatusTag,
   type HseActionKey,
+  EMPLOYEE_STATUS_TAG as STATUS_TAG,
 } from '#/components/hse';
 import type { VxeTableGridColumns } from '#/adapter/vxe-table';
 import {
@@ -60,11 +61,6 @@ const SPECIAL_POST_OPTIONS = [
   { label: '是', value: 'true' },
   { label: '否', value: 'false' },
 ];
-
-const STATUS_TAG: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'neutral'> = {
-  active: 'success',
-  inactive: 'neutral',
-};
 
 // ===================== 列表数据 =====================
 const loading = ref(false);

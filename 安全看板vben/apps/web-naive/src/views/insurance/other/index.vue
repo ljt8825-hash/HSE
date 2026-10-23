@@ -37,6 +37,10 @@ import {
   HseSearchPanel,
   HseStatusTag,
   type HseActionKey,
+  INSURANCE_OTHER_STATUS_TAG as STATUS_TAG,
+  INSURANCE_OTHER_TYPE_TAG_COLOR as INSURANCE_TYPE_TAG_COLOR,
+  EXPIRY_TAG,
+  EXPIRY_LABEL,
 } from '#/components/hse';
 import type { VxeTableGridColumns } from '#/adapter/vxe-table';
 import {
@@ -57,27 +61,6 @@ import { message } from '#/adapter/naive';
 defineOptions({ name: 'InsuranceOther' });
 
 // ===================== 映射 =====================
-const EXPIRY_TAG: Record<
-  string,
-  'success' | 'info' | 'warning' | 'danger' | 'neutral'
-> = {
-  normal: 'success',
-  expiring: 'warning',
-  expired: 'danger',
-  unknown: 'neutral',
-};
-const EXPIRY_LABEL: Record<string, string> = {
-  normal: '正常',
-  expiring: '临期',
-  expired: '过期',
-  unknown: '未知',
-};
-
-const STATUS_TAG: Record<string, 'success' | 'danger' | 'neutral'> = {
-  有效: 'success',
-  失效: 'danger',
-};
-
 const INSURANCE_TYPE_OPTIONS = [
   { label: '公众责任险', value: '公众责任险' },
   { label: '财产一切险', value: '财产一切险' },
@@ -87,11 +70,6 @@ const STATUS_OPTIONS = [
   { label: '有效', value: '有效' },
   { label: '失效', value: '失效' },
 ];
-
-const INSURANCE_TYPE_TAG_COLOR: Record<string, 'info' | 'warning' | 'neutral'> = {
-  公众责任险: 'info',
-  财产一切险: 'warning',
-};
 
 // ===================== 列表数据 =====================
 const loading = ref(false);

@@ -41,6 +41,11 @@ import {
   HsePageLayout,
   HseSearchPanel,
   HseStatusTag,
+  VIOLATION_STATUS_TAG as STATUS_TAG,
+  VIOLATION_LEVEL_TAG as LEVEL_TAG,
+  VIOLATION_TYPE_TAG as TYPE_TAG,
+  VIOLATION_CHECK_SOURCE_TAG as CHECK_SOURCE_TAG,
+  VIOLATION_DEDUCTION_STATUS_TAG as DEDUCTION_STATUS_TAG,
   type HseActionKey,
 } from '#/components/hse';
 import type { VxeTableGridColumns } from '#/adapter/vxe-table';
@@ -91,22 +96,7 @@ const STATUS_OPTIONS = [
   { label: '待复查', value: '待复查' },
   { label: '已关闭', value: '已关闭' },
 ];
-const STATUS_TAG: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'neutral'> = {
-  待处理: 'danger',
-  整改中: 'warning',
-  待复查: 'info',
-  已关闭: 'success',
-};
-const LEVEL_TAG: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'neutral'> = {
-  严重: 'danger',
-  一般: 'warning',
-  轻微: 'info',
-};
-const TYPE_TAG: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'neutral'> = {
-  违章指挥: 'danger',
-  违章作业: 'warning',
-  违反劳动纪律: 'info',
-};
+// 注：STATUS_TAG / LEVEL_TAG / TYPE_TAG 已迁移至 statusColors.ts（VIOLATION_*）
 
 // ===== 阶段2a：查处来源 =====
 // 字典与后端 violation_records.check_source 一致：
@@ -123,12 +113,7 @@ const CHECK_SOURCE_TEXT: Record<string, string> = {
   township: '乡镇查处',
   self: '自查自纠',
 };
-/** 列表列展示配色：公司检查最醒目，未标注为灰 */
-const CHECK_SOURCE_TAG: Record<string, 'error' | 'warning' | 'default' | 'info'> = {
-  company: 'error',
-  township: 'warning',
-  self: 'info',
-};
+// 注：CHECK_SOURCE_TAG 已迁移至 statusColors.ts（VIOLATION_CHECK_SOURCE_TAG，NTag 原生类型）
 
 // ===== E-08-02：扣分状态（服务端派生七态，标签文案与后端 DEDUCTION_STATUS_LABELS 一致） =====
 const DEDUCTION_STATUS_OPTIONS: { label: string; value: ViolationApi.DeductionStatus }[] = [
@@ -143,15 +128,7 @@ const DEDUCTION_STATUS_OPTIONS: { label: string; value: ViolationApi.DeductionSt
 const DEDUCTION_STATUS_TEXT: Record<string, string> = Object.fromEntries(
   DEDUCTION_STATUS_OPTIONS.map((o) => [o.value, o.label]),
 );
-const DEDUCTION_STATUS_TAG: Record<string, 'success' | 'warning' | 'error' | 'default' | 'info'> = {
-  deducted: 'success',
-  pending_deduct: 'warning',
-  no_deduct: 'info',
-  unresolved: 'warning',
-  pending_review: 'warning',
-  revoked: 'error',
-  history: 'default',
-};
+// 注：DEDUCTION_STATUS_TAG 已迁移至 statusColors.ts（VIOLATION_DEDUCTION_STATUS_TAG，NTag 原生类型）
 
 // ===================== 列表数据 =====================
 const loading = ref(false);

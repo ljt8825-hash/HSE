@@ -28,6 +28,9 @@ import {
   HseSearchPanel,
   HseStatusTag,
   type HseActionKey,
+  INSURANCE_VEHICLE_STATUS_TAG as STATUS_TAG,
+  EXPIRY_TAG,
+  EXPIRY_LABEL,
 } from '#/components/hse';
 import type { VxeTableGridColumns } from '#/adapter/vxe-table';
 import {
@@ -45,28 +48,6 @@ import { message } from '#/adapter/naive';
 defineOptions({ name: 'InsuranceVehicle' });
 
 // ===================== 映射 =====================
-const EXPIRY_TAG: Record<
-  string,
-  'success' | 'info' | 'warning' | 'danger' | 'neutral'
-> = {
-  normal: 'success',
-  expiring: 'warning',
-  expired: 'danger',
-  unknown: 'neutral',
-};
-const EXPIRY_LABEL: Record<string, string> = {
-  normal: '正常',
-  expiring: '临期',
-  expired: '过期',
-  unknown: '未知',
-};
-
-const STATUS_TAG: Record<string, 'success' | 'warning' | 'danger' | 'neutral'> = {
-  在用: 'success',
-  停用: 'warning',
-  报废: 'danger',
-};
-
 const VEHICLE_STATUS_OPTIONS = [
   { label: '在用', value: '在用' },
   { label: '停用', value: '停用' },

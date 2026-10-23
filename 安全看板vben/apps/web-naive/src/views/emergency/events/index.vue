@@ -26,6 +26,8 @@ import {
   HsePageLayout,
   HseSearchPanel,
   HseStatusTag,
+  EMERGENCY_EVENT_LEVEL_TAG as LEVEL_TAG,
+  EMERGENCY_EVENT_STATUS_TAG as STATUS_TAG,
   type HseActionKey,
 } from '#/components/hse';
 import type { VxeTableGridColumns } from '#/adapter/vxe-table';
@@ -57,19 +59,7 @@ const STATUS_OPTIONS = [
   { label: '已结案', value: '已结案' },
 ];
 
-const LEVEL_TAG: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'neutral'> = {
-  '一级': 'danger',
-  '二级': 'danger',
-  '三级': 'warning',
-  '四级': 'info',
-};
-
-const STATUS_TAG: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'neutral'> = {
-  '已接报': 'info',
-  '响应中': 'warning',
-  '处置中': 'warning',
-  '已结案': 'success',
-};
+// 注：LEVEL_TAG / STATUS_TAG 已迁移至 statusColors.ts（EMERGENCY_EVENT_LEVEL_TAG / EMERGENCY_EVENT_STATUS_TAG）
 
 // ===================== 列表数据 =====================
 const loading = ref(false);

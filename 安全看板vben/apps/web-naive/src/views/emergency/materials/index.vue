@@ -28,6 +28,9 @@ import {
   HseSearchPanel,
   HseStatusTag,
   type HseActionKey,
+  EXPIRY_TAG as STATUS_TAG,
+  EXPIRY_LABEL as STATUS_LABEL,
+  EMERGENCY_MATERIAL_CATEGORY_TAG as CATEGORY_TAG,
 } from '#/components/hse';
 import type { VxeTableGridColumns } from '#/adapter/vxe-table';
 import {
@@ -53,28 +56,6 @@ const CATEGORY_OPTIONS = [
   { label: '应急照明', value: '应急照明' },
   { label: '其他物资', value: '其他物资' },
 ];
-
-const STATUS_TAG: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'neutral'> = {
-  normal: 'success',
-  expiring: 'warning',
-  expired: 'danger',
-};
-
-const STATUS_LABEL: Record<string, string> = {
-  normal: '正常',
-  expiring: '临期',
-  expired: '过期',
-};
-
-const CATEGORY_TAG: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'neutral'> = {
-  '救援装备': 'danger',
-  '个人防护': 'info',
-  '医疗急救': 'success',
-  '消防器材': 'warning',
-  '通讯设备': 'info',
-  '应急照明': 'warning',
-  '其他物资': 'neutral',
-};
 
 // ===================== 列表数据 =====================
 const loading = ref(false);

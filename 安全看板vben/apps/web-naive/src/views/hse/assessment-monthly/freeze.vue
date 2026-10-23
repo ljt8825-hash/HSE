@@ -27,7 +27,7 @@ import {
 } from 'naive-ui';
 import { IconifyIcon } from '@vben/icons';
 
-import { HseActionBar, HsePageLayout, HseStatusTag, type HseActionKey } from '#/components/hse';
+import { HseActionBar, HsePageLayout, HseStatusTag, ASSESSMENT_CYCLE_STATUS_TAG as STATUS_TAG, type HseActionKey } from '#/components/hse';
 import {
   freezeAssessmentCycle,
   getAssessmentCycle,
@@ -61,13 +61,6 @@ const STATUS_TEXT: Record<string, string> = {
   pending_review: '待审核',
   reviewed: '已审核',
   frozen: '已冻结',
-};
-const STATUS_TAG: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'neutral'> = {
-  not_started: 'neutral',
-  in_progress: 'info',
-  pending_review: 'warning',
-  reviewed: 'success',
-  frozen: 'danger',
 };
 
 async function loadCycleList() {

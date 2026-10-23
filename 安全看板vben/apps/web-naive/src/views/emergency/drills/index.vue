@@ -28,6 +28,9 @@ import {
   HsePageLayout,
   HseSearchPanel,
   HseStatusTag,
+  EMERGENCY_DRILL_RESULT_TAG as RESULT_TAG,
+  EMERGENCY_DRILL_STATUS_TAG as STATUS_TAG,
+  EMERGENCY_DRILL_TYPE_TAG as DRILL_TYPE_TAG,
   type HseActionKey,
 } from '#/components/hse';
 import type { VxeTableGridColumns } from '#/adapter/vxe-table';
@@ -75,25 +78,8 @@ const DRILL_LEVEL_OPTIONS = [
   { label: '四级', value: '四级' },
 ];
 
-const RESULT_TAG: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'neutral'> = {
-  '优秀': 'success',
-  '良好': 'success',
-  '合格': 'info',
-  '不合格': 'danger',
-};
-
-const STATUS_TAG: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'neutral'> = {
-  '计划中': 'info',
-  '进行中': 'warning',
-  '已完成': 'success',
-  '已取消': 'neutral',
-};
-
-const DRILL_TYPE_TAG: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'neutral'> = {
-  '桌面演练': 'info',
-  '功能演练': 'warning',
-  '实战演练': 'success',
-};
+// 注：RESULT_TAG / STATUS_TAG / DRILL_TYPE_TAG 已迁移至 statusColors.ts
+// （EMERGENCY_DRILL_RESULT_TAG / EMERGENCY_DRILL_STATUS_TAG / EMERGENCY_DRILL_TYPE_TAG）
 
 function formatDate(value: string | number | null | undefined): string {
   const s = value == null ? '' : String(value);

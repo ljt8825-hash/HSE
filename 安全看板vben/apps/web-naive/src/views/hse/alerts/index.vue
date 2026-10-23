@@ -31,6 +31,8 @@ import {
   HsePageLayout,
   HseSearchPanel,
   HseStatusTag,
+  ALERT_LEVEL_TAG as LEVEL_TAG,
+  ALERT_STATUS_TAG as STATUS_TAG,
 } from '#/components/hse';
 import type { VxeTableGridColumns } from '#/adapter/vxe-table';
 import {
@@ -83,14 +85,6 @@ const STATUS_OPTIONS = [
   { label: '已关闭', value: 'resolved' },
 ];
 
-const LEVEL_TAG: Record<string, 'danger' | 'warning' | 'info' | 'success' | 'neutral'> = {
-  critical: 'danger',
-  high: 'warning',
-  medium: 'warning',
-  low: 'info',
-  info: 'neutral',
-};
-
 const LEVEL_LABEL: Record<string, string> = {
   critical: '严重',
   high: '高危',
@@ -99,11 +93,7 @@ const LEVEL_LABEL: Record<string, string> = {
   info: '提示',
 };
 
-const STATUS_TAG: Record<string, 'danger' | 'warning' | 'success' | 'info' | 'neutral'> = {
-  new: 'danger',
-  processing: 'warning',
-  resolved: 'success',
-};
+// 注：LEVEL_TAG / STATUS_TAG 已迁移至 statusColors.ts（ALERT_LEVEL_TAG / ALERT_STATUS_TAG）
 
 const STATUS_LABEL: Record<string, string> = {
   new: '待处理',

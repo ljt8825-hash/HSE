@@ -41,6 +41,11 @@ import {
   HseSearchPanel,
   HseStatusTag,
   type HseActionKey,
+  REGULATION_STATUS_TAG as STATUS_TAG,
+  REGULATION_STATUS_LABEL as STATUS_LABEL,
+  EXPIRY_TAG,
+  EXPIRY_LABEL,
+  REGULATION_CHANGE_TYPE_TAG as CHANGE_TYPE_TAG,
 } from '#/components/hse';
 import type { VxeTableGridColumns } from '#/adapter/vxe-table';
 import {
@@ -76,38 +81,6 @@ const TYPE_LABEL: Record<string, string> = {
   standard: '标准',
   procedure: '规程',
   guideline: '指南',
-};
-
-const STATUS_TAG: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'neutral'> = {
-  active: 'success',
-  published: 'success',
-  draft: 'neutral',
-  revising: 'warning',
-  obsolete: 'danger',
-};
-
-const STATUS_LABEL: Record<string, string> = {
-  active: '有效',
-  published: '已发布',
-  draft: '草案',
-  revising: '修订中',
-  obsolete: '已废止',
-};
-
-const EXPIRY_TAG: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'neutral'> = {
-  normal: 'success',
-  expiring: 'warning',
-  expired: 'danger',
-  permanent: 'neutral',
-  unknown: 'neutral',
-};
-
-const EXPIRY_LABEL: Record<string, string> = {
-  normal: '正常',
-  expiring: '临期',
-  expired: '已过期',
-  permanent: '长期有效',
-  unknown: '未知',
 };
 
 const CATEGORY_OPTIONS = [
@@ -341,14 +314,6 @@ const CHANGE_TYPE_LABEL: Record<string, string> = {
   publish: '发布',
   revoke: '废止',
   other: '其他',
-};
-
-const CHANGE_TYPE_TAG: Record<string, 'success' | 'info' | 'warning' | 'error' | 'default'> = {
-  create: 'info',
-  revise: 'warning',
-  publish: 'success',
-  revoke: 'error',
-  other: 'default',
 };
 
 function formatFileSize(size?: number): string {

@@ -38,6 +38,7 @@ import {
   HseSearchPanel,
   HseStatusTag,
   type HseActionKey,
+  HAZARD_CHANGE_TYPE_TAG as CHANGE_TYPE_TAG,
   HAZARD_EXPIRY_LABEL as EXPIRY_LABEL,
   HAZARD_EXPIRY_TAG as EXPIRY_TAG,
   HAZARD_RISK_TAG as RISK_TAG,
@@ -675,13 +676,7 @@ function formatDateTime(date?: string | null): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-const CHANGE_TYPE_TAG: Record<string, 'success' | 'info' | 'warning' | 'error' | 'default'> = {
-  create: 'success',
-  update: 'info',
-  import: 'warning',
-  revise: 'warning',
-  delete: 'error',
-};
+// 注：CHANGE_TYPE_TAG 已迁移至 statusColors.ts（HAZARD_CHANGE_TYPE_TAG，NTag 原生类型）
 const CHANGE_TYPE_LABEL: Record<string, string> = {
   create: '新增',
   update: '更新',

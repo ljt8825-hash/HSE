@@ -37,7 +37,7 @@ import {
   getLeaderTownsByCenter,
 } from '#/api/hse/leader-dashboard';
 import type { LeaderDashboardApi } from '#/api/hse/leader-dashboard';
-import { HseDataGrid, HsePageLayout } from '#/components/hse';
+import { HseDataGrid, HsePageLayout, HseStatusTag } from '#/components/hse';
 import { message } from '#/adapter/naive';
 import LdModuleGrid from './ld-module-grid.vue';
 import type { LdDim } from './ld-module-grid.vue';
@@ -1137,8 +1137,9 @@ fetchCenters();
               :pager="false"
             >
               <template #insuranceStatusCell="{ row }">
-                <NTag v-if="row.isCurrent" size="small" type="success">有效</NTag>
-                <NTag v-else size="small">失效</NTag>
+                <HseStatusTag size="small" :type="row.isCurrent ? 'success' : 'danger'">
+                  {{ row.isCurrent ? '有效' : '失效' }}
+                </HseStatusTag>
               </template>
             </HseDataGrid>
             <NEmpty v-if="!employeeDetail.insurance.length" description="无保险记录" />

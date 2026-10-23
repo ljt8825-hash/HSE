@@ -41,6 +41,7 @@ import {
   HsePageLayout,
   HseSearchPanel,
   HseStatusTag,
+  FIRE_FACILITY_STATUS_TAG as STATUS_TAG,
   type HseActionKey,
 } from '#/components/hse';
 import type { VxeTableGridColumns } from '#/adapter/vxe-table';
@@ -61,13 +62,7 @@ defineOptions({ name: 'SiteFireFacility' });
 // ===================== 映射 =====================
 const TYPE_OPTIONS = ['灭火器', '消防栓', '喷淋系统', '烟感探测器', '应急照明', '疏散指示牌', '防火门'];
 const STATUS_OPTIONS = ['正常', '过期', '损坏', '维修中', '缺失'];
-const STATUS_TAG: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'neutral'> = {
-  正常: 'success',
-  过期: 'danger',
-  损坏: 'danger',
-  维修中: 'warning',
-  缺失: 'warning',
-};
+// 注：STATUS_TAG 已迁移至 statusColors.ts（FIRE_FACILITY_STATUS_TAG）
 
 // ===================== 列表数据 =====================
 const loading = ref(false);

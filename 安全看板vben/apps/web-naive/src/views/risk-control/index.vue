@@ -33,6 +33,10 @@ import {
   HseSearchPanel,
   HseStatusTag,
   type HseActionKey,
+  RISK_CONTROL_LEVEL_TAG as LEVEL_TAG,
+  RISK_CONTROL_STATUS_TAG as STATUS_TAG,
+  EXPIRY_TAG,
+  EXPIRY_LABEL,
 } from '#/components/hse';
 import type { VxeTableGridColumns } from '#/adapter/vxe-table';
 import {
@@ -55,33 +59,6 @@ defineOptions({ name: 'RiskControlList' });
 // 动作级权限：编辑 / 删除 / 评估 / 导入 仅 admin、safety_manager 可见
 const { hasAccessByRoles } = useAccess();
 const canEdit = computed(() => hasAccessByRoles(['admin', 'safety_manager']));
-
-// ===================== 映射 =====================
-const LEVEL_TAG: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'neutral'> = {
-  一级: 'danger',
-  二级: 'warning',
-  三级: 'info',
-  四级: 'success',
-};
-const STATUS_TAG: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'neutral'> = {
-  正常: 'success',
-  已处置: 'info',
-  监控中: 'warning',
-};
-const EXPIRY_TAG: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'neutral'> = {
-  normal: 'success',
-  expiring: 'warning',
-  expired: 'danger',
-  permanent: 'neutral',
-  unknown: 'neutral',
-};
-const EXPIRY_LABEL: Record<string, string> = {
-  normal: '正常',
-  expiring: '临期',
-  expired: '已过期',
-  permanent: '长期有效',
-  unknown: '未知',
-};
 
 // ===================== 列表数据 =====================
 const loading = ref(false);

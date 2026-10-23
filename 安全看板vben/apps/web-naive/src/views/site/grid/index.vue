@@ -38,6 +38,8 @@ import {
   HsePageLayout,
   HseSearchPanel,
   HseStatusTag,
+  SITE_GRID_STATUS_TAG as GRID_STATUS_TAG,
+  SITE_GRID_RECTIFY_TAG as RECTIFY_TAG,
   type HseActionKey,
 } from '#/components/hse';
 import type { VxeTableGridColumns } from '#/adapter/vxe-table';
@@ -67,17 +69,7 @@ const FREQ_OPTIONS = ['每日一次', '每周一次', '每月一次', '每季度
 const GRID_STATUS_OPTIONS = ['在岗', '离岗', '休假', '调整'];
 // 旧版风险等级枚举：重大 / 较大 / 一般 / 低，默认一般风险
 const RISK_OPTIONS = ['重大风险', '较大风险', '一般风险', '低风险'];
-const GRID_STATUS_TAG: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'neutral'> = {
-  在岗: 'success',
-  离岗: 'info',
-  休假: 'warning',
-  调整: 'neutral',
-};
-const RECTIFY_TAG: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'neutral'> = {
-  已整改: 'success',
-  整改中: 'warning',
-  待整改: 'danger',
-};
+// 注：GRID_STATUS_TAG / RECTIFY_TAG 已迁移至 statusColors.ts（SITE_GRID_STATUS_TAG / SITE_GRID_RECTIFY_TAG）
 
 // 完成率分色：<60 红 / 60-79 橙 / 80-89 黄 / 90-99 蓝 / 100 绿
 function completionColor(rate: number): string {

@@ -28,6 +28,7 @@ import {
   HseSearchPanel,
   HseStatusTag,
   type HseActionKey,
+  EMPLOYEE_PROFILE_STATUS_TAG as STATUS_TAG,
 } from '#/components/hse';
 import type { VxeTableGridColumns } from '#/adapter/vxe-table';
 import {
@@ -66,13 +67,6 @@ function maskPhone(phone?: string): string {
 
 // ===================== 枚举映射 =====================
 const GENDER_MAP: Record<string, string> = { '1': '男', '2': '女', '0': '未知' };
-
-const STATUS_TAG: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'neutral'> = {
-  active: 'success',
-  inactive: 'neutral',
-  left: 'warning',
-  pending: 'warning',
-};
 
 // ===================== 列表数据 =====================
 const loading = ref(false);

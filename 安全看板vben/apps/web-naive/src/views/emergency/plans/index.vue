@@ -30,6 +30,10 @@ import {
   HseSearchPanel,
   HseStatusTag,
   type HseActionKey,
+  EMERGENCY_PLAN_STATUS_TAG as STATUS_TAG,
+  EMERGENCY_PLAN_STATUS_LABEL as STATUS_LABEL,
+  EXPIRY_TAG,
+  EXPIRY_LABEL,
 } from '#/components/hse';
 import type { VxeTableGridColumns } from '#/adapter/vxe-table';
 import {
@@ -52,33 +56,6 @@ const TYPE_LABEL: Record<string, string> = {
   special: '专项预案',
   site: '现场处置方案',
 };
-const STATUS_TAG: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'neutral'> = {
-  active: 'success',
-  published: 'success',
-  pending: 'warning',
-  review: 'info',
-};
-const STATUS_LABEL: Record<string, string> = {
-  active: '生效中',
-  published: '已发布',
-  pending: '待审核',
-  review: '复审中',
-};
-const EXPIRY_TAG: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'neutral'> = {
-  valid: 'success',
-  expiring: 'warning',
-  expired: 'danger',
-  permanent: 'neutral',
-  unknown: 'neutral',
-};
-const EXPIRY_LABEL: Record<string, string> = {
-  valid: '正常',
-  expiring: '临期',
-  expired: '已过期',
-  permanent: '长期有效',
-  unknown: '未知',
-};
-
 // ===================== 列表数据 =====================
 const loading = ref(false);
 const data = ref<EmergencyApi.EmergencyPlan[]>([]);

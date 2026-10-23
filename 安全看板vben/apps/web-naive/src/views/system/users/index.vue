@@ -25,6 +25,8 @@ import {
   HseSearchPanel,
   HseStatusTag,
   type HseActionKey,
+  USER_STATUS_TAG as STATUS_TAG,
+  USER_STATUS_LABEL as STATUS_LABEL,
 } from '#/components/hse';
 import type { VxeTableGridColumns } from '#/adapter/vxe-table';
 import {
@@ -39,16 +41,6 @@ import {
 import { message } from '#/adapter/naive';
 
 defineOptions({ name: 'HseSystemUsers' });
-
-// ===================== 映射 =====================
-const STATUS_TAG: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'neutral'> = {
-  active: 'success',
-  disabled: 'danger',
-};
-const STATUS_LABEL: Record<string, string> = {
-  active: '启用',
-  disabled: '禁用',
-};
 
 // ===================== 列表数据 =====================
 const loading = ref(false);

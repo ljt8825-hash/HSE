@@ -34,6 +34,8 @@ import {
   HsePageLayout,
   HseSearchPanel,
   HseStatusTag,
+  BUDGET_EXPENDITURE_STATUS_TAG as STATUS_TAG,
+  BUDGET_EXPENDITURE_USE_STATUS_TAG as USE_STATUS_TAG,
   type HseActionKey,
 } from '#/components/hse';
 import {
@@ -159,21 +161,13 @@ function formatDate(value: string | number | null | undefined): string {
   return s.length >= 10 ? s.slice(0, 10) : s;
 }
 
-const STATUS_TAG: Record<string, 'info' | 'warning' | 'success'> = {
-  planning: 'info',
-  executing: 'warning',
-  completed: 'success',
-};
+// 注：STATUS_TAG 已迁移至 statusColors.ts（BUDGET_EXPENDITURE_STATUS_TAG）
 const STATUS_TEXT: Record<string, string> = {
   planning: '计划中',
   executing: '执行中',
   completed: '已完成',
 };
-const USE_STATUS_TAG: Record<string, 'success' | 'warning' | 'info' | 'neutral'> = {
-  已支出: 'success',
-  申请中: 'warning',
-  未支出: 'info',
-};
+// 注：USE_STATUS_TAG 已迁移至 statusColors.ts（BUDGET_EXPENDITURE_USE_STATUS_TAG）
 
 async function fetchData() {
   loading.value = true;

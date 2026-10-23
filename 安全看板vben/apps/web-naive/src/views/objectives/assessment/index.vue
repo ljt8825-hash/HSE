@@ -37,6 +37,8 @@ import {
   HseSearchPanel,
   HseStatusTag,
   type HseActionKey,
+  ASSESSMENT_LEVEL_TAG as LEVEL_TAG,
+  ASSESSMENT_STATUS_TAG as STATUS_TAG,
 } from '#/components/hse';
 import type { VxeTableGridColumns } from '#/adapter/vxe-table';
 import {
@@ -83,17 +85,6 @@ const departmentOptions = [
   '综合管理部',
   '车队',
 ];
-
-const LEVEL_TAG: Record<string, 'success' | 'info' | 'warning' | 'neutral'> = {
-  优秀: 'success',
-  良好: 'info',
-  合格: 'warning',
-  一般: 'neutral',
-};
-const STATUS_TAG: Record<string, 'success' | 'danger'> = {
-  有效: 'success',
-  失效: 'danger',
-};
 
 const filteredData = computed(() => {
   let data = assessmentList.value;
