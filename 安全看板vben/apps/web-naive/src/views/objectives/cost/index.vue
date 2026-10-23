@@ -83,6 +83,7 @@ const showImportModal = ref(false);
 const importFile = ref<File | null>(null);
 const importPreview = ref<CostApi.BudgetImportPreviewResult | null>(null);
 const importResult = ref<CostApi.BudgetImportConfirmResult | null>(null);
+const importBatchNo = ref(''); // 预览返回的批次号：确认时必须带回（服务端核对文件指纹）
 const previewing = ref(false);
 const confirming = ref(false);
 const importError = ref('');
@@ -199,6 +200,7 @@ function resetImport() {
   importFile.value = null;
   importPreview.value = null;
   importResult.value = null;
+  importBatchNo.value = '';
   importError.value = '';
   previewing.value = false;
   confirming.value = false;
@@ -229,12 +231,16 @@ async function runPreview() {
   try {
     const r = await previewBudgetImport(importFile.value);
     importPreview.value = r;
+    importBatchNo.value = r.batchNo || '';
+    importResult.value = null;
     const parts = [`共 ${r.total} 行`];
     if (r.duplicateCount) parts.push(`重复 ${r.duplicateCount} 行（将跳过）`);
     if (r.errorCount) parts.push(`错误 ${r.errorCount} 行（将跳过）`);
+    if (r.alreadyImported) parts.push(`该文件此前已导入过（批次 ${r.previousBatchNo}），重复行将被跳过`);
     message.success(`预览完成：${parts.join('，')}`);
   } catch (e) {
     importPreview.value = null;
+    importBatchNo.value = '';
     importError.value = extractErr(e, '预览失败：文件可能不是有效的 Excel，或网络异常');
   } finally {
     previewing.value = false;
@@ -243,12 +249,17 @@ async function runPreview() {
 
 async function runConfirm() {
   if (!importFile.value) { message.warning('请先选择 Excel 文件'); return; }
+  if (!importBatchNo.value) { message.warning('请先执行预览，再确认导入'); return; }
   confirming.value = true;
   importError.value = '';
   try {
-    const r = await confirmBudgetImport(importFile.value);
+    const r = await confirmBudgetImport(importFile.value, importBatchNo.value);
     importResult.value = r;
-    message.success(`导入完成：新增 ${r.inserted}，跳过 ${r.skipped}，失败 ${r.failed}`);
+    if (r.duplicateConfirm) {
+      message.info(`该批次已确认过（批次 ${r.batchNo}），不会重复插入：新增 ${r.inserted}，跳过 ${r.skipped}，失败 ${r.failed}`);
+    } else {
+      message.success(`导入完成：新增 ${r.inserted}，跳过 ${r.skipped}，失败 ${r.failed}`);
+    }
     await loadAll();
   } catch (e) {
     importError.value = extractErr(e, '导入失败：网络异常或服务端错误，未写入任何数据');
@@ -325,7 +336,7 @@ const previewColumns: DataTableColumns<CostApi.BudgetImportPreviewRow> = [
     width: 90,
     render: (r) => h(NTag, { type: previewStatusTag(r.status) }, { default: () => (r.status === 'error' ? '错误' : r.status === 'duplicate' ? '重复' : '可导入') }),
   },
-  { title: '错误/原因', key: 'errors', render: (r) => (r.errors?.length ? r.errors.join('；') : (r.duplicate ? '预算编码已存在或文件内重复' : '')) },
+  { title: '错误/原因', key: 'errors', render: (r) => (r.errors?.length ? r.errors.join('；') : (r.duplicate ? (r.duplicateReason || '预算编码已存在或文件内重复') : '')) },
 ];
 
 onMounted(() => {
@@ -443,7 +454,7 @@ onMounted(() => {
     <n-modal v-model:show="showImportModal" title="导入预算（Excel）" preset="card" style="width: 760px">
       <n-space vertical :size="12">
         <n-alert type="info" :bordered="false">
-          选择 .xlsx/.xls/.csv 预算文件 → 自动预览（识别字段、总数、错误与重复）→ 确认后正式写入。重复编码自动跳过，不覆盖既有预算。
+          选择 .xlsx/.xls/.csv 预算文件 → 自动预览（识别字段、总数、错误与重复）→ 确认后正式写入。预览与确认绑定同一批次与文件指纹（换文件需重新预览）；有编码按编码判重、无编码按「年度+项目+事项+金额」判重，重复自动跳过，不覆盖既有预算。
         </n-alert>
 
         <n-upload
@@ -460,12 +471,17 @@ onMounted(() => {
 
         <n-alert v-if="importError" type="error" :bordered="false">{{ importError }}</n-alert>
 
+        <n-alert v-if="importPreview && importPreview.alreadyImported" type="warning" :bordered="false">
+          该文件与此前已成功导入的批次（{{ importPreview.previousBatchNo }}）内容一致，重复预算将被跳过，不会覆盖既有数据。
+        </n-alert>
+
         <template v-if="importPreview">
           <n-space>
             <n-tag>共 {{ importPreview.total }} 行</n-tag>
             <n-tag type="success">可导入 {{ importPreview.total - importPreview.errorCount - importPreview.duplicateCount }}</n-tag>
             <n-tag v-if="importPreview.duplicateCount" type="warning">重复 {{ importPreview.duplicateCount }} 行</n-tag>
             <n-tag v-if="importPreview.errorCount" type="error">错误 {{ importPreview.errorCount }} 行</n-tag>
+            <n-tag v-if="importBatchNo" type="info">批次 {{ importBatchNo }}</n-tag>
           </n-space>
           <n-data-table
             :columns="previewColumns"
@@ -477,8 +493,12 @@ onMounted(() => {
           />
         </template>
 
-        <n-alert v-if="importResult" type="success" :bordered="false">
-          导入完成（批次 {{ importResult.batchNo }}）：新增 {{ importResult.inserted }}，跳过 {{ importResult.skipped }}，失败 {{ importResult.failed }}，共 {{ importResult.total }} 行。
+        <n-alert v-if="importResult" :type="importResult.duplicateConfirm ? 'info' : 'success'" :bordered="false">
+          <span v-if="importResult.duplicateConfirm">该批次已确认过，不会重复插入。</span>
+          导入结果（批次 {{ importResult.batchNo }}）：新增 {{ importResult.inserted }}，跳过 {{ importResult.skipped }}，失败 {{ importResult.failed }}，共 {{ importResult.total }} 行。
+          <div v-if="importResult.errors && importResult.errors.length" style="margin-top: 4px">
+            失败原因（前 {{ importResult.errors.length }} 条）：{{ importResult.errors.join('；') }}
+          </div>
         </n-alert>
       </n-space>
 

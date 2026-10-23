@@ -52,6 +52,8 @@ router.get('/commitments/audit-duplicates', ctl.auditDuplicateCommitments); // �
 router.get('/actuals', ctl.actualList);
 router.post('/actuals', costWriter, ctl.actualCreate);
 router.get('/allocations', ctl.allocationList);
-router.post('/allocations', costWriter, ctl.allocationCreate);
+router.post('/allocations', costWriter, ctl.allocationCreate);       // 独立分摊：事务+锁定实际支出+总额校验
+router.put('/allocations/:id', costWriter, ctl.allocationUpdate);    // 分摊修改：显式流程，重算总额一致性
+router.delete('/allocations/:id', costWriter, ctl.allocationDelete); // 分摊删除：受同一总额约束
 
 module.exports = router;

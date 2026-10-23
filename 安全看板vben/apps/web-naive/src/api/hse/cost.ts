@@ -47,13 +47,19 @@ export namespace CostApi {
     data: Record<string, any>;
     errors: string[];
     duplicate: boolean;
+    duplicateReason?: string;
     status: 'ok' | 'error' | 'duplicate';
   }
 
   export interface BudgetImportPreviewResult {
+    /** 导入批次号：确认时必须带回，且文件指纹须与预览一致（防「预览A确认B」） */
+    batchNo: string;
     total: number;
     errorCount: number;
     duplicateCount: number;
+    /** 同一文件（指纹相同）此前已成功导入过 → 提示重复导入 */
+    alreadyImported: boolean;
+    previousBatchNo?: string | null;
     rows: BudgetImportPreviewRow[];
   }
 
@@ -64,6 +70,9 @@ export namespace CostApi {
     updated: number;
     skipped: number;
     failed: number;
+    /** 同一批次重复确认时为 true（直接返回首次结果，不会重复插入） */
+    duplicateConfirm?: boolean;
+    errors?: string[];
   }
 
   export interface CostRequestItem {
@@ -156,7 +165,7 @@ export function getInvestCategories() {
   return requestClient.get<CostApi.ReferenceOption[]>('/cost/reference/invest-categories');
 }
 
-/** 预算 Excel 导入：预览（上传文件→识别字段/总数/错误/重复） */
+/** 预算 Excel 导入：预览（上传文件→识别字段/总数/错误/重复，返回批次号） */
 export function previewBudgetImport(file: File) {
   const formData = new FormData();
   formData.append('file', file);
@@ -165,10 +174,14 @@ export function previewBudgetImport(file: File) {
   });
 }
 
-/** 预算 Excel 导入：确认（再次上传同一文件→正式写入，返回新增/跳过/失败） */
-export function confirmBudgetImport(file: File) {
+/**
+ * 预算 Excel 导入：确认（再次上传同一文件 + 预览返回的 batchNo → 正式写入）。
+ * 服务端会核对文件指纹与预览一致；不一致（文件被替换）将拒绝并要求重新预览。
+ */
+export function confirmBudgetImport(file: File, batchNo: string) {
   const formData = new FormData();
   formData.append('file', file);
+  formData.append('batchNo', batchNo);
   return requestClient.post<CostApi.BudgetImportConfirmResult>('/cost/budgets/import', formData, {
     headers: { 'Content-Type': undefined as any },
   });
