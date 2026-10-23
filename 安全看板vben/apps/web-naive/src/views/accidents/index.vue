@@ -41,6 +41,10 @@ import {
   HseSearchPanel,
   HseStatusTag,
   type HseActionKey,
+  ACCIDENT_LEVEL_TAG as LEVEL_TAG,
+  ACCIDENT_STATUS_LABEL as STATUS_LABEL,
+  ACCIDENT_STATUS_TAG as STATUS_TAG,
+  EXPIRY_TAG,
 } from '#/components/hse';
 import type { VxeTableGridColumns } from '#/adapter/vxe-table';
 import {
@@ -198,17 +202,6 @@ const EXPIRY_OPTIONS = [
   { label: '长期有效', value: 'permanent' },
 ];
 
-const LEVEL_TAG: Record<string, 'danger' | 'warning' | 'info' | 'success' | 'neutral'> = {
-  '特别重大': 'danger',
-  '重大': 'danger',
-  '一级': 'danger',
-  '较大': 'warning',
-  '二级': 'warning',
-  '一般': 'info',
-  '三级': 'info',
-  '四级': 'neutral',
-};
-
 const LEVEL_LABEL: Record<string, string> = {
   '特别重大': '特别重大',
   '重大': '重大',
@@ -218,29 +211,6 @@ const LEVEL_LABEL: Record<string, string> = {
   '二级': '二级',
   '三级': '三级',
   '四级': '四级',
-};
-
-const STATUS_TAG: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'neutral'> = {
-  reported: 'warning',
-  investigating: 'warning',
-  processing: 'info',
-  closed: 'success',
-};
-
-const STATUS_LABEL: Record<string, string> = {
-  reported: '已报告',
-  investigating: '调查中',
-  processing: '处理中',
-  closed: '已结案',
-};
-
-const EXPIRY_TAG: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'neutral'> = {
-  normal: 'success',
-  expiring: 'warning',
-  expired: 'danger',
-  closed: 'neutral',
-  permanent: 'neutral',
-  unknown: 'neutral',
 };
 
 const EXPIRY_LABEL: Record<string, string> = {

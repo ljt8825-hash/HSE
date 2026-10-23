@@ -38,6 +38,11 @@ import {
   HseSearchPanel,
   HseStatusTag,
   type HseActionKey,
+  HAZARD_EXPIRY_LABEL as EXPIRY_LABEL,
+  HAZARD_EXPIRY_TAG as EXPIRY_TAG,
+  HAZARD_RISK_TAG as RISK_TAG,
+  HAZARD_STATUS_LABEL as STATUS_LABEL,
+  HAZARD_STATUS_TAG as STATUS_TAG,
 } from '#/components/hse';
 import type { VxeTableGridColumns } from '#/adapter/vxe-table';
 import {
@@ -117,41 +122,6 @@ const STATUS_OPTIONS = [
   { label: '待复查', value: 'pending_review' },
   { label: '关闭', value: 'closed' },
 ];
-
-const STATUS_TAG: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'neutral'> = {
-  discovered: 'info',
-  processing: 'warning',
-  pending_review: 'warning',
-  closed: 'success',
-};
-const STATUS_LABEL: Record<string, string> = {
-  discovered: '发现',
-  processing: '整改中',
-  pending_review: '待复查',
-  closed: '已关闭',
-};
-
-const RISK_TAG: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'neutral'> = {
-  '重大': 'danger',
-  '一级': 'danger',
-  '二级': 'warning',
-  '三级': 'info',
-};
-
-const EXPIRY_TAG: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'neutral'> = {
-  normal: 'success',
-  expiring: 'warning',
-  expired: 'danger',
-  resolved: 'neutral',
-  unknown: 'neutral',
-};
-const EXPIRY_LABEL: Record<string, string> = {
-  normal: '正常',
-  expiring: '临期',
-  expired: '过期',
-  resolved: '已完成',
-  unknown: '未知',
-};
 
 // ===================== 列表数据 =====================
 const loading = ref(false);

@@ -15,5 +15,7 @@ export type { LedgerSearchOptions } from './useLedgerSearch';
 
 export { useLedgerExport } from './useLedgerExport';
 
+export * from './statusColors';
+
 export type { HseActionKey, HseActionState } from './HseActionBar.vue';
 export type { HseStatusType } from './HseStatusTag.vue';
