@@ -118,6 +118,7 @@ const hseEmployeeRoutes = require('./routes/hse-employee');
 const hseEmployeeImportV2Routes = require('./routes/hse-employee-import-v2');
 // Sprint 5.5: 隐患整改闭环中心
 const hseHazardRectificationRoutes = require('./routes/hse-hazard-rectification');
+const costRoutes = require('./routes/cost');
 
 // Sprint 10-D-2-1: HSE月度安全履职考核模块
 const hseAssessmentMonthlyRoutes = require('./routes/hse-assessment-monthly');
@@ -427,6 +428,7 @@ app.use('/api/mobile/auth', require('./routes/mobileAuth'));
 // Sprint-WPS-01: WPS 多维表基础接入层 管理 Controller（admin 只读/受控自清理，见 routes/wps-dbsheet.js）
 app.use('/api/wps/dbsheet', authMiddleware, requireRole('system_admin', 'admin'), require('./routes/wps-dbsheet'));
 app.use('/api/objectives', objectivesRoutes);
+app.use('/api/cost', costRoutes);
 app.use('/api/system-mgmt', require('./routes/system-mgmt'));
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/hse/alerts', alertsRoutes);

@@ -101,6 +101,16 @@ const routes: RouteRecordRaw[] = [
             path: '/objectives/budget/monthly-plan',
             component: () => import('#/views/objectives/budget/monthly-plan/index.vue'),
           },
+          {
+            meta: {
+              title: '安全生产费用（业务闭环）',
+              icon: 'lucide:coins',
+              authority: ['admin'],
+            },
+            name: 'ObjectivesBudgetCost',
+            path: '/objectives/budget/cost',
+            component: () => import('#/views/objectives/cost/index.vue'),
+          },
         ],
       },
       // ===================== 月度安全履职考核（阶段06B-3） =====================
