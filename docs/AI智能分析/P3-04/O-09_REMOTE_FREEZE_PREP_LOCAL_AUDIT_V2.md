@@ -364,3 +364,100 @@ node scripts/p3-04-02-endpoint-verify.js
 ```
 
 无 `INSERT` / `UPDATE` / `DELETE` / `ALTER` / `CREATE` / `DROP`；无 `git add` / `commit` / `push`。
+
+---
+
+# 附记：阶段 B（GitHub 上传）执行回执
+
+> 本附记在阶段 A 报告**生成并提交之后**追加，用于记录上传结果。两段提交的事实必须分开阅读：
+> **阶段 A 只证明本地**；本附记只记录**上传动作与远端返回值**，不改变任何审计结论。
+
+## B-1 上传前记录
+
+| 项 | 值 |
+|---|---|
+| 本地 HEAD（上传前） | `5e8b0524ccd69369e59857024f0640cadec5f4cb` |
+| 分支 | `feat/hse-business-closure` |
+| 工作区 | 55 项未提交（17 改 + 37 未跟踪 + 1 新增本报告） |
+| 上传范围 | **仅 P3-04 域**：12 个代码文件 + 7 个脚本 + 12 份 P3-04 报告 |
+
+**明确排除（未提交，仍留在工作区）**：
+
+```text
+server/services/objectiveService.js
+安全看板vben/apps/web-naive/src/api/hse/cost.ts
+安全看板vben/apps/web-naive/src/api/hse/goals.ts
+安全看板vben/apps/web-naive/src/views/objectives/budget/expenditure/index.vue
+安全看板vben/apps/web-naive/src/views/objectives/cost/index.vue
+（另含 server/routes/cost.js、acl-out/、test-write.txt 及非 P3-04 报告）
+```
+
+理由：objectives/budget 属其他在途工作，未经本批次审计，不得混入生产执行包。
+
+## B-2 第一次提交（代码 + 报告）
+
+```text
+commit SHA : d0066c4f1eefad53fdd9cd30884b3b89e6c95eb9
+short      : d0066c4
+parent     : 5e8b052
+files      : 31 changed, 9804 insertions(+), 174 deletions(-)
+             （12 代码 + 7 脚本 + 12 报告；其中 19 个为新建）
+message    : fix(hse-hazard): P3-04 隐患生命周期 canonical 封口 + 历史状态规范化（DEV 已迁移，O-09 冻结）
+push       : 5e8b052..d0066c4  feat/hse-business-closure -> feat/hse-business-closure
+result     : PUSH OK（exit 0）
+```
+
+## B-3 远端核验（`git ls-remote`，不看本地跟踪引用）
+
+```text
+$ git ls-remote origin refs/heads/feat/hse-business-closure
+d0066c4f1eefad53fdd9cd30884b3b89e6c95eb9    refs/heads/feat/hse-business-closure
+
+本地 HEAD = d0066c4f1eefad53fdd9cd30884b3b89e6c95eb9
+→ remote HEAD == local HEAD == push commit SHA
+```
+
+## B-4 提交内 blob 与工作区文件哈希一致性
+
+对 12 个代码文件同时计算「工作区文件 SHA-256」与「提交内原始 blob SHA-256」（`git cat-file -p <oid>`，不经换行转换）：
+
+**12/12 完全一致**，即远端存储的内容与本地被审计的内容逐字节相同。示例：
+
+| 文件 | blob oid（短） | SHA-256（工作区 = blob） |
+|---|---|---|
+| `server/services/hazardService.js` | `78044e1208` | `c494e3e92686f6b774f284fbc4f66764745c8adacd1fd2ef781638945306ced3` |
+| `server/routes/todos.js` | `c10e67c734` | `713c99f222f9c0306aafa4ec8cffd88279783de71955a18936427d5b295db1f6` |
+| `server/routes/alerts.js` | `a2aa7de1c3` | `fd73d8cb5586de40ce77eff6e00ce910f193eac0558727b3cba6eef76a5b3f4a` |
+| `server/routes/dashboard.js` | `c1dc8402a8` | `3cec86a980423ce5b107cdedb25eeb50d8df696e07347cc549a219a13d32e60e` |
+| `server/routes/overview.js` | `18c976b465` | `6206612f362f1b3a268762ceb18e925b4517a35129ebe52c9af21fa1eb7c8795` |
+| `server/services/riskControlService.js` | `48c9acc190` | `1c8d113abc36b3849003737c67f91a8adf89f5c2674d4cb8513d4cb7639f4265` |
+| `server/services/importShared.js` | `1a3840fd4d` | `0276be9294279acfd8781bf123d67d21955bd37273304ce545aa5e59b6e60130` |
+| `server/services/importExcelService.js` | `5faf7ead5e` | `0534b7fca80a316d98129f01abefe3492001b1cac0322d134fcfd15ece0a0c38` |
+| `server/routes/demo-data.js` | `9efb7655cc` | `d18723c94981e1af4f6f7c29838b793832ec7b52119b798061f89994561a1d75` |
+| `server/services/hseAssessmentAnalysisService.js` | `e041d26da7` | `47bee6e0eb7c4989d316f4a97109de04b580662a027b39f3a4f9b7d4e58d79d9` |
+| `server/tests/e2e/hazard-alert-flow.test.js` | `1ddc1fe720` | `5e8024def328316586f4fac535141b43a06bc35e4e72a76ad5ecbf6ec474a3cb` |
+| `安全看板vben/.../hse/statusColors.ts` | `4d641f13b4` | `e787a1f5c63b1d5bcaa0053c8f3b99c0428d59536aea74150eccb224121dbedb` |
+
+> 说明：仓库 `core.autocrlf = true`，但提交内原始 blob 与工作区文件哈希相同 ⇒ 本次提交未发生换行归一化差异，远端核验可直接用 `git cat-file -p <oid> | sha256sum` 复现上表值。
+
+## B-5 本附记的提交
+
+本附记仅修改本报告一个文件，不触碰任何代码。其提交 SHA 与最终远端 HEAD 以命令输出为准（见对话回执）：
+
+为避免「文档记录自身 SHA」的自引用悖论，本附记**不硬编码自己的 commit SHA**，最终以 `git ls-remote` 输出为准：
+
+```text
+第二次提交：仅 docs/AI智能分析/P3-04/O-09_REMOTE_FREEZE_PREP_LOCAL_AUDIT_V2.md
+push      ：d0066c4..<HEAD>
+remote HEAD = <HEAD>          ← 以 ls-remote 实测为准，见对话回执
+```
+
+**注意**：代码文件在 `d0066c4` 与本次文档提交中 **blob 完全相同**（本附记未改代码），因此无论以哪个提交核验代码哈希，结果一致。
+
+## B-6 上传后仍未做的事
+
+- **未**修改任何代码（上传前后代码哈希一致）；
+- **未**执行任何 DDL / DML；
+- **未**迁移生产库；
+- **未**关闭 O-10，**未**修复 FU-18 / FU-19 / FU-13；
+- **未**宣称最终冻结（最终判定须由独立核验完成）。
