@@ -20,17 +20,37 @@ export type { HseStatusType };
 
 /* ===================== 隐患模块 ===================== */
 // 后端隐患生命周期枚举：discovered / processing / pending_review / closed
+// P3-04-00：仅以上 4 个 canonical 值可写回后端；下列历史/旧告警词汇
+// 只做“只读展示”兼容（迁移前历史行可读），绝不由前端写回。
 export const HAZARD_STATUS_TAG: Record<string, HseStatusType> = {
   discovered: 'info',
   processing: 'warning',
   pending_review: 'warning',
   closed: 'success',
+  // ---- 历史数据（只读展示，不写回）----
+  未完成: 'neutral',
+  已完成: 'success',
+  // ---- 旧告警/看板词汇（只读展示，不写回）----
+  待处理: 'warning',
+  处理中: 'warning',
+  已关闭: 'success',
+  已整改: 'success',
+  已验收: 'success',
 };
 export const HAZARD_STATUS_LABEL: Record<string, string> = {
   discovered: '发现',
   processing: '整改中',
   pending_review: '待复查',
   closed: '已关闭',
+  // ---- 历史数据（只读展示，不写回）----
+  未完成: '待整改',
+  已完成: '已关闭',
+  // ---- 旧告警/看板词汇（只读展示，不写回）----
+  待处理: '待处理',
+  处理中: '整改中',
+  已关闭: '已关闭',
+  已整改: '已整改',
+  已验收: '已验收',
 };
 
 // 隐患风险等级枚举：重大 / 一级 / 二级 / 三级

@@ -443,7 +443,10 @@ function formatHazardRow(row) {
   const checkDate = row.hazard_date ? new Date(row.hazard_date) : null;
   const fixDate = row.fix_date ? new Date(row.fix_date) : null;
   const fmt = (d) => d ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` : null;
-  const isResolved = row.status === '已完成' || row.status === 'completed' ? '是' : '否';
+  // P3-04-00.3 (F-04b)：hazards.status 的“已闭环”判定必须与 hazardService.SQL_CLOSED_STATUS_LIST 同源。
+  // 原实现只认旧中文 '已完成'，迁移后 60 条 canonical 'closed' 会被判成“未解决”；
+  // 'completed' 为更早的历史值，一并读取兼容。此处内联而非 require，避免与 hazardService 循环依赖。
+  const isResolved = (row.status === 'closed' || row.status === '已完成' || row.status === 'completed') ? '是' : '否';
   return camelKeys({
     id: row.id,
     no: row.no || null,
@@ -1176,7 +1179,9 @@ const generateHazard = async (params, body, user) => {
   const measure = body.measure || riskRow.measures || '';
   const checker = body.checker || createdBy;
   const fixer = body.fixer || '';
-  const status = '未完成';
+  // P3-04-00 (W11): 统一 canonical 初始状态，禁止再写历史中文 '未完成'。
+  // 本路径由“风险点生成隐患”触发，状态由服务端固定为 discovered，不接受客户端指定。
+  const status = 'discovered';
   const riskLevel = riskRow.level || '四级';
 
   let newHazard = null;

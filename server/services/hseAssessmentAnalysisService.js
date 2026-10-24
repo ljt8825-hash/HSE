@@ -923,7 +923,7 @@ async function deduction() {
   const rectResult = await pool.query(
     `SELECT
        (SELECT COUNT(*) FROM hazards WHERE is_deleted = false)::int as total,
-       (SELECT COUNT(*) FROM hazards WHERE is_deleted = false AND status = '已完成')::int as completed,
+       (SELECT COUNT(*) FROM hazards WHERE is_deleted = false AND status IN ('已完成','closed'))::int as completed,
        (SELECT COUNT(*) FROM hazards WHERE is_deleted = false AND status = '未完成')::int as pending,
        (SELECT COUNT(*) FROM hse_rectifications WHERE is_deleted = false AND is_overdue = true)::int as overdue,
        (SELECT COUNT(*) FROM hse_rectifications WHERE is_deleted = false AND status IN ('进行中','整改中'))::int as "inProgress"`

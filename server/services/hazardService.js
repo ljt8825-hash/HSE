@@ -134,7 +134,8 @@ function calcExpiryStatus(hazardDate, isResolved, deadlineDays) {
   return 'normal';
 }
 
-// ========== Sprint5.13: 隐患状态流转常量 ==========
+// ========== Sprint5.13 / P3-04-00: 隐患生命周期状态（唯一 canonical 事实源） ==========
+// 只有以下 4 个值可以写入 hazards.status；任何其它值只能“识别”，不能“写回”。
 const HAZARD_STATUS = {
   DISCOVERED: 'discovered',
   PROCESSING: 'processing',
@@ -142,6 +143,11 @@ const HAZARD_STATUS = {
   CLOSED: 'closed',
 };
 
+const HAZARD_STATUS_VALUES = Object.values(HAZARD_STATUS);
+const HAZARD_STATUS_SET = new Set(HAZARD_STATUS_VALUES);
+
+// 旧数据词汇 → canonical：仅用于“读取识别”（历史 110 行 status=未完成/已完成）。
+// 不得用于写入：写入端只允许 HAZARD_STATUS 四个值。
 const STATUS_MAP = {
   '发现': HAZARD_STATUS.DISCOVERED,
   '整改中': HAZARD_STATUS.PROCESSING,
@@ -151,6 +157,17 @@ const STATUS_MAP = {
   '已完成': HAZARD_STATUS.CLOSED,
 };
 
+// 告警/看板历史中文词：语义与生命周期“相近但不等价”，单独归类为
+// non_lifecycle（可识别展示，绝不参与状态机写入与统计口径）。
+const NON_LIFECYCLE_STATUS = {
+  '待处理': HAZARD_STATUS.DISCOVERED,
+  '处理中': HAZARD_STATUS.PROCESSING,
+  '已关闭': HAZARD_STATUS.CLOSED,
+  '已整改': HAZARD_STATUS.CLOSED,
+  '已验收': HAZARD_STATUS.CLOSED,
+};
+
+// canonical → 中文展示
 const STATUS_LABEL = {
   [HAZARD_STATUS.DISCOVERED]: '发现',
   [HAZARD_STATUS.PROCESSING]: '整改中',
@@ -158,8 +175,62 @@ const STATUS_LABEL = {
   [HAZARD_STATUS.CLOSED]: '关闭',
 };
 
+/**
+ * 状态四分类（P3-04-00 §6/§7）：
+ *  - canonical    : 4 个生命周期标准值
+ *  - legacy       : 历史数据词汇（未完成/已完成/发现/整改中/待复查/关闭）
+ *  - non_lifecycle: 告警/看板用过的中文词（待处理/处理中/已关闭/已整改/已验收）
+ *  - unknown      : 无法识别的值（含 NULL / 任意字符串）→ fail-closed
+ */
+function classifyStatus(raw) {
+  if (raw === null || raw === undefined || raw === '') {
+    return { status: null, category: 'unknown' };
+  }
+  if (HAZARD_STATUS_SET.has(raw)) {
+    return { status: raw, category: 'canonical' };
+  }
+  if (Object.prototype.hasOwnProperty.call(STATUS_MAP, raw)) {
+    return { status: STATUS_MAP[raw], category: 'legacy' };
+  }
+  if (Object.prototype.hasOwnProperty.call(NON_LIFECYCLE_STATUS, raw)) {
+    return { status: NON_LIFECYCLE_STATUS[raw], category: 'non_lifecycle' };
+  }
+  return { status: null, category: 'unknown' };
+}
+
+function isCanonicalStatus(raw) {
+  return HAZARD_STATUS_SET.has(raw);
+}
+
+// 展示标签：canonical + 历史/告警词汇均可读，未知值原样返回（fail-closed，不猜测）
 function getStatusLabel(status) {
-  return STATUS_LABEL[status] || status;
+  if (STATUS_LABEL[status]) return STATUS_LABEL[status];
+  if (status === '未完成' || status === '待处理') return '待整改';
+  if (status === '已完成' || status === '已关闭' || status === '已整改' || status === '已验收') return '已关闭';
+  if (status === '处理中') return '整改中';
+  return status;
+}
+
+// ========== P3-04-00.2 (F-04)：SQL 侧“已闭环 / 未闭环”判定的唯一来源 ==========
+// 背景：sealed 之后 lifecycle 只写 canonical，但 SQL 里仍残留 `status != '已完成'` 这类旧词汇判断。
+// 该类判断有两个叠加缺陷：
+//   1) 词汇错位——迁移后写入的是 'closed'，`!= '已完成'` 会把已闭环隐患判为未闭环；
+//   2) NULL 陷阱——status 为 NULL 时 `NULL != '已完成'` 求值为 NULL（非 TRUE），
+//      导致历史 50 条 NULL 隐患被排除在“未闭环”之外（实测 risk_sources.hazard_count 恒 0）。
+// 统一收敛为下面这一处：
+//   - 已闭环 = canonical 'closed' + 迁移前历史值 '已完成'（与 STATUS_MAP / statusToIsResolved 同源，
+//     仅作读取兼容；P3-04-01 迁移完成后由该轮删除 '已完成'）
+//   - 未闭环 = 取反，且 NULL 视为未闭环（fail-open 到“待整改”，不把未知状态当成已闭环）
+const SQL_CLOSED_STATUS_LIST = `('${HAZARD_STATUS.CLOSED}', '已完成')`;
+
+/** 已闭环判定 SQL（alias 传 'h.' 形式的表别名前缀，可为 ''） */
+function sqlStatusClosed(alias = '') {
+  return `${alias}status IN ${SQL_CLOSED_STATUS_LIST}`;
+}
+
+/** 未闭环判定 SQL：NULL 也计入未闭环 */
+function sqlStatusOpen(alias = '') {
+  return `(${alias}status IS NULL OR ${alias}status NOT IN ${SQL_CLOSED_STATUS_LIST})`;
 }
 
 // ========== 内存降级存储 ==========
@@ -179,17 +250,18 @@ function initMemoryData() {
 }
 
 // ========== 是否整改完成 转换 ==========
-// DB status 存储: '已完成' / '未完成'
+// DB status 存储（sealed 后）: canonical discovered/processing/pending_review/closed
+// 历史行仍可能是 '已完成' / NULL（P3-04-01 迁移前），读取侧一律按 canonical 语义归一
 // 前端 isResolved: '是' / '否'
 function statusToIsResolved(status) {
   if (!status) return '否';
-  if (status === '已完成' || status === 'completed') return '是';
+  // P3-04-00: canonical closed 必须视为已解决（此前仅识别旧中文，导致 closed 行被误判为未解决）
+  if (status === HAZARD_STATUS.CLOSED || status === '已完成' || status === 'completed') return '是';
   return '否';
 }
-function isResolvedToStatus(isResolved) {
-  if (isResolved === '是') return '已完成';
-  return '未完成';
-}
+// P3-04-00.2 (F-04c)：原来的 isResolvedToStatus() 把 '是/否' 翻成 '已完成/未完成' 再做 `status = $n` 等值匹配，
+// 造成两侧都错：`否` 恒 0 行（无任何行是 '未完成'）；`是` 只命中历史行，迁移后 closed 行全部查不到。
+// 现改为集合判定（见 sqlStatusClosed / sqlStatusOpen），不再由 isResolved 反推单一状态值。
 
 // ========== 格式化行 ==========
 function formatDate(date) {
@@ -322,7 +394,7 @@ async function syncRiskOnHazardResolve(riskId, fixDate, client) {
               SELECT COUNT(*)::int FROM hazards h
               WHERE h.related_risk_id = $2
                 AND h.is_deleted = FALSE
-                AND h.status != '已完成'
+                AND ${sqlStatusOpen('h.')}
             ),
             updated_at = CURRENT_TIMESTAMP
         WHERE id = $2
@@ -366,7 +438,6 @@ async function list(query) {
       );
     }
     if (isResolved) {
-      const targetStatus = isResolvedToStatus(isResolved);
       data = data.filter(r => statusToIsResolved(r.status) === isResolved);
     }
     if (status) {
@@ -406,10 +477,8 @@ async function list(query) {
     params.push(`%${keyword}%`);
   }
   if (isResolved) {
-    const targetStatus = isResolvedToStatus(isResolved);
-    paramIdx++;
-    whereSql += ` AND status = $${paramIdx}`;
-    params.push(targetStatus);
+    // P3-04-00.2 (F-04c)：canonical 集合判定，替代原先 `status = '已完成'/'未完成'` 的等值匹配
+    whereSql += ` AND ${isResolved === '是' ? sqlStatusClosed() : sqlStatusOpen()}`;
   }
   if (status) {
     paramIdx++;
@@ -678,12 +747,9 @@ async function create(body, req) {
   const gridId = b.gridId || b.grid_id || null;
   const deadlineDays = b.deadlineDays || b.deadline_days || 30;
 
-  let status = HAZARD_STATUS.DISCOVERED;
-  if (b.status) {
-    status = STATUS_MAP[b.status] || b.status;
-  } else if (b.isResolved === '是') {
-    status = HAZARD_STATUS.CLOSED;
-  }
+  // P3-04-00 (W1): 生命周期初始状态由服务端决定。
+  // 忽略客户端传入的 status / isResolved，防止伪造 closed / processing 绕过状态机。
+  const status = HAZARD_STATUS.DISCOVERED;
 
   if (!isConnected()) {
     initMemoryData();
@@ -775,14 +841,9 @@ async function update(params, body, req) {
   if (b.reviewResult !== undefined) { setClauses.push(`review_result = $${i++}`); ps.push(b.reviewResult || null); }
   if (b.deadlineDays !== undefined) { setClauses.push(`deadline_days = $${i++}`); ps.push(b.deadlineDays); }
 
-  if (b.status !== undefined) {
-    const newStatus = STATUS_MAP[b.status] || b.status;
-    setClauses.push(`status = $${i++}`);
-    ps.push(newStatus);
-  } else if (b.isResolved !== undefined) {
-    setClauses.push(`status = $${i++}`);
-    ps.push(b.isResolved === '是' ? HAZARD_STATUS.CLOSED : HAZARD_STATUS.DISCOVERED);
-  }
+  // P3-04-00 (W2): 普通更新禁止修改生命周期 status（含 isResolved 派生入口）。
+  // 即使客户端传 status / isResolved 也被忽略，不进入 SQL；状态只能经
+  // rectify / submitReview / review / close 业务动作变更。
 
   setClauses.push('updated_at = CURRENT_TIMESTAMP');
   ps.push(params.id);
@@ -791,7 +852,6 @@ async function update(params, body, req) {
     initMemoryData();
     const idx = memoryRecords.findIndex(r => r.id === parseInt(params.id) && !r.is_deleted);
     if (idx === -1) return err(-2, '记录不存在');
-    const beforeSnapshot = { ...memoryRecords[idx] };
     if (b.no !== undefined) memoryRecords[idx].no = b.no;
     if (b.description !== undefined) memoryRecords[idx].description = b.description;
     if (b.measure !== undefined) memoryRecords[idx].measure = b.measure;
@@ -816,18 +876,8 @@ async function update(params, body, req) {
     if (b.reviewResult !== undefined) memoryRecords[idx].review_result = b.reviewResult || null;
     if (b.deadlineDays !== undefined) memoryRecords[idx].deadline_days = b.deadlineDays;
 
-    if (b.status !== undefined) {
-      memoryRecords[idx].status = STATUS_MAP[b.status] || b.status;
-    } else if (b.isResolved !== undefined) {
-      memoryRecords[idx].status = b.isResolved === '是' ? HAZARD_STATUS.CLOSED : HAZARD_STATUS.DISCOVERED;
-    }
-
+    // P3-04-00 (W2): 内存镜像同样忽略客户端 status/isResolved，生命周期状态不变。
     memoryRecords[idx].updated_at = new Date().toISOString();
-
-    if ((b.status === HAZARD_STATUS.CLOSED || b.isResolved === '是') && beforeSnapshot.status !== HAZARD_STATUS.CLOSED) {
-      const rid = memoryRecords[idx].related_risk_id || b.relatedRiskId;
-      if (rid) await syncRiskOnHazardResolve(rid, b.fixDate || memoryRecords[idx].fix_date);
-    }
 
     return ok(formatRow(memoryRecords[idx]), '更新成功(内存模式)');
   }
@@ -841,16 +891,16 @@ async function update(params, body, req) {
 
   const updated = result.rows[0];
 
-  if ((b.status === HAZARD_STATUS.CLOSED || b.isResolved === '是') && updated.related_risk_id) {
-    await syncRiskOnHazardResolve(updated.related_risk_id, updated.fix_date || b.fixDate);
-  }
+  // P3-04-00 (W2): update 不再改变 status，因此不再在此处触发“隐患关闭→风险联动”。
+  // 风险联动只由 review(pass) / close 等真实关闭动作触发。
 
   try {
     const isResolvedNow = statusToIsResolved(updated.status);
     const newExpiry = calcExpiryStatus(updated.hazard_date, isResolvedNow, updated.deadline_days);
-    if (newExpiry === 'expired' && b.isResolved !== '是' && b.status !== HAZARD_STATUS.CLOSED) {
+    // 只有未关闭的隐患才提醒（以 DB 真实 status 为准，不再依赖客户端参数）
+    if (newExpiry === 'expired' && updated.status !== HAZARD_STATUS.CLOSED) {
       await notifyHazardExpiry(updated, 'expired');
-    } else if (newExpiry === 'expiring' && b.isResolved !== '是' && b.status !== HAZARD_STATUS.CLOSED) {
+    } else if (newExpiry === 'expiring' && updated.status !== HAZARD_STATUS.CLOSED) {
       await notifyHazardExpiry(updated, 'expiring');
     }
   } catch (_e) {
@@ -992,12 +1042,17 @@ async function review(params, body, req) {
   return ok(formatRow(updated), `复查${reviewResult === 'pass' ? '合格，已关闭' : '不合格，重新整改'}`);
 }
 
-// ========== PUT /:id/close — 直接关闭 ==========
+// ========== PUT /:id/close — 关闭（P3-04-00 加源状态守卫） ==========
+// 唯一合法源状态：pending_review。禁止 discovered / processing 直接关闭，
+// 从而不能绕过 rectify → submitReview → review(pass) 状态机。
 async function close(params, body, req) {
   if (!isConnected()) {
     initMemoryData();
     const idx = memoryRecords.findIndex(r => r.id === parseInt(params.id) && !r.is_deleted);
     if (idx === -1) return err(-2, '记录不存在');
+    if (memoryRecords[idx].status !== HAZARD_STATUS.PENDING_REVIEW) {
+      return err(-2, '隐患状态不允许关闭（仅待复查可关闭）');
+    }
     memoryRecords[idx].status = HAZARD_STATUS.CLOSED;
     memoryRecords[idx].updated_at = new Date().toISOString();
     return ok(formatRow(memoryRecords[idx]), '隐患关闭成功(内存模式)');
@@ -1010,12 +1065,18 @@ async function close(params, body, req) {
     SET status = '${HAZARD_STATUS.CLOSED}',
         rectification = COALESCE($1, rectification),
         updated_at = CURRENT_TIMESTAMP
-    WHERE id = $2 AND is_deleted = false
+    WHERE id = $2 AND is_deleted = false AND status = '${HAZARD_STATUS.PENDING_REVIEW}'
     RETURNING *
   `, [closeNote || null, params.id]);
 
   if (result.rows.length === 0) {
-    return err(-2, '隐患不存在');
+    // 区分“不存在”与“状态不允许”，便于测试与前端提示
+    const exists = await pool.query(
+      'SELECT id FROM hazards WHERE id = $1 AND is_deleted = false',
+      [params.id]
+    );
+    if (exists.rows.length === 0) return err(-2, '隐患不存在');
+    return err(-2, '隐患状态不允许关闭（仅待复查可关闭）');
   }
 
   const updated = result.rows[0];
@@ -1289,6 +1350,16 @@ const rulesAll = () => ok({
 }, '获取隐患治理全部规则成功');
 
 module.exports = {
+  // P3-04-00: 状态常量与分类工具（供 alerts/dashboard 复用，避免第二套常量）
+  HAZARD_STATUS,
+  STATUS_MAP,
+  NON_LIFECYCLE_STATUS,
+  classifyStatus,
+  // P3-04-00.2 (F-04): SQL 侧已闭环/未闭环判定（供 overview 等路由复用，禁止另写 '已完成' 字面量）
+  sqlStatusClosed,
+  sqlStatusOpen,
+  SQL_CLOSED_STATUS_LIST,
+  isCanonicalStatus,
   list,
   stats,
   relatedRisk,

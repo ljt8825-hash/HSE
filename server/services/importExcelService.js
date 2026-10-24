@@ -22,6 +22,9 @@ const {
   buildConflictKey,
 } = shared;
 const { confirmImportMemory } = require('./importMemoryService');
+// P3-04-00.2 (F-03)：隐患生命周期初始状态必须引用唯一 fact source，不得在本文件另立字面量。
+// hazardService 不反向依赖 importExcelService，无循环引用。
+const { HAZARD_STATUS } = require('./hazardService');
 
 // ============================================================
 // POST /api/import/parse — 解析文件
@@ -508,6 +511,17 @@ async function confirmImportNative(fileRecordId, moduleType, operator, insurance
     }
     return cleaned;
   });
+
+  // P3-04-00.2 (F-03)：隐患生命周期状态与 Excel 彻底隔离（第二道锁）。
+  // 即便将来有人移除 hazards 模块的 dbColumns 白名单，这条删除仍能保证
+  // Excel「是否整改完成」列的取值不会流向数据库。服务端随后按常量注入初始状态。
+  if (moduleType === 'hazards') {
+    for (const row of data) {
+      if (row && Object.prototype.hasOwnProperty.call(row, 'status')) {
+        delete row.status;
+      }
+    }
+  }
 
   // 人员保险导入：若指定了保险类型（导入雇主险 / 导入工伤险），
   // 对未填写保险类型的行自动补齐默认值，确保列表按险种 Tab 正确筛选。
@@ -1255,8 +1269,22 @@ async function confirmImportNative(fileRecordId, moduleType, operator, insurance
     // 白名单优先：列顺序稳定；无白名单的模块保留旧行为（Object.keys 首行）
     // 任务9：personnel 写库项为 { dbRow, sourceRowNo, sourceEmployeeCode }，取值用 item.dbRow
     const firstItem = toInsert[0];
-    const columns = dbColumns || Object.keys(firstItem.dbRow || firstItem);
+    // P3-04-00.2 (F-03)：隐患新建行的生命周期状态只由服务端常量注入。
+    // 1) dbColumns 已排除 status ⇒ Excel 的任何取值都进不了列清单；
+    // 2) 这里为 INSERT 显式补 canonical 初始态，避免落回列默认值 '未完成'（历史词汇，F-05）；
+    // 3) UPDATE 分支仍只用 dbColumns，不注入 ⇒ 重导入绝不会把已整改隐患打回初始态。
+    const insertConstants = (moduleType === 'hazards') ? { status: HAZARD_STATUS.DISCOVERED } : {};
+    const constantKeys = Object.keys(insertConstants);
+    const columns = [
+      ...(dbColumns || Object.keys(firstItem.dbRow || firstItem)),
+      ...constantKeys,
+    ];
     const getRow = (item) => (item && item.dbRow) ? item.dbRow : item;
+    const valueFor = (row, col) => (
+      Object.prototype.hasOwnProperty.call(insertConstants, col)
+        ? insertConstants[col]
+        : (row[col] === undefined ? null : row[col])
+    );
     for (let i = 0; i < toInsert.length; i += BATCH_SIZE) {
       const batch = toInsert.slice(i, i + BATCH_SIZE);
       const placeholders = [];
@@ -1267,7 +1295,7 @@ async function confirmImportNative(fileRecordId, moduleType, operator, insurance
         const rowPlaceholders = columns.map((_, ci) => `$${paramIdx + ci}`).join(', ');
         placeholders.push(`(${rowPlaceholders})`);
         for (const col of columns) {
-          values.push(row[col] === undefined ? null : row[col]);
+          values.push(valueFor(row, col));
         }
         paramIdx += columns.length;
       }
@@ -1286,11 +1314,11 @@ async function confirmImportNative(fileRecordId, moduleType, operator, insurance
           const row = getRow(item);
           try {
             // 逐条降级 INSERT 同样使用白名单列（与批量路径一致），内部元数据不泄漏
-            const cols = dbColumns || Object.keys(row);
+            const cols = columns;
             const ph = cols.map((_, ci) => `$${ci + 1}`).join(', ');
             await pool.query(
               `INSERT INTO ${tableName} (${cols.join(', ')}) VALUES (${ph})`,
-              cols.map(c => (row[c] === undefined ? null : row[c]))
+              cols.map(c => valueFor(row, c))
             );
             inserted++;
           } catch (e2) {
@@ -1325,7 +1353,10 @@ async function confirmImportNative(fileRecordId, moduleType, operator, insurance
       let idx = 0;
       // UPDATE 同样只使用白名单列（personnel 等有 dbColumns 的模块）；
       // 无白名单模块保留旧行为（Object.entries 全字段）
-      const updateKeys = dbColumns || Object.keys(row);
+      // P3-04-00.2 (F-03)：第三道锁——即便将来有人把 status 加回 dbColumns，
+      // 重导入也绝不改写隐患生命周期（否则会把已整改/已关闭的隐患打回初始态）。
+      const updateKeys = (dbColumns || Object.keys(row))
+        .filter(k => !(moduleType === 'hazards' && k === 'status'));
       for (const key of updateKeys) {
         const value = row[key];
         if (key !== 'id' && value !== undefined && value !== null && value !== '') {

@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { success, error } = require('../middleware/response');
 const { pool, isConnected } = require('../config/db');
+// P3-04-00.4：隐患“未闭环”判定唯一来源（禁止在本文件另写 'closed'/'已完成' 字面量）
+const { sqlStatusOpen } = require('../services/hazardService');
 const XLSX = require('xlsx');
 
 // 聚合结果缓存：避免同一来源在 日/周/月 多个 Tab 间重复打库
@@ -97,12 +99,17 @@ const HANDLERS = {
   },
 
   // 4) 逾期未整改隐患（持续型）
+  // P3-04-00.4：原为 `h.status != 'CLOSED'` —— 一个从未存在过的大写状态值。
+  // 由于任何状态下都与 'CLOSED' 不相等，该条件恒真，等于“不加状态过滤”：
+  //   · 迁移前：'已完成' 会被算作逾期未整改（60 条已闭环被误计），50 条 NULL 被三值逻辑丢弃；
+  //   · 迁移后：'closed' 仍 != 'CLOSED' ⇒ 计数由 60 涨到 110，已闭环隐患全部混入待办。
+  // 现统一走 sqlStatusOpen（NULL 视为未闭环），使迁移前后都稳定为“真正未闭环且逾期”的条数。
   'hazard:overdue': async () => {
     const where = `
       FROM hazards h
       LEFT JOIN v_employee_current e ON h.responsible_id = e.employee_id
       WHERE h.is_deleted = false
-        AND h.status != 'CLOSED'
+        AND ${sqlStatusOpen('h.')}
         AND h.hazard_date IS NOT NULL
         AND h.hazard_date + (h.deadline_days || ' days')::interval < CURRENT_DATE`;
     const countR = await pool.query(`SELECT COUNT(*)::int AS count ${where}`);

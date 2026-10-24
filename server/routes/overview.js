@@ -7,6 +7,9 @@ const express = require('express');
 const router = express.Router();
 const { pool, isConnected } = require('../config/db');
 const { success, error } = require('../middleware/response');
+// P3-04-00.2 (F-04b)：隐患“已闭环/未闭环”判定统一取自 hazardService，
+// 禁止在本路由内另写 '已完成' 字面量（旧词汇 + NULL 陷阱，见 hazardService 同名注释）。
+const { sqlStatusClosed, sqlStatusOpen } = require('../services/hazardService');
 
 // GET /api/overview/summary — 全量汇总
 router.get('/summary', async (req, res, next) => {
@@ -27,7 +30,7 @@ router.get('/summary', async (req, res, next) => {
     const [hazardResult, trainingResult, fireResult, accidentResult] = await Promise.all([
       pool.query(`
         SELECT COUNT(*) AS total,
-               COUNT(*) FILTER (WHERE status = '已完成') AS fixed
+               COUNT(*) FILTER (WHERE ${sqlStatusClosed()}) AS fixed
         FROM hazards WHERE is_deleted = false
       `),
       pool.query(`
@@ -86,7 +89,7 @@ router.get('/summary', async (req, res, next) => {
                (deadline::date - CURRENT_DATE) AS days_left
         FROM hazards
         WHERE is_deleted = false
-          AND status != '已完成'
+          AND ${sqlStatusOpen()}
           AND deadline IS NOT NULL
           AND (deadline::date - CURRENT_DATE) <= 7
         ORDER BY deadline ASC

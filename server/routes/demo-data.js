@@ -256,7 +256,8 @@ async function generateViolationRecords(client, count) {
 async function generateHazards(client, count) {
   const types = ['设备设施', '作业环境', '管理缺陷', '人员行为', '消防隐患', '电气隐患'];
   const levels = ['一般', '较大', '重大'];
-  const statuses = ['已整改', '整改中', '待复查', '已发现'];
+  // P3-04-00 (W10): 演示隐患也使用 canonical 生命周期值，避免写入中文幽灵状态
+  const statuses = ['closed', 'processing', 'pending_review', 'discovered'];
   const locations = ['车间', '仓库', '办公区', '停车场', '作业现场', '配电室', '锅炉房'];
 
   for (let i = 0; i < count; i++) {

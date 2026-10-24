@@ -469,13 +469,25 @@ const NATIVE_IMPORT_MODULES = {
       '检查人员': 'checker',
       '整改人员': 'fixer',
       '整改时间': 'fix_date',
+      // P3-04-00.2 (F-03)：保留该列映射仅用于识别表头（findHeaderRow 依赖），
+      // 其取值在 confirmImportNative 数据清洗阶段一律删除，绝不下传数据库。
       '是否整改完成': 'status',
       '备注': 'remark',
     },
-    statusMap: {
-      '是': '已完成',
-      '否': '未完成',
-    },
+    // P3-04-00.2 (F-03)：隐患生命周期状态严禁由 Excel 决定。
+    // dbColumns 是本模块的写库白名单，**显式排除 status**——
+    // 批量 INSERT / 逐条 INSERT / UPDATE 三条 SQL 都只按此白名单取列，
+    // 因此 Excel 里的任何值（是/否/closed/abc…）都无法进入 hazards.status。
+    // 新建行的 canonical 初始状态由服务端常量注入（见 importExcelService），
+    // UPDATE 分支不注入状态，绝不改写既有隐患的生命周期。
+    dbColumns: ['no', 'hazard_date', 'description', 'measure', 'checker', 'fixer', 'fix_date', 'remark'],
+    // 已删除原有 statusMap（{'是':'已完成','否':'未完成'}）——原因不是"它是死配置"，恰恰相反：
+    // parseExcelNative 会真实消费 statusMap（见本文件 `const statusMap = moduleConfig.statusMap`
+    // 与 `if (dbField === 'status' && statusMap && statusMap[value]) value = statusMap[value];`）。
+    // 也就是说它曾是**生效中的映射**：Excel「是否整改完成=是」会被改写成合法的旧生命周期值
+    // '已完成'，从而绕开 rectify → submitReview → review 全链路、且不产生任何复查记录。
+    // 这是 P3-04-00.2 对 P3-04-00.1「F-02=死配置」结论的更正。
+    // 移除后：表头仍由 fieldMapping 识别（不动），取值在清洗阶段删除，落库由服务端常量注入。
   },
   'fire-facility': {
     targetTable: 'memory_fire_equipment',

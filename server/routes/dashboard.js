@@ -76,7 +76,8 @@ function calcChangeRate(current, previous) {
  */
 const METRIC_CONFIG = {
   hazards_total: { table: 'hazards', dateColumn: 'created_at', statusFilter: null, name: '隐患排查' },
-  hazards_fixed: { table: 'hazards', dateColumn: 'created_at', statusFilter: "'已整改','已验收'", name: '已整改' },
+  // P3-04-00 (SAFE-04): 已整改 KPI 仅对应 canonical closed；不再使用 已整改/已验收 伪生命周期值
+  hazards_fixed: { table: 'hazards', dateColumn: 'created_at', statusFilter: "'closed'", name: '已整改' },
   accidents_total: { table: 'accidents', dateColumn: 'occurred_at', statusFilter: null, name: '事故总数' },
   accidents_pending: { table: 'accidents', dateColumn: 'occurred_at', statusFilter: "'待处理','处理中'", name: '待处理' },
   training_count: { table: 'training_records', dateColumn: 'training_date', statusFilter: null, name: '培训次数' },
@@ -106,10 +107,11 @@ router.get('/metrics', async (req, res) => {
     const { currentStart, previousStart, previousEnd, periodLabel } = getPeriodRanges(period);
 
     // 构建部门过滤条件
-    const deptCondition = departmentId ? ' AND department = $3' : '';
+    // P3-04-00: current 查询只用 $1(时间) + $2(部门)；previous 用 $1+$2(周期末)+$3(部门)。
+    // 此前 currentParams 夹带 '已整改' 字面量，参数数 > 占位符，pg 报错 → current 指标恒为 0。
     const currentParams = departmentId
-      ? [currentStart.toISOString(), '已整改', departmentId]
-      : [currentStart.toISOString(), '已整改'];
+      ? [currentStart.toISOString(), departmentId]
+      : [currentStart.toISOString()];
     const previousParams = departmentId
       ? [previousStart.toISOString(), previousEnd.toISOString(), departmentId]
       : [previousStart.toISOString(), previousEnd.toISOString()];
@@ -118,32 +120,33 @@ router.get('/metrics', async (req, res) => {
     const metricQueries = [
       {
         key: 'hazards_total',
-        currentSql: `SELECT COUNT(*)::int AS cnt FROM hazards WHERE created_at >= $1${departmentId ? ' AND department = $3' : ''}`,
+        currentSql: `SELECT COUNT(*)::int AS cnt FROM hazards WHERE created_at >= $1${departmentId ? ' AND department = $2' : ''}`,
         previousSql: `SELECT COUNT(*)::int AS cnt FROM hazards WHERE created_at >= $1 AND created_at < $2${departmentId ? ' AND department = $3' : ''}`
       },
       {
         key: 'hazards_fixed',
-        currentSql: `SELECT COUNT(*)::int AS cnt FROM hazards WHERE created_at >= $1 AND status = '已整改'${departmentId ? ' AND department = $3' : ''}`,
-        previousSql: `SELECT COUNT(*)::int AS cnt FROM hazards WHERE created_at >= $1 AND created_at < $2 AND status = '已整改'${departmentId ? ' AND department = $3' : ''}`
+        // P3-04-00 (W9/SAFE-04): 已整改 KPI 只统计 canonical closed，不再使用 已整改/已验收 伪生命周期值
+        currentSql: `SELECT COUNT(*)::int AS cnt FROM hazards WHERE created_at >= $1 AND status = 'closed'${departmentId ? ' AND department = $2' : ''}`,
+        previousSql: `SELECT COUNT(*)::int AS cnt FROM hazards WHERE created_at >= $1 AND created_at < $2 AND status = 'closed'${departmentId ? ' AND department = $3' : ''}`
       },
       {
         key: 'accidents_total',
-        currentSql: `SELECT COUNT(*)::int AS cnt FROM accidents WHERE occurred_at >= $1${departmentId ? ' AND department = $3' : ''}`,
+        currentSql: `SELECT COUNT(*)::int AS cnt FROM accidents WHERE occurred_at >= $1${departmentId ? ' AND department = $2' : ''}`,
         previousSql: `SELECT COUNT(*)::int AS cnt FROM accidents WHERE occurred_at >= $1 AND occurred_at < $2${departmentId ? ' AND department = $3' : ''}`
       },
       {
         key: 'accidents_pending',
-        currentSql: `SELECT COUNT(*)::int AS cnt FROM accidents WHERE occurred_at >= $1 AND status IN ('待处理','处理中')${departmentId ? ' AND department = $3' : ''}`,
+        currentSql: `SELECT COUNT(*)::int AS cnt FROM accidents WHERE occurred_at >= $1 AND status IN ('待处理','处理中')${departmentId ? ' AND department = $2' : ''}`,
         previousSql: `SELECT COUNT(*)::int AS cnt FROM accidents WHERE occurred_at >= $1 AND occurred_at < $2 AND status IN ('待处理','处理中')${departmentId ? ' AND department = $3' : ''}`
       },
       {
         key: 'training_count',
-        currentSql: `SELECT COUNT(*)::int AS cnt FROM training_records WHERE training_date >= $1${departmentId ? ' AND department = $3' : ''}`,
+        currentSql: `SELECT COUNT(*)::int AS cnt FROM training_records WHERE training_date >= $1${departmentId ? ' AND department = $2' : ''}`,
         previousSql: `SELECT COUNT(*)::int AS cnt FROM training_records WHERE training_date >= $1 AND training_date < $2${departmentId ? ' AND department = $3' : ''}`
       },
       {
         key: 'sanwei_count',
-        currentSql: `SELECT COUNT(*)::int AS cnt FROM sanwei_violations WHERE violation_date >= $1${departmentId ? ' AND department = $3' : ''}`,
+        currentSql: `SELECT COUNT(*)::int AS cnt FROM sanwei_violations WHERE violation_date >= $1${departmentId ? ' AND department = $2' : ''}`,
         previousSql: `SELECT COUNT(*)::int AS cnt FROM sanwei_violations WHERE violation_date >= $1 AND violation_date < $2${departmentId ? ' AND department = $3' : ''}`
       }
     ];
@@ -305,8 +308,15 @@ router.get('/alerts', async (req, res) => {
     }
 
     if (status) {
+      // P3-04-00: 入参状态归一为 canonical（仅读过滤，不写库）
+      const statusMap = {
+        new: 'discovered', processing: 'processing', resolved: 'closed',
+        '待处理': 'discovered', '未完成': 'discovered',
+        '处理中': 'processing', '整改中': 'processing', '发现': 'discovered',
+        '已关闭': 'closed', '已完成': 'closed', '已整改': 'closed', '已验收': 'closed', '关闭': 'closed',
+      };
       conditions.push(`status = $${paramIdx++}`);
-      params.push(status);
+      params.push(statusMap[status] || status);
     }
 
     if (keyword) {
@@ -481,36 +491,19 @@ router.get('/export', async (req, res) => {
   }
 });
 
-// ========= 6. PATCH /alerts/:id/status — 更新告警状态 =========
+// ========= 6. PATCH /alerts/:id/status — 已禁用直接改写隐患生命周期 =========
 
 router.patch('/alerts/:id/status', async (req, res) => {
+  // P3-04-00 (W9/SAFE-03): 该接口曾允许客户端传中文白名单直接 UPDATE hazards.status，
+  // 是绕过状态机的高危入口。现一律拒绝；状态必须经
+  // /api/hazards/:id/rectify|submit-review|review|close 受控业务动作变更。
   try {
-    const id = parseInt(req.params.id);
-    const { status } = req.body;
-
-    if (!id || !status) {
+    const { status } = req.body || {};
+    if (!status) {
       return res.status(400).json(error(400, '缺少必填参数'));
     }
-
-    const validStatus = ['待处理', '处理中', '已关闭', '已整改', '已验收'];
-    if (!validStatus.includes(status)) {
-      return res.status(400).json(error(400, `无效状态值: ${status}`));
-    }
-
-    if (!isConnected()) {
-      return res.json(success({ id, status }, '操作成功(内存模式)'));
-    }
-
-    const result = await safeQuery(
-      'UPDATE hazards SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING id, status',
-      [status, id]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json(error(404, '记录不存在'));
-    }
-
-    res.json(success(result.rows[0], '状态更新成功'));
+    return res.status(409).json(error(409,
+      '该接口不再允许直接修改隐患生命周期状态；请通过隐患闭环业务动作（rectify/submit-review/review/close）变更'));
   } catch (err) {
     console.error('[Dashboard /alerts/status] 更新失败:', err.message);
     res.status(500).json(error(500, '服务器内部错误'));

@@ -14,7 +14,19 @@ const express = require('express');
 const router = express.Router();
 const { success, error } = require('../middleware/response');
 const { pool, isConnected } = require('../config/db');
-const { broadcastAlertUpdate, broadcastAlertResolve } = require('../services/wsServer');
+const { broadcastAlertUpdate } = require('../services/wsServer');
+const hazardService = require('../services/hazardService');
+const { HAZARD_STATUS } = hazardService;
+
+/**
+ * P3-04-00: 解包 hazardService 描述符（{__t:'json', payload|error}）。
+ * 告警写操作一律委托隐患服务，禁止本路由直接 UPDATE hazards.status。
+ */
+function unwrapServiceResult(r) {
+  if (!r || r.__t !== 'json') return { ok: false, message: '服务无返回' };
+  if (r.error) return { ok: false, code: r.error.code, message: r.error.message };
+  return { ok: true, payload: r.payload, message: r.message };
+}
 
 /**
  * GET /alerts
@@ -41,7 +53,12 @@ router.get('/', async (req, res, next) => {
       params.push(levelMap[level] || level);
     }
     if (status) {
-      const statusMap = { new: '待处理', processing: '处理中', resolved: '已关闭' };
+      // P3-04-00: 告警 code 翻译为 canonical 生命周期值（不再使用中文词）
+      const statusMap = {
+        new: HAZARD_STATUS.DISCOVERED,
+        processing: HAZARD_STATUS.PROCESSING,
+        resolved: HAZARD_STATUS.CLOSED,
+      };
       conditions.push(`status = $${paramIdx++}`);
       params.push(statusMap[status] || status);
     }
@@ -108,9 +125,9 @@ router.get('/stats', async (req, res, next) => {
     const result = await pool.query(`
       SELECT
         COUNT(*)::int AS total,
-        COUNT(*) FILTER (WHERE status = '待处理')::int AS pending,
-        COUNT(*) FILTER (WHERE status = '处理中')::int AS processing,
-        COUNT(*) FILTER (WHERE status = '已关闭')::int AS resolved,
+        COUNT(*) FILTER (WHERE status = 'discovered')::int AS pending,
+        COUNT(*) FILTER (WHERE status IN ('processing','pending_review'))::int AS processing,
+        COUNT(*) FILTER (WHERE status = 'closed')::int AS resolved,
         COUNT(*) FILTER (WHERE level = '严重')::int AS critical,
         COUNT(*) FILTER (WHERE level = '警告')::int AS warning,
         COUNT(*) FILTER (WHERE level = '提示')::int AS info
@@ -154,10 +171,10 @@ router.get('/statistics', async (req, res, next) => {
     const result = await pool.query(`
       SELECT
         COUNT(*)::int AS total_alerts,
-        COUNT(*) FILTER (WHERE status = '待处理')::int AS pending_count,
-        COUNT(*) FILTER (WHERE status = '处理中')::int AS processing_count,
-        COUNT(*) FILTER (WHERE status = '已关闭')::int AS resolved_count,
-        COUNT(*) FILTER (WHERE status = '已关闭')::int AS closed_count,
+        COUNT(*) FILTER (WHERE status = 'discovered')::int AS pending_count,
+        COUNT(*) FILTER (WHERE status IN ('processing','pending_review'))::int AS processing_count,
+        COUNT(*) FILTER (WHERE status = 'closed')::int AS resolved_count,
+        COUNT(*) FILTER (WHERE status = 'closed')::int AS closed_count,
         COUNT(*) FILTER (WHERE level = '严重')::int AS critical_count,
         COUNT(*) FILTER (WHERE level = '警告')::int AS high_count,
         COUNT(*) FILTER (WHERE level = '提示')::int AS medium_count,
@@ -272,7 +289,12 @@ router.get('/export', async (req, res, next) => {
       params.push(levelMap[level] || level);
     }
     if (status) {
-      const statusMap = { new: '待处理', processing: '处理中', resolved: '已关闭' };
+      // P3-04-00: 告警 code 翻译为 canonical 生命周期值（不再使用中文词）
+      const statusMap = {
+        new: HAZARD_STATUS.DISCOVERED,
+        processing: HAZARD_STATUS.PROCESSING,
+        resolved: HAZARD_STATUS.CLOSED,
+      };
       conditions.push(`status = $${paramIdx++}`);
       params.push(statusMap[status] || status);
     }
@@ -349,27 +371,37 @@ router.get('/:id', async (req, res, next) => {
 router.post('/:id/process', async (req, res, next) => {
   try {
     const id = parseInt(req.params.id);
-    const { remark } = req.body;
+    const { remark } = req.body || {};
 
     if (!isConnected()) {
       return res.json(success(null, '告警处理成功(内存模式)'));
     }
 
-    const result = await pool.query(
-      'UPDATE hazards SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING id, title, level, status',
-      ['处理中', id]
+    const exists = await pool.query(
+      'SELECT 1 FROM hazards WHERE id = $1 AND is_deleted = false',
+      [id]
     );
-
-    if (result.rows.length === 0) {
+    if (exists.rows.length === 0) {
       return res.status(404).json(error(404, '告警不存在'));
     }
 
-    // 通过 WebSocket 推送状态更新
-    broadcastAlertUpdate(id, { status: 'processing', handlerRemark: remark });
+    // P3-04-00 (W7): 不再裸写中文 '处理中'。
+    // 委托隐患闭环业务动作 rectify（守卫 discovered → processing），保证 canonical 词汇与状态机。
+    const r = await hazardService.rectify({ id }, { rectification: remark }, req);
+    const d = unwrapServiceResult(r);
+    if (!d.ok) {
+      return res.status(409).json(error(409, d.message || '当前状态不允许处理'));
+    }
+
+    // 以数据库真实值为准（hazardService.formatRow 不返回 status）
+    const fresh = await pool.query('SELECT status FROM hazards WHERE id = $1', [id]);
+    const canonical = fresh.rows[0] ? fresh.rows[0].status : null;
+    broadcastAlertUpdate(id, { status: canonical, handlerRemark: remark });
 
     res.json(success({
-      id: result.rows[0].id,
-      status: 'processing',
+      id,
+      status: mapStatusToCode(canonical),
+      hazardStatus: canonical,
     }, '告警处理成功'));
   } catch (err) {
     console.error('[Alerts] 处理失败:', err.message);
@@ -384,27 +416,37 @@ router.post('/:id/process', async (req, res, next) => {
 router.post('/:id/resolve', async (req, res, next) => {
   try {
     const id = parseInt(req.params.id);
-    const { remark } = req.body;
+    const { remark } = req.body || {};
 
     if (!isConnected()) {
       return res.json(success(null, '告警已解决(内存模式)'));
     }
 
-    const result = await pool.query(
-      'UPDATE hazards SET status = $1, resolved_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING id, title, level, status',
-      ['已关闭', id]
+    const exists = await pool.query(
+      'SELECT 1 FROM hazards WHERE id = $1 AND is_deleted = false',
+      [id]
     );
-
-    if (result.rows.length === 0) {
+    if (exists.rows.length === 0) {
       return res.status(404).json(error(404, '告警不存在'));
     }
 
-    // 通过 WebSocket 推送解决状态
-    broadcastAlertResolve(id);
+    // P3-04-00 (W8): 不再裸写中文 '已关闭'，也不再写不存在的 resolved_at 列。
+    // 委托隐患闭环业务动作 close（守卫 仅 pending_review → closed）。
+    // 正确链路：rectify → submit-review → resolve(close)；禁止 processing 直接关闭。
+    const r = await hazardService.close({ id }, { closeNote: remark }, req);
+    const d = unwrapServiceResult(r);
+    if (!d.ok) {
+      return res.status(409).json(error(409, d.message || '当前状态不允许关闭（需先提交复查）'));
+    }
+
+    const fresh = await pool.query('SELECT status FROM hazards WHERE id = $1', [id]);
+    const canonical = fresh.rows[0] ? fresh.rows[0].status : null;
+    broadcastAlertUpdate(id, { status: canonical });
 
     res.json(success({
-      id: result.rows[0].id,
-      status: 'resolved',
+      id,
+      status: mapStatusToCode(canonical),
+      hazardStatus: canonical,
     }, '告警已解决'));
   } catch (err) {
     console.error('[Alerts] 解决失败:', err.message);
@@ -422,8 +464,21 @@ function mapLevelToCode(level) {
 }
 
 function mapStatusToCode(status) {
-  const map = { '待处理': 'new', '处理中': 'processing', '已关闭': 'resolved', '已整改': 'resolved', '已验收': 'resolved' };
-  return map[status] || 'new';
+  // canonical → 告警 code
+  const canonical = {
+    [HAZARD_STATUS.DISCOVERED]: 'new',
+    [HAZARD_STATUS.PROCESSING]: 'processing',
+    [HAZARD_STATUS.PENDING_REVIEW]: 'processing',
+    [HAZARD_STATUS.CLOSED]: 'resolved',
+  };
+  if (canonical[status]) return canonical[status];
+  // 历史/幽灵值：仅展示识别，绝不作为写入依据；未知值返回 unknown（不猜测为合法态）
+  const displayOnly = {
+    '待处理': 'new', '未完成': 'new',
+    '处理中': 'processing', '整改中': 'processing', '待复查': 'processing',
+    '已关闭': 'resolved', '已完成': 'resolved', '已整改': 'resolved', '已验收': 'resolved', '关闭': 'resolved',
+  };
+  return displayOnly[status] || 'unknown';
 }
 
 module.exports = router;
