@@ -471,9 +471,23 @@ L6 综合分析与智能
 
 | 日期 | WORK | Commit SHA | 分支 | 内容 | Push |
 |---|---|---|---|---|---|
-| 2026-10-27 | WORK-001 | 见下方「WORK-001 提交」 | `feat/hse-business-closure` | 3 份架构基线文档（新增） | 见下方 |
+| 2026-10-27 | WORK-001 | `363aee037b4527e9c0f1a578f84136ded7c2ca02`（简写 `363aee0`） | `feat/hse-business-closure` | 3 份架构基线文档（新增），1758 行，仅 `docs/架构基线/` 下 3 个文件 | ✅ 成功：`a02aab0..363aee0` |
 
-> WORK-001 提交 SHA 与 push 结果在完成后回填。
+### WORK-001 提交明细
+
+| 项 | 值 |
+|---|---|
+| 分支 | `feat/hse-business-closure` |
+| 内容提交 SHA | `363aee037b4527e9c0f1a578f84136ded7c2ca02`（`363aee0`） |
+| 提交时间 | 2026-10-27 13:16:59 +0800 |
+| 变更文件 | `docs/架构基线/HSE平台总体业务架构基线_V1.0.md`（866 行）<br>`docs/架构基线/HSE平台架构决策与工作日志.md`（485 行）<br>`docs/架构基线/HSE平台模块实施状态总表.md`（407 行） |
+| 合计 | 3 files changed, 1758 insertions(+) |
+| Push | 成功：`a02aab0..363aee0  feat/hse-business-closure -> feat/hse-business-closure` |
+| 提交范围控制 | 使用 `git commit -- <3 个路径>`，**未暂存/未提交**任何其他 dirty 文件；执行前已存在的 `server/routes/cost.js`（`A `）保持原暂存状态未动 |
+| 工作区影响 | dirty 文件数 229 → 229（完全相同）；`docs/191副/project_memory.md` blob 前后均为 `0e0e178…` |
+| 本次表格 SHA 回填 | 在上表内容提交之后追加的一次纯文档回填提交（内容仅本行与上表），不复改已推送的内容提交 |
+
+> 说明：架构决策日志需要在提交后回填 SHA，因此必然产生一次"回填提交"。回填提交只改本文件的《提交记录》表，不触碰另外两份文档。
 
 ---
 
