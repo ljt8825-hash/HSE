@@ -1,0 +1,44 @@
+﻿审查维度,对象,状态,目标或落点,关键证据,与B03-01-C的差异,差异原因,处置建议
+P1_幂等载体,方案A 专用映射表 hazard_sync_map,RECOMMENDED,"新建表；UNIQUE(app_token,table_id,record_id)+UNIQUE(pg_hazard_id)",B03-01-D-0 §3.2/§3.3；grid_record_sync_map 2061 行先例,新增,本轮首次提出,推荐采用：hazards 零改动、可承载子对象、可整体回滚
+P1_幂等载体,方案B hazards 增列+部分唯一索引,NOT_RECOMMENDED,source_system+source_record_id + 部分唯一索引,hazards 46 列/0 UNIQUE/110 行；formatRow 单表读取,新增,本轮首次提出,不采用：无法表达 1:N 子对象幂等；DDL 触碰核心表
+P1_幂等载体,方案C 通用注册表 external_record_map,ALTERNATIVE,"(source_system,source_table,source_record_id,target_table,target_id)",一期仅 1 源 1 目标；无先例,新增,本轮首次提出,暂不采用：target_table 无法被 DB 约束，引用完整性降级
+P1_幂等载体,复用 grid_record_sync_map,REJECTED,—,"该表键=(wps_record_id,wps_file_id)；pg_record_id=integer；0 FK；无子对象位；hash 口径为 WPS 18 列冻结",新增,本轮首次提出,不可复用，仅借鉴受保护列断言/单事务双写/hash 跳过
+P1_幂等载体,子对象幂等：rect_code / review_code,USABLE_NO_DDL,RECT-FS-{record_id} / REV-FS-{record_id},hse_rectifications.rect_code UNIQUE NOT NULL；hse_reviews.review_code UNIQUE NOT NULL,新增,本轮首次提出,仅在业务裁决允许生成子对象行时启用
+P4_字段映射复核,01 多行文本,NOT_APPLICABLE,—,fldPMfL7wZ 主字段；源码 0 引用；0/2,无,主字段不可删不可写,忽略
+P4_字段映射复核,02 隐患编号,UNMAPPED,无（缺列）,newHazardNo() index.js:3115-3120（UTC+4随机）；2/2,无,hazards 无 code 类列,禁作主键/历史合并键；如需展示另加 display_no
+P4_字段映射复核,03 排查人ID,CONFIRMED,hazards.checker_id,"sub=identity.phone index.js:940,1077 -> :3313；2/2",无,—,必须 HMAC->phone_hash 唯一命中才写；未命中 NULL
+P4_字段映射复核,04 排查人姓名,PARTIAL,hazards.checker,index.js:3314；文本快照,无,无身份保证,仅作文本快照，禁作匹配依据
+P4_字段映射复核,05 排查人部门,NOT_APPLICABLE,—,index.js:3315；恒为「安环管理部」,无,hazardGate 硬校验 index.js:3108,不落：常量列，误用即伪组织维度
+P4_字段映射复核,06 排查人职位,UNMAPPED,无（post_name 为死列）,index.js:3316；2/2,无,无可复用活列,不落；以 employee.roster_position 为准
+P4_字段映射复核,07 排查时间,CONDITIONAL,hazards.hazard_date,index.js:3317；2/2,无,源为 YYYY-MM-DD HH:MM 文本,归一为 date，原串进审计；时区见 V-项
+P4_字段映射复核,08 隐患类别,CONDITIONAL,hazards.hazard_type,index.js:3217-3220；11 值闭集；2/2,无,DEC-16 未裁,只取用户选择；AI 原始值另存，禁覆盖
+P4_字段映射复核,09 隐患级别,CONFIRMED,hazards.hazard_level,index.js:3318；2/2,新增风险,目标列历史 0/110 填充,首次填充会使 overview.js:163 byLevel 统计突变，需提前告知业务
+P4_字段映射复核,10 隐患位置,CONFIRMED,hazards.location,index.js:3227；自由文本<=100；2/2,无,DEC-17 未裁,location_raw 必写非空（DB 可空，靠契约强制）
+P4_字段映射复核,11 隐患描述,CONFIRMED,hazards.description,index.js:3319；2/2,无,—,唯一必填业务字段；历史 110 行唯一连接点
+P4_字段映射复核,12 纬度,UNMAPPED,无（缺列）,"index.js:3241,3324；2/2",无,hazards 无列,原始证据，不可重算；需增 geo_lat 或 B-04 降级
+P4_字段映射复核,13 经度,UNMAPPED,无（缺列）,"index.js:3242,3325；2/2",无,hazards 无列,原始证据，不可重算；需增 geo_lng 或 B-04 降级
+P4_字段映射复核,14 现场照片,PARTIAL,hazard_attachments（表存在，承载槽不足）,index.js:3244-3251；2/2 各 1 张；hazard_attachments 13 列/0 行/仅 PK,原 UNMAPPED -> PARTIAL,hazard_attachments 实际存在（hazardsService.js:47-63），C 记「无附件列」有误,缺 token 列/方向列/幂等键；file_url NOT NULL 不可塞 token
+P4_字段映射复核,15 处理状态,CONDITIONAL,hazards.status,"index.js:2954,2962,2963；只产 3 值；2/2",无（风险升级）,PG 4 态 vs Feishu 3 态；M5/M6/M9 禁止映射,一期建议不写 status；见 B-03/B-06
+P4_字段映射复核,16 备注,PARTIAL,hazards.remark（建议不写）,index.js:3321 值恒为 req:<cid>；2/2,无,值为内部幂等 token,写库等于把内部 token 当业务备注；建议剔出白名单
+P4_字段映射复核,17 创建时间,NOT_APPLICABLE,不写 created_at,type=5 DateTime auto_fill=true；2/2,无,平台自动填充,忽略；用 PG created_at
+P4_字段映射复核,18 整改人ID,CONDITIONAL,hse_rectifications.responsible_person_id,assign index.js:3691-3694；0/2,无,DEC-04 未裁,仅在有整改事实时建行；身份桥同上
+P4_字段映射复核,19 整改人姓名,CONDITIONAL,hse_rectifications.responsible_person_name,assign index.js:3695；0/2,无,DEC-04 未裁,快照文本
+P4_字段映射复核,20 整改人部门,CONDITIONAL,hse_rectifications.department_id,assign index.js:3696；恒为安环管理部；0/2,无,DEC-04/DEC-18 未裁,常量；H7 名称一致性风险见 §7.2
+P4_字段映射复核,21 指派人ID,UNMAPPED,无（created_by 语义不同）,assign index.js:3697；0/2,无,无列,业务证据（责任链）；需 assigner_id 或 B-04 降级
+P4_字段映射复核,22 指派人姓名,UNMAPPED,无（缺列）,assign index.js:3698；0/2,无,无列,业务证据；需 assigner_name
+P4_字段映射复核,23 指派时间,UNMAPPED,无（started_at 不是指派）,assign index.js:3699；0/2,无,语义不同,业务证据（时限依据）；需 assigned_at
+P4_字段映射复核,24 整改期限,CONDITIONAL,hse_rectifications.deadline,assign index.js:3652-3654；>=今天且<=365天；0/2,无,text -> timestamptz,日期归一
+P4_字段映射复核,25 整改说明,CONDITIONAL,hse_rectifications.measure,"rectify index.js:3805,3838；0/2",无,measure text NOT NULL,无说明时不建整改行，不塞空串（T-07）
+P4_字段映射复核,26 整改提交时间,CONDITIONAL,hse_rectifications.completed_at,rectify index.js:3836；0/2,无,DEC-04 未裁,—
+P4_字段映射复核,27 整改后照片,PARTIAL,hazard_attachments（承载槽不足）,rectify index.js:3834-3839；submit :3328-3329；0/2,原 UNMAPPED -> PARTIAL,同 #14,同 #14
+P4_字段映射复核,28 验收人,PARTIAL,hse_reviews.reviewer_name,"review index.js:3905,3911（仅姓名）；0/2",无,无手机号/ID,禁姓名兜底匹配（红线4）
+P4_字段映射复核,29 验收时间,CONDITIONAL,hse_reviews.review_date,review index.js:3912；0/2,无,DEC-04 未裁,—
+P4_字段映射复核,30 验收结论,CONDITIONAL,hse_reviews.comment + result 前缀派生,"review index.js:3887,3914,3922（通过:/打回:）；0/2",无,存在第三种文案（登记即闭环）,第三种不得派生 pass/fail，不得生成 review 行（B-05）
+P4_字段映射复核,31 闭环时间,PARTIAL,hse_reviews.review_date（复用）,review(pass) :3913；submit :3330；0/2,无,无独立列,需独立 closed_at 或业务接受复用
+P4_字段映射复核,32 打回次数,UNMAPPED,无（缺列）,review(reject) :3921（旧值+1，上限99）；0/2,无,无列,业务证据；禁反推为多条 review 行（防伪造证据）
+P4_字段映射复核,33 整改依据,UNMAPPED,无（缺列）,"ai-fill :3263,3334（<=1000）；2/2",无,无列,派生（可由 #38 重算）；前提 #38 保留
+P4_字段映射复核,34 整改建议,UNMAPPED,无（缺列）,"ai-fill :3264,3335（<=1000）；2/2",无,无列,派生（可由 #38 重算）
+P4_字段映射复核,35 三违判定,UNMAPPED,无（缺列）,"ai-fill :3265-3266,3336（是/否）；2/2",无,无列；文本列无约束,业务判定（跨域）；禁并入 violation_records
+P4_字段映射复核,36 重大事故隐患判定,UNMAPPED,无（缺列）,"ai-fill :3267-3268,3337（是/否）；2/2",无,无列,业务判定（法定）；禁并入 hazard_level
+P4_字段映射复核,37 风险等级,CONFIRMED,hazards.risk_level,"ai-fill :3269,3338；2/2",新增风险,目标列历史 0/110 填充,首次填充会激活 stats 的 risk_level IN 判定
+P4_字段映射复核,38 AI识别原始输出,UNMAPPED,无（缺列）,"ai-fill :3271,3339（<=4000 JSON）；2/2",无,无列,原始证据；DEC-16 唯一仲裁依据，不得丢弃
