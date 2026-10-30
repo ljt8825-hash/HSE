@@ -244,23 +244,27 @@ function parseFlexDate(v) {
 // 【B-1-P1-03-02】业务资格分类：正式员工专属（新签订人解析）——
 //   原注释自称"在职"但条件不充分（终态人段仍 active，P1-03-01 实证）；
 //   现叠加花名册正式员工资格（formalEmployeeEligibilitySql），NULL/终态一律拒绝。
+// 【B-1-P1-03-02-R1-01】修复：四条查询统一 FROM v_employee_current ev 别名——
+//   原实现 formalEmployeeEligibilitySql('ev') 引用 ev.employee_id 而 FROM 未定义别名，
+//   运行时必报 "missing FROM-clause entry for table ev"。所有字段引用同步加 ev. 前缀；
+//   解析顺序（ID→工号→身份证→姓名）与唯一性判断（idCard/name 须恰好 1 行）保持不变。
 async function resolveSignee({ employeeId, employeeCode, name, idCard }) {
-  const base = "employee_deleted=false AND assignment_status='active' AND "
+  const base = "ev.employee_deleted=false AND ev.assignment_status='active' AND "
     + formalEmployeeEligibilitySql('ev');
   if (employeeId) {
-    const r = await pool.query(`SELECT employee_id, name, org_unit_id, org_name FROM v_employee_current WHERE ${base} AND employee_id=$1`, [employeeId]);
+    const r = await pool.query(`SELECT ev.employee_id, ev.name, ev.org_unit_id, ev.org_name FROM v_employee_current ev WHERE ${base} AND ev.employee_id=$1`, [employeeId]);
     if (r.rows.length) return r.rows[0];
   }
   if (employeeCode) {
-    const r = await pool.query(`SELECT employee_id, name, org_unit_id, org_name FROM v_employee_current WHERE ${base} AND employee_code ILIKE $1`, [String(employeeCode).trim()]);
+    const r = await pool.query(`SELECT ev.employee_id, ev.name, ev.org_unit_id, ev.org_name FROM v_employee_current ev WHERE ${base} AND ev.employee_code ILIKE $1`, [String(employeeCode).trim()]);
     if (r.rows.length) return r.rows[0];
   }
   if (idCard) {
-    const r = await pool.query(`SELECT employee_id, name, org_unit_id, org_name FROM v_employee_current WHERE ${base} AND id_card=$1`, [String(idCard).trim()]);
+    const r = await pool.query(`SELECT ev.employee_id, ev.name, ev.org_unit_id, ev.org_name FROM v_employee_current ev WHERE ${base} AND ev.id_card=$1`, [String(idCard).trim()]);
     if (r.rows.length === 1) return r.rows[0];
   }
   if (name) {
-    const r = await pool.query(`SELECT employee_id, name, org_unit_id, org_name FROM v_employee_current WHERE ${base} AND name=$1`, [String(name).trim()]);
+    const r = await pool.query(`SELECT ev.employee_id, ev.name, ev.org_unit_id, ev.org_name FROM v_employee_current ev WHERE ${base} AND ev.name=$1`, [String(name).trim()]);
     if (r.rows.length === 1) return r.rows[0];
   }
   return null;
@@ -2016,4 +2020,6 @@ module.exports = {
   committeeActivityFileInfo,
   // 内存单例（供测试/扩展引用，等价原 routes/objectives.js 的 mem）
   memoryStores: mem,
+  // 【B-1-P1-03-02-R1】内部函数导出（仅供单元测试行为验证；不改变任何既有接口语义）
+  resolveSignee,
 };

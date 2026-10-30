@@ -871,6 +871,24 @@ async function generateFromPending(body) {
       const empR = await pool.query('SELECT * FROM v_employee_current WHERE employee_id = $1', [id]);
       if (empR.rows.length === 0) { failed.push({ row: id, reason: 'employee_not_found', message: '人员不存在' }); continue; }
       const person = empR.rows[0];
+      // 【B-1-P1-03-02-R1-02】服务端正式员工资格校验（不得仅依赖 pendingList 前端筛选）：
+      //   客户端直接传入人员 ID 时同样拦截——非正式员工（辞职/死亡/退休/NULL 待核实/
+      //   其他关系值）一律不生成正式员工待参保记录；历史保单不改动；
+      //   逐人 continue，混合批次中合格人员不受单个不合格 ID 影响，失败原因逐人返回。
+      const relR = await pool.query(
+        'SELECT employment_relation FROM employee WHERE id = $1 AND is_deleted = false',
+        [id]
+      );
+      const rel = relR.rows.length ? relR.rows[0].employment_relation : undefined;
+      if (rel !== '正式员工') {
+        const relText = rel == null ? 'NULL（待核实）' : (String(rel).trim() === '' ? '空' : String(rel));
+        failed.push({
+          row: id,
+          reason: 'not_formal_employee',
+          message: `人员ID${id}: 非花名册正式员工（用工关系=${relText}），不生成正式员工待参保记录`,
+        });
+        continue;
+      }
       const match = _matchInsuranceRule(person);
       if (!match.matched) { failed.push({ row: id, reason: 'rule_not_matched', message: `人员${person.name}: 未匹配到规则` }); continue; }
       for (const rawType of (match.recommendedPlan.types || [])) {
