@@ -153,13 +153,13 @@ function paginate(arr, page, pageSize) {
 }
 
 function calcBudgetStatus(budgetAmt, spentAmt) {
-  if (!budgetAmt || budgetAmt <= 0) return { executionRate: 0, status: 'normal' };
+  if (!budgetAmt || budgetAmt <= 0) return { executionRate: 0, executionStatus: 'normal' };
   const rate = (spentAmt / budgetAmt) * 100;
   const warn = getBudgetWarningThreshold();
   let status = 'normal';
   if (rate >= 100) status = 'overspend';
   else if (rate >= warn) status = 'warning';
-  return { executionRate: Math.round(rate * 100) / 100, status };
+  return { executionRate: Math.round(rate * 100) / 100, executionStatus: status };
 }
 
 // ============================================================
@@ -338,7 +338,6 @@ function budgetToCamel(r) {
 function budgetToSnake(b) {
   const fieldMap = {
     budget_year: b.budgetYear ?? b.budget_year ?? b.year,
-    year: b.budgetYear ?? b.budget_year ?? b.year,
     category: b.category,
     department: b.department,
     project_name: b.projectName ?? b.project_name ?? b.itemName ?? b.item,
@@ -1306,7 +1305,7 @@ async function budgetStats(query) {
         const actual = (parseFloat(r.actual_quantity) || 0) * (parseFloat(r.actual_unit_price) || 0);
         return s + (spent > 0 ? spent / 10000 : actual);
       }, 0);
-      const warnItems = data.filter(r => calcBudgetStatus(r.budget_amount, r.spent_amount).status === 'warning').length;
+      const warnItems = data.filter(r => calcBudgetStatus(r.budget_amount, r.spent_amount).executionStatus === 'warning').length;
       return ok({ total: data.length, planTotal: Math.round(planTotal * 10000) / 10000, spentTotal: Math.round(spentTotal * 10000) / 10000, executionRate: planTotal > 0 ? Math.round((spentTotal / planTotal) * 100) : 0, warningItems: warnItems }, '统计(内存)');
     }
     await ensureTables();
@@ -1406,7 +1405,7 @@ async function budgetCreate(body) {
     const fm = budgetToSnake(b);
     const keys = Object.keys(fm);
     const r = await pool.query(`INSERT INTO hse_safety_budget(${keys.join(',')}) VALUES(${keys.map((_, i) => `$${i + 1}`).join(',')}) RETURNING *`, keys.map(k => fm[k]));
-    return ok(budgetToCamel(r.rows[0]), '创建成功');
+    return ok({ ...budgetToCamel(r.rows[0]), ...calcBudgetStatus(parseFloat(r.rows[0].budget_amount) || 0, parseFloat(r.rows[0].spent_amount) || 0) }, '创建成功');
   } catch (e) { return err(-1, e.message); }
 }
 
@@ -1433,7 +1432,7 @@ async function budgetUpdate(idRaw, body) {
     }
     params.push(id);
     const r = await pool.query(`UPDATE hse_safety_budget SET ${updates.join(',')}, updated_at=CURRENT_TIMESTAMP WHERE id=$${idx} RETURNING *`, params);
-    return r.rows.length ? ok(budgetToCamel(r.rows[0]), '更新成功') : err(-2, '不存在');
+    return r.rows.length ? ok({ ...budgetToCamel(r.rows[0]), ...calcBudgetStatus(parseFloat(r.rows[0].budget_amount) || 0, parseFloat(r.rows[0].spent_amount) || 0) }, '更新成功') : err(-2, '不存在');
   } catch (e) { return err(-1, e.message); }
 }
 

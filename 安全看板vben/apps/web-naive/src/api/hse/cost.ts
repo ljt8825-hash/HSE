@@ -123,6 +123,79 @@ export namespace CostApi {
       amount?: number | null;
     }>;
   }
+
+  /** 成本分摊（归因）记录 —— 契约：server/routes/cost/main.js /allocations */
+  export interface AllocationItem {
+    id: number;
+    costActualId: number | null;
+    requestId: number | null;
+    company: string | null;
+    bizDomainId: number | null;
+    opTypeId: number | null;
+    investCategoryId: number | null;
+    objectType: string | null;
+    objectId: number | null;
+    objectName: string | null;
+    eventType: string | null;
+    eventId: number | null;
+    eventName: string | null;
+    amount: number;
+    recordType: string;
+    remark: string | null;
+    createdAt?: string;
+    updatedAt?: string;
+  }
+
+  export interface AllocationParams {
+    page?: number;
+    pageSize?: number;
+    costActualId?: number;
+    requestId?: number;
+    bizDomainId?: number;
+  }
+
+  /**
+   * 新增分摊：costActualId + amount 为后端必填（costService.allocationCreate）。
+   * request_id 由服务端取「实际支出上的值」（防伪造错挂），不接受前端传入。
+   * 后端强制：追加后有效分摊净额必须恰好等于实际支出净额（不足/超额均拒绝）。
+   */
+  export interface AllocationCreate {
+    costActualId: number;
+    amount: number;
+    bizDomainId?: number | null;
+    opTypeId?: number | null;
+    investCategoryId?: number | null;
+    objectType?: string | null;
+    objectName?: string | null;
+    remark?: string | null;
+  }
+
+  /** 修改分摊：金额可选；后端事务内重算总额一致性，拒绝时原值保持 */
+  export interface AllocationUpdate {
+    amount?: number;
+    bizDomainId?: number | null;
+    opTypeId?: number | null;
+    investCategoryId?: number | null;
+    objectType?: string | null;
+    objectName?: string | null;
+    remark?: string | null;
+  }
+
+  /** 实际支出（分摊的关联对象）—— 契约：/actuals */
+  export interface CostActualItem {
+    id: number;
+    requestId: number | null;
+    commitmentId: number | null;
+    budgetId: number | null;
+    actualAmount: number;
+    actualDate: string | null;
+    fiscalMonth: string | null;
+    paymentMethod: string | null;
+    invoiceNo: string | null;
+    payee: string | null;
+    recordType: string;
+    remark: string | null;
+  }
 }
 
 export function getBudgetOverview(params: CostApi.BudgetOverviewParams) {
@@ -185,4 +258,37 @@ export function confirmBudgetImport(file: File, batchNo: string) {
   return requestClient.post<CostApi.BudgetImportConfirmResult>('/cost/budgets/import', formData, {
     headers: { 'Content-Type': undefined as any },
   });
+}
+
+// ===================== 成本分摊（归因） =====================
+
+/** 分摊列表（可按实际支出/费用申请/业务领域过滤；仅返回未删除记录） */
+export function getAllocations(params: CostApi.AllocationParams) {
+  return requestClient.get<{ list: CostApi.AllocationItem[]; total: number }>('/cost/allocations', { params });
+}
+
+/**
+ * 新增分摊：必须关联实际支出(costActualId)。后端为最终裁判——
+ * 事务内锁定实际支出，强制「追加后有效分摊净额 == 实际支出净额」，
+ * 不足/超额一律拒绝（HTTP 200 + body code<0 + 可读 message）。
+ */
+export function createAllocation(data: CostApi.AllocationCreate) {
+  return requestClient.post<CostApi.AllocationItem>('/cost/allocations', data);
+}
+
+/** 修改分摊：后端重算总额一致性；被拒时事务回滚、原值保持 */
+export function updateAllocation(id: number, data: CostApi.AllocationUpdate) {
+  return requestClient.put<CostApi.AllocationItem>(`/cost/allocations/${id}`, data);
+}
+
+/** 删除分摊（软删除）：计划归因可删；已参与实际归因的后端拒绝 */
+export function deleteAllocation(id: number) {
+  return requestClient.delete(`/cost/allocations/${id}`);
+}
+
+// ===================== 实际支出（分摊表单上下文） =====================
+
+/** 实际支出列表：分摊新增时选择关联对象（pageSize 上限 200） */
+export function getCostActuals(params: { page?: number; pageSize?: number; requestId?: number } = {}) {
+  return requestClient.get<{ list: CostApi.CostActualItem[]; total: number }>('/cost/actuals', { params });
 }

@@ -169,6 +169,16 @@ const STATUS_TEXT: Record<string, string> = {
   executing: '执行中',
   completed: '已完成',
 };
+const EXECUTION_STATUS_TEXT: Record<string, string> = {
+  normal: '正常',
+  warning: '预警',
+  overspend: '超标',
+};
+const EXECUTION_STATUS_TAG: Record<string, 'success' | 'warning' | 'danger' | 'neutral'> = {
+  normal: 'success',
+  warning: 'warning',
+  overspend: 'danger',
+};
 const USE_STATUS_TAG: Record<string, 'success' | 'warning' | 'info' | 'neutral'> = {
   已支出: 'success',
   申请中: 'warning',
@@ -668,6 +678,11 @@ onMounted(() => {
           <NDescriptionsItem label="状态">
             <HseStatusTag :type="STATUS_TAG[currentBudget.status] || 'neutral'">
               {{ STATUS_TEXT[currentBudget.status] || currentBudget.status || '-' }}
+            </HseStatusTag>
+          </NDescriptionsItem>
+          <NDescriptionsItem label="执行健康度">
+            <HseStatusTag :type="EXECUTION_STATUS_TAG[currentBudget.executionStatus] || 'neutral'">
+              {{ EXECUTION_STATUS_TEXT[currentBudget.executionStatus] || currentBudget.executionStatus || '-' }}
             </HseStatusTag>
           </NDescriptionsItem>
           <NDescriptionsItem label="备注" :span="2">{{ currentBudget.remark || '-' }}</NDescriptionsItem>

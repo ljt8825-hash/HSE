@@ -427,6 +427,7 @@ export namespace BudgetApi {
     useStatus: string;
     department: string;
     status: string;
+    executionStatus?: string;
     remark: string;
     createdAt?: string;
     updatedAt?: string;

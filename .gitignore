@@ -498,3 +498,6 @@ server/.dev-runtime/
 outputs/
 # server 级临时脚本与运行时目录
 server/_tmp/
+
+# P3-05-03-04：迁移备份目录（pg_dump 含全库数据与凭据，禁入版本库；仓库 PUBLIC）
+/_migration_backups/

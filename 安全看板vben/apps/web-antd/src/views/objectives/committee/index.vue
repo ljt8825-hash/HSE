@@ -46,11 +46,13 @@
                 style="width: 120px"
                 @change="handleSearch"
               >
-                <SelectOption value="在职">在职</SelectOption>
-                <SelectOption value="离职">离职</SelectOption>
-                <SelectOption value="待岗">待岗</SelectOption>
-                <SelectOption value="退休">退休</SelectOption>
-                <SelectOption value="返聘">返聘</SelectOption>
+                <SelectOption
+                  v-for="opt in COMMITTEE_STATUS_FILTER_OPTIONS"
+                  :key="opt.value"
+                  :value="opt.value"
+                >
+                  {{ opt.label }}
+                </SelectOption>
               </Select>
             </FormItem>
             <FormItem>
@@ -77,8 +79,8 @@
           >
             <template #bodyCell="{ column, record }">
               <template v-if="column.key === 'status'">
-                <Tag :color="getStatusColor((record as any).org_status)">
-                  {{ statusLabel((record as any).org_status) }}
+                <Tag :color="orgStatusColor((record as any).org_status)">
+                  {{ orgStatusLabel((record as any).org_status) }}
                 </Tag>
               </template>
               <template v-else-if="column.key === 'action'">
@@ -99,8 +101,8 @@
               <DescriptionsItem label="性别">{{ currentItem.gender || '-' }}</DescriptionsItem>
               <DescriptionsItem label="年龄">{{ currentItem.age ?? '-' }}</DescriptionsItem>
               <DescriptionsItem label="状态">
-                <Tag :color="getStatusColor(currentItem.org_status)">
-                  {{ statusLabel(currentItem.org_status) }}
+                <Tag :color="orgStatusColor(currentItem.org_status)">
+                  {{ orgStatusLabel(currentItem.org_status) }}
                 </Tag>
               </DescriptionsItem>
             </Descriptions>
@@ -289,6 +291,12 @@ import dayjs from 'dayjs';
 import HseStatCard from '#/components/hse/StatCard.vue';
 import { getEmployeeList, type EmployeeApi } from '#/api/hse/employee';
 import {
+  COMMITTEE_STATUS_FILTER_OPTIONS,
+  orgStatusColor,
+  orgStatusLabel,
+  toOrgStatusParam,
+} from '#/api/hse/employee-status';
+import {
   getCommitteeActivityList,
   createCommitteeActivity,
   updateCommitteeActivity,
@@ -306,31 +314,10 @@ const activeTab = ref<'personnel' | 'committee'>('personnel');
 // ===== Tab1：安全人员（花名册只读） =====
 const ROSTER_DEPT = '安环管理部';
 
-const STATUS_LABEL: Record<string, string> = {
-  active: '在职',
-  left: '离职',
-  pending: '待岗',
-  retired: '退休',
-  rehire: '返聘',
-};
-const STATUS_VALUE: Record<string, string> = {
-  在职: 'active',
-  离职: 'left',
-  待岗: 'pending',
-  退休: 'retired',
-  返聘: 'rehire',
-};
-function statusLabel(s?: string): string {
-  if (!s) return '-';
-  return STATUS_LABEL[s] || s;
-}
-function getStatusColor(s?: string): string {
-  if (!s) return 'default';
-  const key = STATUS_LABEL[s] ? s : STATUS_VALUE[s];
-  if (key === 'active' || key === '在职') return 'green';
-  if (key === 'left' || key === '离职') return 'red';
-  return 'orange';
-}
+// A-02d.3（B02-DEC-03.17 P2/P4）：状态标签、颜色与筛选项统一收口到 `#/api/hse/employee-status`
+//   - 筛选项 value 改为后端编码（原实现以中文标签作为 value，再经只有 5 个中文键的映射反查，
+//     A-02d 新增的中间态在中国标签侧无对应键 ⇒ 参数变 undefined、筛选被静默丢弃）
+//   - 「返聘」查询编码由历史别名 rehire 纠正为后端正式编码 reinstated（原值查询恒空）
 
 const loading = ref(false);
 const statsLoading = ref(false);
@@ -372,12 +359,17 @@ async function fetchData() {
   loading.value = true;
   statsLoading.value = true;
   try {
+    // A-02d.3：status 直接使用编码；未登记的值显式提示，不再静默丢弃筛选条件
+    const statusParam = toOrgStatusParam(searchForm.status);
+    if (searchForm.status && !statusParam) {
+      message.warning(`未知的状态筛选值「${searchForm.status}」，已忽略该筛选条件`);
+    }
     const res = await getEmployeeList({
       page: pagination.page,
       pageSize: pagination.pageSize,
       keyword: searchForm.keyword || undefined,
       deptName: ROSTER_DEPT,
-      status: searchForm.status ? (STATUS_VALUE[searchForm.status] as EmployeeApi.OrgStatus) : undefined,
+      status: statusParam as EmployeeApi.OrgStatus | undefined,
     });
     personnelList.value = res.list || [];
     total.value = res.total || 0;

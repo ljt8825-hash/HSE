@@ -44,6 +44,11 @@ import {
 import type { VxeTableGridColumns } from '#/adapter/vxe-table';
 import { getEmployeeList, type EmployeeApi } from '#/api/hse/employee';
 import {
+  COMMITTEE_STATUS_FILTER_OPTIONS,
+  orgStatusLabel,
+  toOrgStatusParam,
+} from '#/api/hse/employee-status';
+import {
   createCommitteeActivity,
   deleteCommitteeActivity,
   downloadCommitteeActivityTemplate,
@@ -62,20 +67,13 @@ const activeTab = ref<'personnel' | 'committee'>('personnel');
 
 // ===================== Tab1：安全人员（花名册只读） =====================
 const ROSTER_DEPT = '安环管理部';
-const STATUS_LABEL: Record<string, string> = {
-  active: '在职',
-  left: '离职',
-  pending: '待岗',
-  retired: '退休',
-  rehire: '返聘',
-};
-const STATUS_VALUE: Record<string, string> = {
-  在职: 'active',
-  离职: 'left',
-  待岗: 'pending',
-  退休: 'retired',
-  返聘: 'rehire',
-};
+/**
+ * A-02d.3（B02-DEC-03.17 P1/P2）：
+ *   筛选项的 value 直接使用后端编码，不再用「中文标签 → 编码」反查（原实现会对
+ *   secondment / unpaid_leave / former 反查出 undefined，筛选条件被静默丢弃）。
+ *   「返聘」编码由错误的 rehire 改为后端正式编码 reinstated。
+ *   标签与选项的单一事实源见 `#/api/hse/employee-status`。
+ */
 const STATUS_TAG: Record<string, 'success' | 'danger' | 'warning' | 'neutral'> = {
   active: 'success',
   在职: 'success',
@@ -83,8 +81,15 @@ const STATUS_TAG: Record<string, 'success' | 'danger' | 'warning' | 'neutral'> =
   离职: 'danger',
   pending: 'warning',
   待岗: 'warning',
+  secondment: 'warning',
+  借调: 'warning',
+  unpaid_leave: 'warning',
+  停薪留职: 'warning',
   retired: 'neutral',
   退休: 'neutral',
+  former: 'neutral',
+  历史段: 'neutral',
+  reinstated: 'neutral',
   rehire: 'neutral',
   返聘: 'neutral',
 };
@@ -112,12 +117,17 @@ const personnelStatItems = computed(() => {
 async function fetchPersonnel() {
   personnelLoading.value = true;
   try {
+    // A-02d.3：status 直接使用编码；未登记的值显式提示，不再静默丢弃筛选条件
+    const statusParam = toOrgStatusParam(personnelSearch.status);
+    if (personnelSearch.status && !statusParam) {
+      message.warning(`未知的状态筛选值「${personnelSearch.status}」，已忽略该筛选条件`);
+    }
     const res = await getEmployeeList({
       page: personnelPage.value,
       pageSize: personnelPageSize.value,
       keyword: personnelSearch.keyword || undefined,
       deptName: ROSTER_DEPT,
-      status: personnelSearch.status ? (STATUS_VALUE[personnelSearch.status] as EmployeeApi.OrgStatus) : undefined,
+      status: statusParam as EmployeeApi.OrgStatus | undefined,
     });
     personnelList.value = res.list || [];
     personnelTotal.value = res.total || 0;
@@ -486,7 +496,7 @@ onMounted(() => {
               v-model:value="personnelSearch.status"
               placeholder="状态"
               clearable
-              :options="Object.keys(STATUS_LABEL).map((v) => ({ label: STATUS_LABEL[v], value: STATUS_LABEL[v] }))"
+              :options="COMMITTEE_STATUS_FILTER_OPTIONS"
             />
           </NGi>
         </HseSearchPanel>
@@ -501,7 +511,7 @@ onMounted(() => {
         >
           <template #personStatus="{ row }">
             <HseStatusTag :type="STATUS_TAG[(row as any).org_status] || 'neutral'">
-              {{ STATUS_LABEL[(row as any).org_status] || (row as any).org_status || '-' }}
+              {{ orgStatusLabel((row as any).org_status) }}
             </HseStatusTag>
           </template>
           <template #personAction="{ row }">
@@ -575,7 +585,7 @@ onMounted(() => {
           <NDescriptionsItem label="联系电话">{{ currentPerson.phone || '-' }}</NDescriptionsItem>
           <NDescriptionsItem label="状态">
             <HseStatusTag :type="STATUS_TAG[(currentPerson as any).org_status] || 'neutral'">
-              {{ STATUS_LABEL[(currentPerson as any).org_status] || (currentPerson as any).org_status || '-' }}
+              {{ orgStatusLabel((currentPerson as any).org_status) }}
             </HseStatusTag>
           </NDescriptionsItem>
         </NDescriptions>

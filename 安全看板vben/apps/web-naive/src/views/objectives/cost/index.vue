@@ -3,8 +3,25 @@
  * 安全生产费用业务域（P2）—— 预算概览（计算财务状态）+ 费用申请（含成本归因）+ 预算 Excel 导入
  * 复用既有 Naive UI 组件；不引入 Ant Design Vue。
  */
-import { h, onMounted, reactive, ref } from 'vue';
-import { NButton, NTag, NUpload, useMessage } from 'naive-ui';
+import { computed, h, onMounted, reactive, ref } from 'vue';
+import {
+  NAlert,
+  NButton,
+  NCard,
+  NDataTable,
+  NForm,
+  NFormItem,
+  NH2,
+  NInput,
+  NInputNumber,
+  NModal,
+  NSelect,
+  NSpace,
+  NStatistic,
+  NTag,
+  NUpload,
+  useMessage,
+} from 'naive-ui';
 import type { DataTableColumns, UploadFileInfo } from 'naive-ui';
 import {
   getBudgetOverview,
@@ -17,16 +34,36 @@ import {
   getBizDomains,
   getOpTypes,
   getInvestCategories,
+  getAllocations,
+  createAllocation,
+  updateAllocation,
+  deleteAllocation,
+  getCostActuals,
 } from '#/api/hse/cost';
 import type { CostApi } from '#/api/hse/cost';
+// 删除确认用离散 dialog：应用根无 NDialogProvider（项目既有解法，见 hse/employee-import-v2）
+import { dialog } from '#/adapter/naive';
+import { useAccess } from '@vben/access';
 
 const message = useMessage();
+
+// 写操作权限（仅 UX 置灰；安全边界在后端 requireRole，见 routes/cost/main.js:18）
+const { hasAccessByRoles } = useAccess();
+const canWriteCost = computed(() =>
+  hasAccessByRoles(['system_admin', 'admin', 'safety_manager', 'hse_manager']),
+);
 
 const budgets = ref<CostApi.BudgetOverviewItem[]>([]);
 const budgetsTotal = ref(0);
 const requests = ref<CostApi.CostRequestItem[]>([]);
 const requestsTotal = ref(0);
 const stats = ref<CostApi.CostStats>({ totalActual: 0, allocatedTotal: 0, unattributedActual: 0, byDomain: [], byCategory: [] });
+
+// ===================== 成本分摊（GAP-03）状态 =====================
+const allocations = ref<CostApi.AllocationItem[]>([]);
+const allocationsTotal = ref(0);
+const actuals = ref<CostApi.CostActualItem[]>([]);
+const allOpTypes = ref<{ label: string; value: number }[]>([]);
 
 const bizDomains = ref<{ label: string; value: number }[]>([]);
 const opTypes = ref<{ label: string; value: number }[]>([]);
@@ -88,19 +125,46 @@ const previewing = ref(false);
 const confirming = ref(false);
 const importError = ref('');
 
+// ===================== 分摊模态框状态（GAP-03） =====================
+const showAllocModal = ref(false);
+const allocSubmitting = ref(false);
+const allocEditingId = ref<number | null>(null);
+const allocForm = reactive<{
+  costActualId: number | null;
+  amount: number | null;
+  bizDomainId: number | null;
+  opTypeId: number | null;
+  investCategoryId: number | null;
+  objectName: string;
+  remark: string;
+}>({
+  costActualId: null,
+  amount: null,
+  bizDomainId: null,
+  opTypeId: null,
+  investCategoryId: null,
+  objectName: '',
+  remark: '',
+});
+
 async function loadAll() {
   loading.value = true;
   try {
-    const [b, r, s] = await Promise.all([
+    const [b, r, s, al, ac] = await Promise.all([
       getBudgetOverview({ pageSize: 100 }),
       getCostRequests({ pageSize: 100 }),
       getCostStats({}),
+      getAllocations({ pageSize: 200 }),
+      getCostActuals({ pageSize: 200 }),
     ]);
     budgets.value = b.list;
     budgetsTotal.value = b.total;
     requests.value = r.list;
     requestsTotal.value = r.total;
     stats.value = s;
+    allocations.value = al.list;
+    allocationsTotal.value = al.total;
+    actuals.value = ac.list;
     budgetOptions.value = b.list.map((x) => ({ label: `${x.projectName}-${x.itemName}`, value: x.budgetId }));
   } catch (e) {
     message.error('数据加载失败');
@@ -111,9 +175,10 @@ async function loadAll() {
 
 async function loadRefs() {
   try {
-    const [d, c] = await Promise.all([getBizDomains(), getInvestCategories()]);
+    const [d, c, o] = await Promise.all([getBizDomains(), getInvestCategories(), getOpTypes()]);
     bizDomains.value = d.map((x) => ({ label: x.name, value: x.id }));
     investCategories.value = c.map((x) => ({ label: x.name, value: x.id }));
+    allOpTypes.value = o.map((x) => ({ label: x.name, value: x.id }));
   } catch (e) { /* ignore */ }
 }
 
@@ -188,6 +253,135 @@ async function removeRequest(id: number) {
     message.success('已删除');
     await loadAll();
   } catch (e) { /* 拦截器已提示 */ }
+}
+
+// ===================== 分摊展示辅助（GAP-03） =====================
+// 注意：pg 驱动把 bigint/numeric 序列化为字符串（如 id:"61"、amount:"1600.00"），
+// 金额入 NInputNumber / 数值比较前一律 Number() 转换，避免「输入框显示为空」等类型错位。
+const requestTitle = (id: number | null) => {
+  if (id == null) return '计划归因';
+  const r = requests.value.find((x) => String(x.id) === String(id));
+  return r ? r.title : `申请#${id}`;
+};
+const actualLabel = (a: CostApi.CostActualItem) =>
+  `#${a.id} · ${requestTitle(a.requestId)} · ${yen(Number(a.actualAmount))}${a.actualDate ? ` · ${String(a.actualDate).slice(0, 10)}` : ''}`;
+const actualOptions = computed(() => actuals.value.map((a) => ({ label: actualLabel(a), value: a.id })));
+const dimName = (list: { label: string; value: number }[], id: number | null) =>
+  id == null ? '未归集' : (list.find((x) => x.value === id)?.label ?? `#${id}`);
+
+function resetAllocForm() {
+  allocForm.costActualId = null;
+  allocForm.amount = null;
+  allocForm.bizDomainId = null;
+  allocForm.opTypeId = null;
+  allocForm.investCategoryId = null;
+  allocForm.objectName = '';
+  allocForm.remark = '';
+}
+
+function openAllocCreate() {
+  resetAllocForm();
+  allocEditingId.value = null;
+  opTypes.value = [];
+  showAllocModal.value = true;
+}
+
+async function openAllocEdit(row: CostApi.AllocationItem) {
+  resetAllocForm();
+  allocEditingId.value = row.id;
+  allocForm.costActualId = row.costActualId ?? null;
+  allocForm.amount = row.amount != null ? Number(row.amount) : null;
+  allocForm.bizDomainId = row.bizDomainId ?? null;
+  allocForm.investCategoryId = row.investCategoryId ?? null;
+  allocForm.objectName = row.objectName ?? '';
+  allocForm.remark = row.remark ?? '';
+  opTypes.value = [];
+  if (row.bizDomainId) {
+    try {
+      const r = await getOpTypes(row.bizDomainId);
+      opTypes.value = r.map((x) => ({ label: x.name, value: x.id }));
+    } catch (e) { /* 忽略：下拉为空不影响编辑其它字段 */ }
+  }
+  allocForm.opTypeId = row.opTypeId ?? null;
+  showAllocModal.value = true;
+}
+
+async function onAllocDomainChange(v: number | null) {
+  allocForm.opTypeId = null;
+  opTypes.value = [];
+  if (!v) return;
+  const r = await getOpTypes(v);
+  opTypes.value = r.map((x) => ({ label: x.name, value: x.id }));
+}
+
+function onAllocActualChange(v: number | null) {
+  const a = actuals.value.find((x) => String(x.id) === String(v));
+  // 刚性总额规则：首笔必须一次补齐 → 默认带出实际支出全额（Number 转换：pg 数值为字符串）；后端仍是最终裁判
+  allocForm.amount = a ? Number(a.actualAmount) : null;
+  if (a && allocations.value.some((x) => String(x.costActualId) === String(a.id))) {
+    message.warning(`实际支出 #${a.id} 已有分摊记录：后端要求「追加后净额恰好相等」，继续提交将被拒绝`);
+  }
+}
+
+async function submitAlloc() {
+  if (allocSubmitting.value) return; // 防重复提交（双击/连点）
+  // 局部常量窄化：属性窄化会被后续函数调用重置，局部 const 在 strictNullChecks 下稳定
+  const costActualId = allocForm.costActualId;
+  const amount = allocForm.amount;
+  if (!costActualId) { message.warning('请选择关联的实际支出'); return; }
+  if (!amount || amount <= 0) { message.warning('请填写分摊金额（大于 0）'); return; }
+  allocSubmitting.value = true;
+  try {
+    if (allocEditingId.value) {
+      // 显式 UPDATE（不用 DELETE+POST 替代）；request_id / costActualId 不随修改提交
+      const payload: CostApi.AllocationUpdate = {
+        amount,
+        bizDomainId: allocForm.bizDomainId,
+        opTypeId: allocForm.opTypeId,
+        investCategoryId: allocForm.investCategoryId,
+        objectName: allocForm.objectName || undefined,
+        remark: allocForm.remark || undefined,
+      };
+      await updateAllocation(allocEditingId.value, payload);
+      message.success('分摊已修改');
+    } else {
+      const payload: CostApi.AllocationCreate = {
+        costActualId,
+        amount,
+        bizDomainId: allocForm.bizDomainId,
+        opTypeId: allocForm.opTypeId,
+        investCategoryId: allocForm.investCategoryId,
+        objectName: allocForm.objectName || undefined,
+        remark: allocForm.remark || undefined,
+      };
+      await createAllocation(payload);
+      message.success('分摊已创建');
+    }
+    showAllocModal.value = false;
+    await loadAll();
+  } catch (e) {
+    // 业务拒绝（HTTP 200 + code<0）：全局拦截器已用服务端 message 弹提示，此处不重复 toast
+  } finally {
+    allocSubmitting.value = false;
+  }
+}
+
+function removeAllocation(row: CostApi.AllocationItem) {
+  dialog.warning({
+    title: '删除确认',
+    content: row.costActualId
+      ? `该分摊已关联实际支出 #${row.costActualId}（${yen(Number(row.amount))}）。后端规定「已参与归因的分摊不可删除」（软删除受总额约束保护），删除将被拒绝；计划归因方可删除。确定继续？`
+      : `将删除计划归因（${requestTitle(row.requestId)}，${yen(Number(row.amount))}）。确定继续？`,
+    positiveText: '确定删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      try {
+        await deleteAllocation(row.id);
+        message.success('已删除');
+        await loadAll();
+      } catch (e) { /* 拦截器已提示（如归因完整性保护） */ }
+    },
+  });
 }
 
 // ===================== 预算导入交互 =====================
@@ -316,9 +510,62 @@ const requestColumns: DataTableColumns<CostApi.CostRequestItem> = [
     render: (r) =>
       h(
         NButton,
-        { size: 'small', type: 'error', quaternary: true, onClick: () => removeRequest(r.id) },
+        { size: 'small', type: 'error', quaternary: true, disabled: !canWriteCost.value, onClick: () => removeRequest(r.id) },
         { default: () => '删除' },
       ),
+  },
+];
+
+const allocRowKey = (r: CostApi.AllocationItem) => r.id;
+
+const allocationColumns: DataTableColumns<CostApi.AllocationItem> = [
+  { title: 'ID', key: 'id', width: 60 },
+  { title: '关联申请', key: 'requestId', width: 150, render: (r) => requestTitle(r.requestId) },
+  {
+    title: '关联实际支出',
+    key: 'costActualId',
+    width: 110,
+    render: (r) =>
+      r.costActualId == null
+        ? h(NTag, { type: 'info', size: 'small' }, { default: () => '计划归因' })
+        : `#${r.costActualId}`,
+  },
+  { title: '金额', key: 'amount', width: 110, render: (r) => yen(Number(r.amount)) },
+  {
+    title: '记录类型',
+    key: 'recordType',
+    width: 90,
+    render: (r) =>
+      h(
+        NTag,
+        { type: r.recordType === 'reversal' ? 'warning' : 'success', size: 'small' },
+        { default: () => (r.recordType === 'reversal' ? '冲销' : '正向') },
+      ),
+  },
+  { title: '业务领域', key: 'bizDomainId', width: 130, render: (r) => dimName(bizDomains.value, r.bizDomainId) },
+  { title: '作业类型', key: 'opTypeId', width: 120, render: (r) => dimName(allOpTypes.value, r.opTypeId) },
+  { title: '投入类别', key: 'investCategoryId', width: 120, render: (r) => dimName(investCategories.value, r.investCategoryId) },
+  { title: '对象', key: 'objectName', render: (r) => r.objectName || '-' },
+  { title: '备注', key: 'remark', render: (r) => r.remark || '-' },
+  {
+    title: '操作',
+    key: 'actions',
+    width: 130,
+    render: (r) =>
+      h(NSpace, null, {
+        default: () => [
+          h(
+            NButton,
+            { size: 'small', quaternary: true, disabled: !canWriteCost.value, onClick: () => openAllocEdit(r) },
+            { default: () => '编辑' },
+          ),
+          h(
+            NButton,
+            { size: 'small', type: 'error', quaternary: true, disabled: !canWriteCost.value, onClick: () => removeAllocation(r) },
+            { default: () => '删除' },
+          ),
+        ],
+      }),
   },
 ];
 
@@ -371,7 +618,7 @@ onMounted(() => {
 
     <n-card title="预算概览（余额/可用/执行率由交易表计算）" :bordered="false" class="mb">
       <template #header-extra>
-        <n-button type="primary" @click="openImport">导入预算</n-button>
+        <n-button type="primary" :disabled="!canWriteCost" @click="openImport">导入预算</n-button>
       </template>
       <n-data-table
         :columns="budgetColumns"
@@ -384,13 +631,29 @@ onMounted(() => {
 
     <n-card title="费用申请（关联隐患/事故/检查等来源）" :bordered="false">
       <template #header-extra>
-        <n-button type="primary" @click="openCreate">新建申请</n-button>
+        <n-button type="primary" :disabled="!canWriteCost" @click="openCreate">新建申请</n-button>
       </template>
       <n-data-table
         :columns="requestColumns"
         :data="requests"
         :loading="loading"
         :row-key="requestRowKey"
+        :pagination="{ pageSize: 10 }"
+      />
+    </n-card>
+
+    <n-card title="成本分摊（归因）" :bordered="false" class="mb">
+      <template #header-extra>
+        <n-button type="primary" :disabled="!canWriteCost" @click="openAllocCreate">新增分摊</n-button>
+      </template>
+      <n-alert type="info" :bordered="false" class="mb">
+        分摊必须关联实际支出。后端规则：一次提交后「有效分摊净额」须恰好等于该实际支出金额（不足/超额均拒绝，仅可一次补齐）；调整归因请用编辑（被拒时原值保持不变）；已参与归因的分摊不可删除（软删除受总额约束保护），计划归因可删除。维度缺省时统计中单列「未归集」。
+      </n-alert>
+      <n-data-table
+        :columns="allocationColumns"
+        :data="allocations"
+        :loading="loading"
+        :row-key="allocRowKey"
         :pagination="{ pageSize: 10 }"
       />
     </n-card>
@@ -447,6 +710,44 @@ onMounted(() => {
         <n-space justify="end">
           <n-button @click="showModal = false">取消</n-button>
           <n-button type="primary" :loading="submitting" @click="submitCreate">提交</n-button>
+        </n-space>
+      </template>
+    </n-modal>
+
+    <n-modal v-model:show="showAllocModal" :title="allocEditingId ? `编辑分摊 #${allocEditingId}` : '新增分摊'" preset="card" style="width: 640px">
+      <n-form label-placement="left" :label-width="110">
+        <n-form-item label="关联实际支出" required>
+          <n-select
+            v-model:value="allocForm.costActualId"
+            :options="actualOptions"
+            :disabled="!!allocEditingId"
+            placeholder="选择实际支出（必填）"
+            @update:value="onAllocActualChange"
+          />
+        </n-form-item>
+        <n-form-item label="分摊金额" required>
+          <n-input-number v-model:value="allocForm.amount" :min="0" :precision="2" style="width: 100%" />
+        </n-form-item>
+        <n-form-item label="业务领域">
+          <n-select v-model:value="allocForm.bizDomainId" :options="bizDomains" clearable placeholder="环卫/市政园林/公司层面" @update:value="onAllocDomainChange" />
+        </n-form-item>
+        <n-form-item label="作业类型">
+          <n-select v-model:value="allocForm.opTypeId" :options="opTypes" clearable placeholder="随领域联动" />
+        </n-form-item>
+        <n-form-item label="投入类别">
+          <n-select v-model:value="allocForm.investCategoryId" :options="investCategories" clearable placeholder="隐患整改/劳保用品/..." />
+        </n-form-item>
+        <n-form-item label="对象名称">
+          <n-input v-model:value="allocForm.objectName" placeholder="如：某转运站（可选）" />
+        </n-form-item>
+        <n-form-item label="备注">
+          <n-input v-model:value="allocForm.remark" type="textarea" placeholder="可选" />
+        </n-form-item>
+      </n-form>
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="showAllocModal = false">取消</n-button>
+          <n-button type="primary" :loading="allocSubmitting" @click="submitAlloc">提交</n-button>
         </n-space>
       </template>
     </n-modal>
