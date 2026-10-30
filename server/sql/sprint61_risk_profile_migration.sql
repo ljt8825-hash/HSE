@@ -111,10 +111,19 @@ SELECT
   ga.completion_rate as patrol_completion_rate
 
 FROM employee e
-JOIN hse_employee_relation er ON er.employee_id = e.id AND er.is_current = true AND er.is_deleted = false
-LEFT JOIN hse_org_unit o ON o.id = er.org_unit_id AND o.is_deleted = false
-LEFT JOIN hse_operation_unit ou ON ou.id = er.operation_unit_id AND ou.is_deleted = false
-LEFT JOIN position p ON p.id = er.position_id AND p.is_deleted = false
+-- 【B-1-P1-02-C 修订】原 JOIN hse_employee_relation（Sprint6.0 验证数据，1304 行
+--   employee_id 与 employee.id 区间完全不相交，100% 断链）→ INNER JOIN 恒 0 行，
+--   风险画像列表/详情生产永远为空。改为 employee_assignment 权威任职段
+--   （与 v_employee_current / v_employee_org_full 同口径：is_current + is_primary +
+--   is_deleted=false；uk_emp_assign_partial 唯一索引保证一人至多一行）。
+--   输出列名不变（org_unit_id / operation_unit_id / position_id 两表同列名），
+--   消费方 hseRiskProfileService 无需改动。
+--   注：下方三违子查询的 name+township 匹配为既有逻辑（violations 表无 employee_id），
+--   不属本次断链修复范围，保持原样、不以姓名匹配替代任何 employee_id 关联。
+JOIN employee_assignment ea ON ea.employee_id = e.id AND ea.is_current = true AND ea.is_primary = true AND ea.is_deleted = false
+LEFT JOIN hse_org_unit o ON o.id = ea.org_unit_id AND o.is_deleted = false
+LEFT JOIN hse_operation_unit ou ON ou.id = ea.operation_unit_id AND ou.is_deleted = false
+LEFT JOIN position p ON p.id = ea.position_id AND p.is_deleted = false
 LEFT JOIN hse_responsibility r ON r.employee_id = e.id AND r.is_deleted = false AND r.status = 'active'
 
 -- 三违统计子查询

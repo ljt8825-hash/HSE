@@ -607,22 +607,41 @@ async function getRosterAuthority(id) {
 }
 
 // DELETE /employees/:id — 删除员工（软删除，同时结束当前组织关系）
+// 【B-1-P1-02-E 事务化】原实现两次独立 pool.query（软删 employee + 关闭任职段），
+//   第二次失败会出现"员工已软删但任职段仍 is_current=true"的半更新脏状态。
+//   现改为单事务：任一失败整体 ROLLBACK，两步同生共死。
+//   保留原语义：end_date = CURRENT_DATE（删除当天即任职终点，不改为 ASG 的 start-1 规则，
+//   因为删除无新段 start_date 可对齐）；返回结构不变。
 async function deleteEmployee(id) {
-  const result = await pool.query(
-    `UPDATE employee SET is_deleted = true, updated_at = NOW() WHERE id = $1 AND is_deleted = false RETURNING id, name`,
-    [id]
-  );
-  if (result.rows.length === 0) return { error: -2, message: '员工不存在或已删除' };
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
 
-  // Sprint-C Phase 1: 使用 employee_assignment 替代 hse_employee_org
-  // 同时结束当前组织关系
-  await pool.query(
-    `UPDATE employee_assignment SET is_current = false, end_date = CURRENT_DATE, updated_at = NOW()
-     WHERE employee_id = $1 AND is_current = true AND is_deleted = false`,
-    [id]
-  );
+    const result = await client.query(
+      `UPDATE employee SET is_deleted = true, updated_at = NOW() WHERE id = $1 AND is_deleted = false RETURNING id, name`,
+      [id]
+    );
+    if (result.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return { error: -2, message: '员工不存在或已删除' };
+    }
 
-  return { audit: { id, name: result.rows[0].name } };
+    // Sprint-C Phase 1: 使用 employee_assignment 替代 hse_employee_org
+    // 同时结束当前组织关系（与软删同事务，保证原子性）
+    await client.query(
+      `UPDATE employee_assignment SET is_current = false, end_date = CURRENT_DATE, updated_at = NOW()
+       WHERE employee_id = $1 AND is_current = true AND is_deleted = false`,
+      [id]
+    );
+
+    await client.query('COMMIT');
+    return { audit: { id, name: result.rows[0].name } };
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw e; // 显式向上抛出，由路由层统一错误处理；不静默吞掉、不返回伪造成功
+  } finally {
+    client.release();
+  }
 }
 
 module.exports = {

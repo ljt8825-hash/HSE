@@ -174,7 +174,9 @@ describe('V1 · NULL / 空关系不得推断为终态', () => {
     expect(result.success).toBe(1);
     expect(result.failed).toBe(0);
     // 既有流程未被改变：关旧段 → 建新段
-    expect(calls.some((c) => c.text.includes('UPDATE employee_assignment SET is_current = false'))).toBe(true);
+    // 【B-1-P1-02-D】关段 SQL 已补 end_date + is_deleted=false（多行格式），改用正则断言意图
+    expect(calls.some((c) => /UPDATE\s+employee_assignment\s+SET\s+is_current\s*=\s*false/.test(c.text))).toBe(true);
+    expect(calls.some((c) => /end_date\s*=\s*CASE/.test(c.text))).toBe(true);
     expect(calls.some((c) => c.text.includes('INSERT INTO employee_assignment'))).toBe(true);
     // 不补值：没有任何语句写 employment_relation
     expect(writes.some((c) => c.text.includes('employment_relation'))).toBe(false);
@@ -211,7 +213,7 @@ describe('V1 · 正常人员既有导入行为保持不变', () => {
     expect(result.success).toBe(1);
     const order = calls.map((c) => c.text);
     const iUpdateEmp = order.findIndex((t) => t.includes('UPDATE employee SET'));
-    const iCloseSeg = order.findIndex((t) => t.includes('UPDATE employee_assignment SET is_current = false'));
+    const iCloseSeg = order.findIndex((t) => /UPDATE\s+employee_assignment\s+SET\s+is_current\s*=\s*false/.test(t));
     const iInsertSeg = order.findIndex((t) => t.includes('INSERT INTO employee_assignment'));
     expect(iUpdateEmp).toBeGreaterThan(-1);
     expect(iCloseSeg).toBeGreaterThan(iUpdateEmp);

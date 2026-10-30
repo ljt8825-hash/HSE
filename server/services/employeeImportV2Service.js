@@ -638,73 +638,38 @@ async function ensurePendingColumns() {
   pendingColumnsReady = true;
 }
 
-/** 更新 v_employee_current 视图，补全 id_card / is_public_welfare / id_address */
-let viewUpdated = false;
-async function ensureViewFields() {
-  if (viewUpdated) return;
-  if (!isConnected()) return;
-  try {
-    await pool.query(`DROP VIEW IF EXISTS v_employee_current`);
-    await pool.query(`
-      CREATE VIEW v_employee_current AS
-      SELECT DISTINCT ON (e.id)
-          e.id AS employee_id,
-          e.employee_code,
-          e.name,
-          e.gender,
-          e.birth_date,
-          e.phone,
-          e.id_card,
-          e.person_category,
-          e.person_type,
-          e.is_public_welfare,
-          e.id_address,
-          CASE WHEN e.birth_date IS NOT NULL THEN EXTRACT(YEAR FROM age(e.birth_date))::INT ELSE NULL END AS age,
-          a.id AS assignment_id,
-          a.org_unit_id,
-          ou.org_name,
-          ou.org_type,
-          ou.org_code,
-          ou.org_path,
-          a.operation_unit_id,
-          opu.unit_name,
-          opu.unit_type,
-          opu.unit_code,
-          a.position_id,
-          p.name AS position_name,
-          p.position_code,
-          p.job_category AS position_type,
-          p.risk_level,
-          p.is_safety_critical,
-          a.supervisor_id,
-          sup.name AS supervisor_name,
-          a.status AS assignment_status,
-          a.is_current,
-          a.is_primary,
-          a.start_date,
-          a.end_date,
-          a.remark,
-          a.created_at AS assigned_at,
-          e.is_deleted AS employee_deleted
-      FROM employee e
-      LEFT JOIN employee_assignment a
-          ON a.employee_id = e.id
-          AND a.is_current = true
-          AND a.is_primary = true
-          AND a.is_deleted = false
-      LEFT JOIN hse_org_unit ou ON ou.id = a.org_unit_id AND ou.is_deleted = false
-      LEFT JOIN hse_operation_unit opu ON opu.id = a.operation_unit_id AND opu.is_deleted = false
-      LEFT JOIN position p ON p.id = a.position_id AND p.is_deleted = false
-      LEFT JOIN employee sup ON sup.id = a.supervisor_id AND sup.is_deleted = false
-      WHERE e.is_deleted = false
-      ORDER BY e.id, a.start_date DESC NULLS LAST
-    `);
-    viewUpdated = true;
-    console.log('[ImportV2] v_employee_current 视图已更新（补全 id_card/is_public_welfare/id_address）');
-  } catch (e) {
-    console.warn('[ImportV2] 视图更新失败:', e.message.substring(0, 100));
-  }
-}
+/**
+ * 【B-1-P1-02-A】移除 v_employee_current 运行时 DROP/CREATE VIEW（原 ensureViewFields）。
+ *
+ * 历史行为：每次 V2 导入首触发即 DROP VIEW + 按代码内副本重建，存在三类风险：
+ *   1) 代码副本列集缺 employment_relationship_status，会把
+ *      alter_employee_relation_status.sql（2026-10-23 dev+生产已执行）加建的
+ *      权威列集打回旧版，破坏依赖该列的消费者；
+ *   2) 运行时 DDL 需要库结构变更权限，且并发导入时 DROP/CREATE 互相踩踏；
+ *   3) 视图定义双源（代码 vs 迁移 SQL）漂移。
+ *
+ * 现行口径：v_employee_current 定义唯一权威 = 迁移 SQL
+ *   （server/sql/alter_employee_relation_status.sql，含 id_card / is_public_welfare /
+ *    id_address / employment_relationship_status 全部业务列，原运行时副本无独有列）；
+ *   后续视图变更一律走迁移脚本，禁止在业务代码运行时执行 DDL。
+ * 故本函数删除后无需任何运行时补偿：导入业务只读取该视图
+ * （employeeImportV2Service.js:576 matchTownCenter 等），列集已全覆盖。
+ */
+
+/**
+ * 【B-1-P1-02-A 登记】ensurePendingColumns() 运行时 ALTER TABLE（保留，未扩展）。
+ *
+ * 行为：首次调用对 employee_import_pending 执行 7 条
+ *   `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`（纯加列、幂等、无删改），成功后由
+ *   pendingColumnsReady 缓存跳过（进程生命周期内至多执行一轮）。
+ * 阻断风险评估：**无立即阻断风险**——
+ *   - 列均为历史增量补列，safety_dashboard_dev 与生产均已存在（IF NOT EXISTS 空转）；
+ *   - 语句自身幂等且 catch 吞掉重复列冲突，不会使导入失败；
+ *   - 不涉及删列/改类型/加约束，不破坏既有数据。
+ * 遗留治理项（登记，不属本轮）：该运行时 DDL 应迁入正式迁移脚本
+ *   （如新建 sql/xxx_employee_import_pending_columns.sql）后整体移除，与
+ *   v_employee_current 同口径收归 SQL 迁移唯一权威。本轮按任务书要求仅登记不扩展。
+ */
 
 /**
  * 解析花名册工作簿并创建导入批次 + pending 记录（上传 / 目录导入共用同一口径）
@@ -716,7 +681,8 @@ async function createImportBatchFromWorkbook({ filePath, fileName, username, ip,
   if (!isConnected()) throw new Error('数据库未连接');
 
   await ensurePendingColumns();
-  await ensureViewFields();
+  // 【B-1-P1-02-A】原 ensureViewFields() 调用已移除：v_employee_current 定义收归迁移 SQL，
+  // 导入业务只读该视图，不再运行时 DROP/CREATE（详见上方登记注释）。
 
   const workbook = XLSX.readFile(filePath);
   if (workbook.SheetNames.length === 0) throw new Error('Excel 文件无工作表');

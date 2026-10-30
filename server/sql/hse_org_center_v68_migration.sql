@@ -209,6 +209,17 @@ COMMENT ON COLUMN hse_employee_org.is_deprecated IS '是否已废弃（V2.1新�
 
 -- ============================================================
 -- 六、视图 v_employee_org_full — 员工完整组织关系视图
+-- 【B-1-P1-02-B 修订】原定义 LEFT JOIN hse_employee_relation（Sprint6.0 验证数据）。
+--   生产实测：hse_employee_relation 共 1,304 行且 employee_id（3866~5363）与
+--   employee.id（6692~10240）区间完全不相交 → 100% 断链死数据，
+--   视图 relation_status='active' 恒 0 行，曾导致考核周期 targetCount=0、
+--   评分冻结空转（2026-08-27 hse_fix_v_employee_org_full.sql 已在生产修复）。
+--   本节原样重放会把视图改回断链版，故改为 employee_assignment 权威任职段版。
+--   字段名/顺序/类型/语义与 hse_fix_v_employee_org_full.sql（现行生产定义）逐列一致；
+--   employee_assignment.id 与 hse_employee_relation.id 同为 bigint，relation_id 列兼容，
+--   CREATE OR REPLACE 对已存在的修复版视图可直接覆盖（幂等）。
+--   若目标库视图存在但列类型漂移导致 OR REPLACE 报错，参照 hse_fix 版
+--   先 DROP VIEW IF EXISTS v_employee_org_full 再执行下方 CREATE VIEW。
 -- ============================================================
 
 CREATE OR REPLACE VIEW v_employee_org_full AS
@@ -222,39 +233,39 @@ SELECT
     e.person_category,
     e.person_type,
     EXTRACT(YEAR FROM age(e.birth_date))::INT AS age,
-    er.id AS relation_id,
-    er.org_unit_id,
+    ea.id AS relation_id,
+    ea.org_unit_id,
     ou.org_name,
     ou.org_type,
     ou.org_code,
     ou.org_path,
-    er.operation_unit_id,
+    ea.operation_unit_id,
     opu.unit_name,
     opu.unit_type,
     opu.unit_code,
-    er.position_id,
+    ea.position_id,
     p.name AS position_name,
     p.position_code,
     p.risk_level,
     p.is_safety_critical,
     p.job_category,
-    er.supervisor_id,
+    ea.supervisor_id,
     sup.name AS supervisor_name,
-    er.status AS relation_status,
-    er.start_date,
-    er.end_date,
-    er.is_current,
-    er.is_primary,
-    er.created_at,
+    ea.status AS relation_status,
+    ea.start_date,
+    ea.end_date,
+    ea.is_current,
+    ea.is_primary,
+    ea.created_at,
     e.is_deleted
 FROM employee e
-LEFT JOIN hse_employee_relation er ON er.employee_id = e.id AND er.is_current = true AND er.is_deleted = false AND er.is_primary = true
-LEFT JOIN hse_org_unit ou ON ou.id = er.org_unit_id AND ou.is_deleted = false
-LEFT JOIN hse_operation_unit opu ON opu.id = er.operation_unit_id AND opu.is_deleted = false
-LEFT JOIN position p ON p.id = er.position_id AND p.is_deleted = false
-LEFT JOIN employee sup ON sup.id = er.supervisor_id AND sup.is_deleted = false;
+LEFT JOIN employee_assignment ea ON ea.employee_id = e.id AND ea.is_current = true AND ea.is_deleted = false AND ea.is_primary = true
+LEFT JOIN hse_org_unit ou ON ou.id = ea.org_unit_id AND ou.is_deleted = false
+LEFT JOIN hse_operation_unit opu ON opu.id = ea.operation_unit_id AND opu.is_deleted = false
+LEFT JOIN position p ON p.id = ea.position_id AND p.is_deleted = false
+LEFT JOIN employee sup ON sup.id = ea.supervisor_id AND sup.is_deleted = false;
 
-COMMENT ON VIEW v_employee_org_full IS '员工完整组织关系视图（V2.1新模型）';
+COMMENT ON VIEW v_employee_org_full IS '员工完整组织关系视图（V2.1，数据源=employee_assignment 权威任职段；relation_id 列名保留以兼容既有消费者）';
 
 -- ============================================================
 -- 七、验证查询

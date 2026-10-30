@@ -689,11 +689,32 @@ async function importExcelFile({ tmpFile, userId }) {
 
           // Sprint-C Phase 1: 更新或插入组织关系（employee_assignment）
           if (existingEmployee) {
-            // 将旧的组织关系设为非当前
-            await client.query(
-              `UPDATE employee_assignment SET is_current = false, updated_at = NOW() WHERE employee_id = $1 AND is_current = true`,
-              [employeeId]
+            // 【B-1-P1-02-D 修复】旧段关闭补全：
+            //   1) 补 end_date（对齐 employeeAssignmentService.assignEmployee 关段范式
+            //      :493-496 —— end_date = 新段 start_date - 1 天，保证时间轴无重叠无缝隙；
+            //      新段无 start_date（花名册未填入职日期）时回退 CURRENT_DATE 并记 warning）；
+            //   2) 补 is_deleted = false 条件（原语句会把已软删段也置 is_current=false，
+            //      违反"软删数据不可被业务 UPDATE 触碰"口径）；
+            //   3) 异常显式处理：本 UPDATE 不做局部 try/catch——失败即向上抛出，
+            //      由下方既有 catch 统一 ROLLBACK 并计入该行 errors（行级失败可见，
+            //      不静默吞掉、不出现"关段失败但新段照插"的半更新状态）。
+            const closeResult = await client.query(
+              `UPDATE employee_assignment
+                  SET is_current = false,
+                      end_date = CASE
+                        WHEN $2::date IS NOT NULL THEN ($2::date - INTERVAL '1 day')::date
+                        ELSE CURRENT_DATE
+                      END,
+                      updated_at = NOW()
+                WHERE employee_id = $1
+                  AND is_current = true
+                  AND is_deleted = false`,
+              [employeeId, startDate]
             );
+            if (closeResult.rowCount === 0) {
+              // 无现行段（异常数据或已被并发关闭）：不阻断导入，但必须留痕
+              warnings.push({ index: rowIndex, message: `员工${normalized.name || employeeId}无现行任职段可关闭，仅新建任职段` });
+            }
           }
 
           await client.query(
