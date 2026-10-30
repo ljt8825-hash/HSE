@@ -4,6 +4,8 @@ const { success, error } = require('../middleware/response');
 const { pool, isConnected } = require('../config/db');
 // P3-04-00.4：隐患“未闭环”判定唯一来源（禁止在本文件另写 'closed'/'已完成' 字面量）
 const { sqlStatusOpen } = require('../services/hazardService');
+// 【B-1-P1-03-02】正式员工资格片段（花名册权威口径，适用边界见 dict 注释）
+const { formalEmployeeEligibilitySql } = require('../services/employeeStatusDict');
 const XLSX = require('xlsx');
 
 // 聚合结果缓存：避免同一来源在 日/周/月 多个 Tab 间重复打库
@@ -21,6 +23,8 @@ function getYearRange(year) {
 // ============================================================
 const HANDLERS = {
   // 1) 目标责任书未签订人员（持续型）
+  // 【B-1-P1-03-02】业务资格分类：正式员工专属 —— 与目标责任书台账口径同步收敛
+  //   （buildRosterWhere 同款 formalEmployeeEligibilitySql），终态持段人员不再列为"未签"待办。
   'objectives:responsibility-unsigned': async () => {
     const where = `
       FROM v_employee_current e
@@ -31,6 +35,7 @@ const HANDLERS = {
       ) c ON true
       WHERE e.employee_deleted = false
         AND e.assignment_status = 'active'
+        AND ${formalEmployeeEligibilitySql('e')}
         AND (c.status IS NULL OR c.status <> 'signed')`;
     const countR = await pool.query(`SELECT COUNT(*)::int AS count ${where}`);
     const itemsR = await pool.query(`
@@ -47,11 +52,14 @@ const HANDLERS = {
   },
 
   // 2) 未生成保险记录人员（持续型）
+  // 【B-1-P1-03-02】业务资格分类：正式员工专属 —— 与保险主列表口径对齐
+  //   （insuranceShared.ACTIVE_ROSTER_JOIN 同为花名册正式员工资格），待办名单不再混入终态人员。
   'insurance:uncovered': async () => {
     const where = `
       FROM v_employee_current e
       WHERE e.employee_deleted = false
         AND e.name IS NOT NULL AND e.name <> ''
+        AND ${formalEmployeeEligibilitySql('e')}
         AND NOT EXISTS (
           SELECT 1 FROM personnel_insurance p
           WHERE p.employee_id = e.employee_id AND p.is_deleted = false

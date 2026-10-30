@@ -79,13 +79,13 @@ function parseConfirmedRelations(cfg) {
  * 反向清理分支的保留语义不使用本门禁（历史周期既有行的移除属独立业务决策，
  * 且 hse_assessment_deduction.target_id 外键无级联，强删有扣分引用的历史对象会硬失败）。
  */
-const FORMAL_EMPLOYEE_ELIGIBILITY_SQL = `
-    EXISTS (
-      SELECT 1 FROM employee fe
-       WHERE fe.id = v.employee_id
-         AND fe.is_deleted = FALSE
-         AND fe.employment_relation = '正式员工'
-    )`;
+/**
+ * 【B-1-P1-03-02 复用收敛】正式员工资格 SQL 改由 employeeStatusDict.formalEmployeeEligibilitySql
+ * 生成（单一事实源；花名册映射证据与适用边界见该函数注释）。默认别名 'v' 与本模块
+ * 原 R4 冻结文本逐字节一致，所有既有消费方（三处考核对象同步 SQL）行为不变。
+ */
+const FORMAL_EMPLOYEE_ELIGIBILITY_SQL =
+  require('./employeeStatusDict').formalEmployeeEligibilitySql('v');
 
 /**
  * SQL 片段（别名 v = v_employee_org_full）：

@@ -262,6 +262,36 @@ function leftRelationInSql(column) {
 }
 
 /**
+ * 「正式员工资格」SQL 片段生成器 —— B-1-P1-03-02 统一口径（R4 冻结规则的参数化复用）。
+ *
+ * 权威渊源：
+ *  - 花名册（员工信息维护 Excel）「用工关系状态」列 → scripts/import-employment-relation.cjs
+ *    → employee.employment_relation（B-1-P1-03-02 报告 §二：Excel 分布 正式1,291/辞职1,951/死亡7
+ *    与 dev 库字段分布三值完全一致，映射链路已实证）；
+ *  - R4 冻结口径（assessmentTargetEligibility.FORMAL_EMPLOYEE_ELIGIBILITY_SQL，
+ *    2026-09-14 CHECKPOINT-6 事故后确立）：
+ *    employee.employment_relation = '正式员工' ⇔ 在职 / 具备正式员工专属业务资格。
+ *  - NULL → false（任务书规则 3：不得自动认定）；待岗等历史兼容值 → false；
+ *    辞职/死亡/退休 → false。禁止姓名/岗位/组织推断（规则 4）。
+ *
+ * 适用边界（B-1-P1-03-02 任务书规则 8）：仅限「正式员工专属业务」的候选/名单/资格过滤；
+ * HSE 全体作业人员业务（事故当事人、培训对象等含外包/劳务）与历史回显路径【不得】使用本片段。
+ *
+ * @param {string} alias 人员视图/子查询的别名（如 'v' / 'ev' / 'e'），仅允许合法标识符
+ * @returns {string} EXISTS SQL 片段；alias='v' 时与 FORMAL_EMPLOYEE_ELIGIBILITY_SQL 逐字节一致
+ */
+function formalEmployeeEligibilitySql(alias = 'v') {
+  assertColumn(alias, 'formalEmployeeEligibilitySql');
+  return `
+    EXISTS (
+      SELECT 1 FROM employee fe
+       WHERE fe.id = ${alias}.employee_id
+         AND fe.is_deleted = FALSE
+         AND fe.employment_relation = '正式员工'
+    )`;
+}
+
+/**
  * 终态原因的值列表（含引号），用于 NOT IN 这类无法直接传列名的场景。
  * 例：`) NOT IN (${terminalRelationValueListSql()})`
  */
@@ -392,6 +422,7 @@ module.exports = {
   knownRelationInSql,
   terminalRelationInSql,
   leftRelationInSql,
+  formalEmployeeEligibilitySql,
   terminalRelationValueListSql,
   isTerminalRelation,
   validateRelationInput,

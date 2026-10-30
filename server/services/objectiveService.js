@@ -21,6 +21,7 @@ const {
   getBudgetWarningThreshold,
 } = require('../config/hseRules');
 const { validateUploadedFile, fixFilenameEncoding } = require('../middleware/upload');
+const { formalEmployeeEligibilitySql } = require('./employeeStatusDict');
 const XLSX = require('xlsx');
 const fs = require('fs');
 
@@ -164,7 +165,10 @@ function calcBudgetStatus(budgetAmt, spentAmt) {
 
 // ============================================================
 // 目标责任书台账（员工花名册 × 签订状态）
-// ============================================================
+// 【B-1-P1-03-02】业务资格分类：正式员工专属 —— 在职人员台账只统计花名册正式员工。
+//   原口径（employee_deleted=false + assignment_status='active'）混入 1,806 名
+//   终态持段人员（P1-03-01 探针），签订率分母虚大；现按花名册正式员工资格收敛
+//   （formalEmployeeEligibilitySql，与考核对象 R4 冻结口径同源）。
 function buildRosterFrom() {
   return `
     FROM v_employee_current e
@@ -179,7 +183,9 @@ function buildRosterFrom() {
 }
 
 function buildRosterWhere({ keyword, department, signStatus }, params) {
-  const where = ["e.employee_deleted = false", "e.assignment_status = 'active'"];
+  const where = ["e.employee_deleted = false", "e.assignment_status = 'active'",
+    // 【B-1-P1-03-02】正式员工资格（花名册权威口径）
+    formalEmployeeEligibilitySql('e')];
   if (keyword) {
     params.push(`%${keyword}%`);
     where.push(`(e.employee_code ILIKE $${params.length} OR e.name ILIKE $${params.length})`);
@@ -235,8 +241,12 @@ function parseFlexDate(v) {
 }
 
 // 按 员工ID / 员工编号 / 身份证号 / 姓名 解析签订人（在职、未删除），要求唯一匹配
+// 【B-1-P1-03-02】业务资格分类：正式员工专属（新签订人解析）——
+//   原注释自称"在职"但条件不充分（终态人段仍 active，P1-03-01 实证）；
+//   现叠加花名册正式员工资格（formalEmployeeEligibilitySql），NULL/终态一律拒绝。
 async function resolveSignee({ employeeId, employeeCode, name, idCard }) {
-  const base = "employee_deleted=false AND assignment_status='active'";
+  const base = "employee_deleted=false AND assignment_status='active' AND "
+    + formalEmployeeEligibilitySql('ev');
   if (employeeId) {
     const r = await pool.query(`SELECT employee_id, name, org_unit_id, org_name FROM v_employee_current WHERE ${base} AND employee_id=$1`, [employeeId]);
     if (r.rows.length) return r.rows[0];

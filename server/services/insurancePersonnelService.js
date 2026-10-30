@@ -40,6 +40,9 @@ const {
   ACTIVE_ROSTER_JOIN,
 } = require('./insuranceShared');
 
+// 【B-1-P1-03-02】正式员工资格片段（花名册权威口径，单一事实源 employeeStatusDict）
+const { formalEmployeeEligibilitySql } = require('./employeeStatusDict');
+
 const _insuranceRule = require('../config/hseRules/insurance-rule.json');
 
 /** 列表查询异常统一收敛为安全文案（原实现 try/catch 兜底：不向客户端泄漏内部 SQL/连接细节） */
@@ -816,6 +819,9 @@ async function matchRule(query) {
 }
 
 // GET /personnel/pending-list
+// 【B-1-P1-03-02】业务资格分类：正式员工专属 —— 待参保名单与保险主列表口径对齐
+//   （主列表 ACTIVE_ROSTER_JOIN 即花名册正式员工资格，insuranceShared:361）。
+//   原口径混入终态持段人员（P1-03-01 P2 风险），现按 formalEmployeeEligibilitySql 收敛。
 async function pendingList(query) {
   const { page = 1, pageSize = 50, department, isOverAge } = query;
   let allPersons = [];
@@ -827,6 +833,7 @@ async function pendingList(query) {
         FROM v_employee_current e
         WHERE e.employee_deleted = false
           AND e.name IS NOT NULL AND e.name <> ''
+          AND ${formalEmployeeEligibilitySql('e')}
           AND NOT EXISTS (
             SELECT 1 FROM personnel_insurance p
             WHERE p.employee_id = e.employee_id AND p.is_deleted = false
