@@ -699,9 +699,11 @@ onMounted(loadList);
             </Button>
             <template #overlay>
               <Menu>
-                <Menu.Item key="clear-all" danger @click="openClearAllConfirm">
+                <!-- P0-1 数据删除风险隔离：全量清空入口已暂停（disabled 使 @click 不再触发），
+                     真正的安全边界是服务端 PURGE_ALL_PERMANENTLY_DISABLED 的 fail-closed 隔离 -->
+                <Menu.Item key="clear-all" danger disabled title="已暂停（P0 数据删除风险隔离）：该操作会物理删除全部人员及关联业务数据，如需清空测试数据请联系系统管理员" @click="openClearAllConfirm">
                   <template #icon><IconifyIcon icon="lucide:trash-2" /></template>
-                  清空人员信息
+                  清空人员信息（已暂停）
                 </Menu.Item>
               </Menu>
             </template>

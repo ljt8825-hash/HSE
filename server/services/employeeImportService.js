@@ -8,6 +8,7 @@ const XLSX = require('xlsx');
 const { pool } = require('../config/db');
 const { secureEncode } = require('../routes/hse-employee/_shared');
 const { resolveOrgUnitId } = require('./employeeAssignmentService');
+const { isTerminalRelation } = require('./employeeStatusDict');
 
 /**
  * Excel 表头 → 数据库字段的映射（员工导入模板）
@@ -534,10 +535,24 @@ async function importExcelFile({ tmpFile, userId }) {
         let existingEmployee = null;
         if (normalized.employee_code) {
           const existResult = await client.query(
-            `SELECT id, name, employee_code FROM employee WHERE employee_code = $1 AND is_deleted = false`,
+            `SELECT id, name, employee_code, employment_relation FROM employee WHERE employee_code = $1 AND is_deleted = false`,
             [normalized.employee_code]
           );
           existingEmployee = existResult.rows[0] || null;
+        }
+
+        // A-02e.5-C1（P0）：终态防复活闸门。
+        // 位置刻意选在【本行任何写操作之前】（UPDATE employee / 关旧段 / INSERT 新段都还没发生），
+        // 因此拒绝时本行零副作用；外层 catch 仍会 ROLLBACK 兜底（BEGIN 已在循环内开启）。
+        // 判定只读 employee.employment_relation 权威字段：不看 assignment.status、不看历史段形态、
+        // 不把 NULL 当终态、不把待岗/借调等中间态当终态，也不回填关系字段。
+        if (existingEmployee && isTerminalRelation(existingEmployee.employment_relation)) {
+          const rel = String(existingEmployee.employment_relation).trim();
+          throw new Error(
+            `员工「${existingEmployee.name || normalized.name}」用工关系为「${rel}」，属于终态，`
+            + '禁止通过花名册导入重新建立任职记录；退休人员请使用返聘流程'
+            + '（POST /api/hse/employee/org/rehire），如需恢复请先由人事处理用工关系'
+          );
         }
 
         // 身份证号唯一性校验（排除自身）

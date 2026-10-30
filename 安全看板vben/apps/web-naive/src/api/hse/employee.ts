@@ -14,8 +14,25 @@ export namespace EmployeeApi {
   /** 人员分类 */
   export type PersonCategory = '适龄人员' | '超龄人员';
 
-  /** 组织状态（生命周期，后端返回英文枚举） */
-  export type OrgStatus = 'active' | 'left' | 'pending' | 'retired' | 'rehire' | 'reinstated';
+  /**
+   * 组织状态（生命周期，后端返回英文枚举）
+   * A-02d：secondment=借调（≠ transfer 一般调动）、unpaid_leave=停薪留职、former=历史兼容值（只读）
+   * A-02d.3（B02-DEC-03.17 P5）：补 inactive —— `displayStatusSql` 的 ELSE 分支在
+   *   assignment.status='inactive' 且用工关系非终态时会原样返回该编码，此前类型缺失。
+   *   inactive 与 retired 是**两个独立编码**（前者=离职语义，后者=退休语义），不得合并。
+   * rehire 为历史兼容值（后端正式编码为 reinstated），保留在类型中仅为读取旧数据不报错。
+   */
+  export type OrgStatus =
+    | 'active'
+    | 'former'
+    | 'inactive'
+    | 'left'
+    | 'pending'
+    | 'rehire'
+    | 'reinstated'
+    | 'retired'
+    | 'secondment'
+    | 'unpaid_leave';
 
   /** 员工列表项（snake_case，对齐后端返回） */
   export interface EmployeeItem {
@@ -37,10 +54,33 @@ export namespace EmployeeApi {
     is_driver?: boolean;
     position_id?: number;
     position_name?: string;
-    /** 组织状态英文枚举：active/left/pending/retired/rehire */
+    /** 组织状态英文枚举（见 OrgStatus）：active/left/inactive/pending/secondment/unpaid_leave/retired/former/reinstated；rehire 为历史别名 */
     org_status?: OrgStatus;
-    /** 用工关系状态（以花名册为准：正式员工/辞职/死亡等） */
+    /**
+     * 用工关系状态（以花名册为准：正式员工/辞职/死亡/退休）
+     * ⚠️ 现状（A-02e.5-D1 核实）：`GET /hse/employee/employees` 的 SELECT **未返回**该列
+     *   （`employeeService.listEmployees` 只返回派生后的 `org_status`），故列表行的该字段恒为 undefined，
+     *   编辑弹窗因此拿不到关系原值。该缺口属 A 节点（关系直接编辑闭环）与 DB-INT 范围，本节点不修，
+     *   也**不得**据此反推关系。
+     *   判断「是否可返聘」请使用 `is_retired_relation`（服务端派生），不要用本字段或 `org_status` 推断。
+     */
     employment_relation?: string;
+    /**
+     * 服务端派生的只读标记（A-02e.5-D1）：`trim(employee.employment_relation) === '退休'`。
+     * 关系为 NULL / 辞职 / 死亡 / 未知值时恒为 false（后端 COALESCE 保证不返回 NULL）。
+     * 仅用于决定「是否展示返聘入口」；真正的资格校验在 `POST /org/rehire` 事务内完成。
+     */
+    is_retired_relation?: boolean;
+    /**
+     * 服务端派生的只读标记（B02-DEC-03.34 / A-02A）：员工当前用工关系是否处于终态集合
+     * （辞职 / 死亡 / 退休）。由 `employeeService.listEmployees` 计算，与后端
+     * `employeeAssignmentService.terminateEmployee` 的关系闸门同源（同一常量集合
+     * `TERMINAL_RELATION_VALUES`）。
+     *   - 关系为 NULL / 空串 / 未知值 / 正式员工 → false；
+     *   - 关系为 辞职 / 死亡 / 退休 → true。
+     * 仅用于决定「是否展示终态登记入口」；真正的资格与事务校验在 `POST /org/terminate` 内完成。
+     */
+    is_terminal_relation?: boolean;
     /** 直接上级姓名 */
     supervisor_name?: string;
     start_date?: string;
@@ -295,6 +335,50 @@ export namespace EmployeeApi {
     remark?: string;
   }
 
+  /**
+   * 终态登记表单数据（B02-DEC-03.34 / A-02A）
+   * 字段严格对齐后端 `employeeAssignmentService.terminateEmployee` 的解构入参：
+   *   { employee_id, terminal_type, event_date, remark }
+   * 说明：
+   *   - `terminal_type` 只接受「辞职 / 死亡 / 退休」三者之一，不得用笼统的「离职」代替具体关系；
+   *   - `event_date` 是**业务事件日期**，必须由操作人显式填写，禁止用系统登记时间/当天日期代替；
+   *     系统登记时间（created_at / updated_at）由后端负责，前端不得覆盖。
+   *   - 不发送 `employment_relation` / `status` / `leave_date`：终态后的关系与离职日期由后端事务决定，
+   *     前端传值一律不接受，也不得用本地赋值伪造终态结果。
+   */
+  export interface OrgTerminateFormData {
+    employee_id: number;
+    /** 终态类型：辞职 / 死亡 / 退休（不得使用「离职」等笼统词） */
+    terminal_type: '辞职' | '死亡' | '退休';
+    /** YYYY-MM-DD，业务事件日期，必填且必须显式选择 */
+    event_date: string;
+    /** 登记依据、审批文号等（可选） */
+    remark?: string;
+  }
+
+  /**
+   * 返聘表单数据（A-02e.5-D1）
+   * 字段严格对齐后端 `employeeAssignmentService.rehireEmployee` 的解构入参：
+   *   { employee_id, org_unit_id, group_id, region_id, enterprise_id, project_id, team_id,
+   *     position_id, supervisor_id, start_date, change_reason, remark }
+   * 说明：
+   *   - 前端走 `team_id`（与调岗一致，取部门树节点 id），由后端 resolveOrgUnitId 解析为 hse_org_unit；
+   *     不直接传 `org_unit_id`（web-naive 无 hse_org_unit 树接口）。
+   *   - `start_date` 是**业务生效日期**，必须由操作人显式填写，禁止用系统登记时间/当天日期代替；
+   *     系统登记时间（created_at / updated_at）由后端负责，前端不得覆盖。
+   *   - 不发送 `employment_relation` / `status`：返聘后的关系重置与新段状态由后端事务决定，
+   *     前端传值一律不接受，也不得用本地赋值伪造返聘结果。
+   */
+  export interface OrgRehireFormData {
+    employee_id: number;
+    team_id: number;
+    position_id: number;
+    /** YYYY-MM-DD */
+    start_date: string;
+    change_reason?: string;
+    remark?: string;
+  }
+
   /** 人事变动历史项 */
   export interface HistoryItem {
     id: number;
@@ -459,6 +543,46 @@ export async function deletePosition(id: number) {
 /** 调岗 / 分配组织关系 */
 export async function assignOrg(data: EmployeeApi.OrgAssignFormData) {
   return requestClient.post(`${BASE}/org/assign`, data);
+}
+
+/**
+ * 返聘（A-02e.5-D1）
+ *
+ * 后端：`POST /api/hse/employee/org/rehire` → `controllers/hse-assignment.js#rehireEmployee`
+ *      → `employeeAssignmentService.rehireEmployee`（单事务：锁行 → 资格 → 建段 → 重置关系 → 历史）
+ *
+ * 与 `assignOrg` 的边界（不得混用）：
+ *   - 本接口只服务「退休 → 重新建立用工关系」这一**动作**，不是状态变更，也不是调岗；
+ *   - 旧接口 `PUT /org/:id/status` 传「返聘」/`reinstated` 会被后端拒绝（-4），必须走本接口；
+ *   - 前端不得自行把 `employment_relation` 改成「正式员工」或造 `reinstated` 段来模拟返聘。
+ *
+ * 失败语义：后端以 `{ code: -4 | -3 | -2 | -1, message }` 返回（HTTP 200），
+ *   由响应拦截器抛出并提示；调用方应保留用户输入并如实展示后端 message。
+ */
+export async function rehireEmployee(data: EmployeeApi.OrgRehireFormData) {
+  return requestClient.post(`${BASE}/org/rehire`, data);
+}
+
+/**
+ * 终态登记（辞职 / 死亡 / 退休）— B02-DEC-03.34 / A-02A
+ *
+ * 后端：`POST /api/hse/employee/org/terminate`
+ *      → `controllers/hse-assignment.js#terminateEmployee`
+ *      → `employeeAssignmentService.terminateEmployee`（单事务：锁行 → 关系闸门 → 关段 → 历史 → 审计）
+ *
+ * 硬约束（对应任务书 §3 / §4 / §5）：
+ *   - 后端在同一事务内写入 `employment_relation` + `leave_date` + 关闭当前任职段 + 写 `employee_history`
+ *     + 写 `sys_operation_log`；任何关键步骤失败整体回滚；
+ *   - 已处于终态（辞职/死亡/退休）的员工会被关系闸门拒绝（-4），不允许重复登记；
+ *   - 关系为 NULL / 空串 / 未知值（待核实）会被拒绝（-4），不得由前端推断或补值；
+ *   - `terminal_type` 只接受具体关系，不接受「离职」等笼统词；
+ *   - `event_date` 必须由操作人显式填写，前端不得用 `Date.now()` 或系统当天日期代替。
+ *
+ * 失败语义：后端以 `{ code: -4 | -3 | -2 | -1, message }` 返回（HTTP 200），
+ *   由响应拦截器抛出并提示；调用方应保留用户输入并如实展示后端 message。
+ */
+export async function terminateEmployee(data: EmployeeApi.OrgTerminateFormData) {
+  return requestClient.post(`${BASE}/org/terminate`, data);
 }
 
 /** 员工人事变动历史 */

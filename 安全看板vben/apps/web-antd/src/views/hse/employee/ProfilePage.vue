@@ -37,6 +37,9 @@ import {
   getEmployeeViolations,
 } from '#/api/hse/employee';
 import type { EmployeeApi } from '#/api/hse/employee';
+// A-02d.3（B02-DEC-03.17 P4.5）：档案接口的 status 由后端 profileStatusSql 派生，
+// 实际返回英文编码（retired / left / inactive / active），需在展示层补编码映射。
+import { orgStatusLabel } from '#/api/hse/employee-status';
 
 const { tokens } = useAntdDesignTokens();
 const route = useRoute();
@@ -102,6 +105,11 @@ const tabStates = reactive<Record<TabKey, TabState>>(
 
 const activeTab = ref<TabKey>('hazards');
 
+/**
+ * 状态判色。
+ * A-02d.3：档案接口（profileStatusSql）返回的是英文编码，原实现只认中文标签 ⇒ 编码值全部落到
+ * default 灰。此处**追加**编码分支，原中文分支逐字保留（旧数据/其它业务状态展示不受影响）。
+ */
 function statusColor(s?: string | null): string {
   switch (s) {
     case '在职':
@@ -114,6 +122,24 @@ function statusColor(s?: string | null): string {
       return 'blue';
     case '返聘':
       return 'cyan';
+    // ↓ A-02d.3 新增：与后端编码对齐（inactive 与 retired 分别取色，不合并）
+    case 'active':
+      return 'green';
+    case 'left':
+    case 'inactive':
+      return 'red';
+    case 'pending':
+    case 'secondment':
+      return 'gold';
+    case 'unpaid_leave':
+      return 'orange';
+    case 'retired':
+      return 'blue';
+    case 'reinstated':
+    case 'rehire':
+      return 'cyan';
+    case 'former':
+      return 'default';
     default:
       return 'default';
   }
@@ -255,7 +281,7 @@ onMounted(() => {
         <div :style="{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }">
           <Button @click="goBack">返回</Button>
           <span :style="{ fontSize: '18px', fontWeight: 600 }">{{ profile?.name }} · 员工档案</span>
-          <Tag :color="statusColor(profile?.status)">{{ profile?.status || '-' }}</Tag>
+          <Tag :color="statusColor(profile?.status)">{{ orgStatusLabel(profile?.status) }}</Tag>
         </div>
 
         <Row :gutter="16">
@@ -271,7 +297,7 @@ onMounted(() => {
                 <DescriptionsItem label="联系电话">{{ dash(profile?.phone) }}</DescriptionsItem>
                 <DescriptionsItem label="入职日期">{{ dash(profile?.hireDate) }}</DescriptionsItem>
                 <DescriptionsItem label="在职状态">
-                  <Tag :color="statusColor(profile?.status)">{{ profile?.status || '-' }}</Tag>
+                  <Tag :color="statusColor(profile?.status)">{{ orgStatusLabel(profile?.status) }}</Tag>
                 </DescriptionsItem>
               </Descriptions>
             </Card>

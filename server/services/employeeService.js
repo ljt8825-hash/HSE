@@ -7,6 +7,15 @@
 const { pool } = require('../config/db');
 const { decryptFields } = require('../middleware/encryption');
 const employeeEventService = require('./employeeEventService');
+const {
+  statusLabelSql,
+  displayStatusSql,
+  leftRelationInSql,
+  knownRelationInSql,
+  terminalRelationInSql,
+  validateRelationInput,
+  RELATION,
+} = require('./employeeStatusDict');
 const { ENCRYPT_FIELDS, secureEncode, parseIdList, fetchEmployeeInfosByIds, buildOverAgeCondition } = require('../routes/hse-employee/_shared');
 
 // 脱敏：身份证 前6 + **** + 后4
@@ -85,16 +94,24 @@ async function listEmployees(query) {
     } else if (employmentRelation === 'active') {
       conditions.push(`e.employment_relation = '正式员工'`);
     } else if (employmentRelation === 'left') {
-      conditions.push(`e.employment_relation IN ('辞职','死亡')`);
+      // 离职口径 = 辞职 + 死亡（退休单列，不并入离职 —— B02-DEC-03.15 §七）
+      conditions.push(leftRelationInSql('e.employment_relation'));
     } else if (employmentRelation === 'total') {
-      conditions.push(`e.employment_relation IN ('正式员工','辞职','死亡')`);
+      // 花名册全员：含退休，否则退休人员会被排除在「总数」之外
+      conditions.push(knownRelationInSql('e.employment_relation'));
     }
   } else if (status) {
-    // 状态筛选：在职/离职以花名册用工关系为权威（与统计卡一致）；待岗/退休/返聘按任职状态
+    // 状态筛选：在职 / 离职以花名册用工关系为权威（与统计卡一致）；待岗 / 返聘按任职状态
     if (status === 'active') {
       conditions.push(`e.employment_relation = '正式员工'`);
     } else if (status === 'left') {
-      conditions.push(`e.employment_relation IN ('辞职','死亡')`);
+      conditions.push(leftRelationInSql('e.employment_relation'));
+    } else if (status === 'retired') {
+      // 退休（D1）：新数据以「关系 = 退休」为权威；旧数据可能只有 assignment_status = 'retired'，
+      // 两者并集保证「新记录可筛选 + 旧数据读取兼容」。
+      conditions.push(
+        `(e.employment_relation = '${RELATION.RETIRED}' OR ev.assignment_status = 'retired')`,
+      );
     } else {
       conditions.push(`ev.assignment_status = $${paramIdx}`);
       params.push(status);
@@ -130,9 +147,23 @@ async function listEmployees(query) {
                  ELSE ev.org_name END AS dept_name,
             ou.org_path AS org_path,
             ea.position_id, ev.position_name,
-            CASE WHEN e.employment_relation IN ('辞职','死亡') THEN 'left' ELSE ev.assignment_status END AS org_status,
+            ${displayStatusSql('e.employment_relation', 'ev.assignment_status')} AS org_status,
             ea.start_date,
             e.leave_date,
+            -- 返聘入口资格标记（A-02e.5-D1）：**只读派生布尔**，不落库、不参与写入。
+            -- 唯一 true 来源是 employee.employment_relation 去空格后等于「退休」——
+            -- 与 employeeAssignmentService.rehireEmployee 的资格判定（String(relation).trim() === '退休'）同源；
+            -- 关系为 NULL / 辞职 / 死亡 / 未知值一律 false（COALESCE 保证不会返回 NULL）。
+            -- 前端仅据此决定「是否展示返聘入口」，真正的资格校验仍在返聘事务内（FOR UPDATE + 关系权威）。
+            -- 复用 RELATION.RETIRED 常量，禁止在此硬编码中文取值。
+            (COALESCE(trim(e.employment_relation), '') = '${RELATION.RETIRED}') AS is_retired_relation,
+            -- 终态登记入口资格标记（A-02A / B02-DEC-03.34）：**只读派生布尔**，不落库、不参与写入。
+            -- 唯一 true 来源是 employee.employment_relation 命中终态原因集合（辞职 / 死亡 / 退休），
+            -- 与 employeeAssignmentService.terminateEmployee 的关系闸门同源（同一常量集合）。
+            -- 关系为 NULL / 空串 / 未知历史值一律 false（COALESCE 保证不返回 NULL）。
+            -- 刻意**不**在此返回 employment_relation 原值：人员编辑弹窗会读取该字段并原样回传，
+            -- 一旦出现在列表里，编辑姓名/手机号就会顺带写关系（P0-A1 扩大到高频路径）。
+            (COALESCE(${terminalRelationInSql('e.employment_relation')}, false)) AS is_terminal_relation,
             CASE WHEN ev.position_name ILIKE '%驾驶员%' OR ev.position_name ILIKE '%司机%' THEN true ELSE false END AS is_driver,
             ea_sup.supervisor_id AS supervisor_id,
             sup.name AS supervisor_name
@@ -174,8 +205,10 @@ async function getFilterOptions() {
 // GET /employees/stats — 员工统计
 async function getEmployeeStats() {
   // 在职/离职口径以「花名册·用工关系状态」为权威
+  // 离职 = 辞职 + 死亡；退休单列（B02-DEC-03.15 §七：退休不得误标为离职）
   const ACTIVE_RELATION = `e.employment_relation = '正式员工'`;
-  const LEFT_RELATION = `e.employment_relation IN ('辞职','死亡')`;
+  const LEFT_RELATION = leftRelationInSql('e.employment_relation');
+  const KNOWN_RELATION = knownRelationInSql('e.employment_relation');
 
   const [totalResult, typeResult, categoryResult, statusResult, listTotalResult, activeResult, leftResult, overAgeResult] = await Promise.all([
     pool.query(`SELECT COUNT(*)::int AS total FROM employee WHERE is_deleted = false`),
@@ -183,20 +216,13 @@ async function getEmployeeStats() {
     pool.query(`SELECT person_category, COUNT(*)::int AS count FROM employee WHERE is_deleted = false AND person_category IS NOT NULL GROUP BY person_category`),
     pool.query(`
       SELECT 
-        CASE 
-          WHEN ea.status = 'active' THEN '在职'
-          WHEN ea.status = 'pending' THEN '待岗'
-          WHEN ea.status = 'inactive' THEN '离职'
-          WHEN ea.status = 'retired' THEN '退休'
-          WHEN ea.status = 'reinstated' THEN '返聘'
-          ELSE ea.status
-        END AS status,
+        ${statusLabelSql('ea.status')} AS status,
         COUNT(*)::int AS count 
       FROM employee_assignment ea 
       WHERE ea.is_current = true AND ea.is_deleted = false 
       GROUP BY ea.status
     `),
-    pool.query(`SELECT COUNT(*)::int AS n FROM employee e WHERE e.is_deleted = false AND e.employment_relation IN ('正式员工','辞职','死亡')`),
+    pool.query(`SELECT COUNT(*)::int AS n FROM employee e WHERE e.is_deleted = false AND ${KNOWN_RELATION}`),
     pool.query(`SELECT COUNT(*)::int AS n FROM employee e WHERE e.is_deleted = false AND ${ACTIVE_RELATION}`),
     pool.query(`SELECT COUNT(*)::int AS n FROM employee e WHERE e.is_deleted = false AND ${LEFT_RELATION}`),
     pool.query(`SELECT COUNT(*)::int AS n FROM employee e WHERE e.is_deleted = false AND ${ACTIVE_RELATION} AND ${buildOverAgeCondition('e')}`),
@@ -254,13 +280,7 @@ async function getEmployeeProfile(empId) {
 
   const orgResult = await pool.query(
     `SELECT ea.org_unit_id, ea.operation_unit_id, ea.position_id, ea.start_date,
-            CASE
-              WHEN ea.status = 'active' THEN '在职'
-              WHEN ea.status = 'pending' THEN '待岗'
-              WHEN ea.status = 'inactive' THEN '离职'
-              WHEN ea.status = 'retired' THEN '退休'
-              WHEN ea.status = 'reinstated' THEN '返聘'
-              ELSE ea.status END AS assignment_status,
+            ${statusLabelSql('ea.status')} AS assignment_status,
             ou.org_name, ou.org_type,
             opu.unit_name, opu.unit_type AS operation_unit_type,
             p.name AS position_name,
@@ -279,7 +299,7 @@ async function getEmployeeProfile(empId) {
     pool.query(`SELECT COUNT(*)::int AS c FROM accidents WHERE handler_id = $1 AND is_deleted = false`, [empId]),
     pool.query(`SELECT COUNT(*)::int AS c FROM emergency_plans WHERE responsible_person_id = $1 AND is_deleted = false`, [empId]),
     pool.query(`SELECT COUNT(*)::int AS c FROM training_records WHERE employee_id = $1 AND is_deleted = false`, [empId]),
-    pool.query(`SELECT COUNT(*)::int AS c FROM violations WHERE name = (SELECT name FROM employee WHERE id = $1 AND is_deleted = false)`, [empId]),
+    pool.query(`SELECT COUNT(*)::int AS c FROM violation_records WHERE violator_id = $1 AND is_deleted = false`, [empId]),
   ]);
 
   return {
@@ -376,13 +396,13 @@ function listEmployeeTraining(empId, query) {
   });
 }
 
-// GET /employees/:id/violations — 三违记录（按姓名匹配 employee.name；violations 表无 employee_id 列）
+// GET /employees/:id/violations — 三违记录（violator_id 精确匹配；读源为 violation_records）
 function listEmployeeViolations(empId, query) {
   return listEmployeeRelated({
     empId, query,
-    table: 'violations',
-    whereCols: (id) => `name = (SELECT name FROM employee WHERE id = $1 AND is_deleted = false)`,
-    selectCols: 'id, no, violation_date, violation_type, status, name, position, description',
+    table: 'violation_records',
+    whereCols: (id) => `violator_id = $1 AND is_deleted = false`,
+    selectCols: 'id, no, violation_date, violation_type, status, violator_name AS name, position, description',
     orderBy: 'violation_date',
     orderExpr: 'violation_date DESC NULLS LAST',
   });
@@ -404,14 +424,7 @@ async function getEmployeeDetail(id) {
   // 查询当前组织关系 - Sprint-C Phase 1: 使用 employee_assignment 替代 hse_employee_org
   const orgResult = await pool.query(
     `SELECT ea.id, ea.position_id, ea.start_date, ea.supervisor_id,
-            CASE 
-              WHEN ea.status = 'active' THEN '在职'
-              WHEN ea.status = 'pending' THEN '待岗'
-              WHEN ea.status = 'inactive' THEN '离职'
-              WHEN ea.status = 'retired' THEN '退休'
-              WHEN ea.status = 'reinstated' THEN '返聘'
-              ELSE ea.status
-            END AS status,
+            ${statusLabelSql('ea.status')} AS status,
             ou.org_path,
             ou.id AS org_unit_id,
             ou.org_name,
@@ -468,6 +481,18 @@ async function updateEmployee(id, updates) {
   const values = [];
   let paramIdx = 1;
 
+  // A-02B（B02-DEC-03.35）普通编辑接口收口：
+  // employee.employment_relation 是人员关系权威字段，其变更只能走专用业务闭环
+  // （A-02A 终态登记 / B2.2 返聘）。普通编辑请求只要显式携带该字段，
+  // 必须在「任何业务更新之前」明确拒绝，不得静默忽略（否则前端会误判关系修改成功）。
+  // -4 = 本域既有「业务冲突」拒绝码（与 assignEmployee / terminateEmployee 闸门同源）。
+  if (updates && updates.employment_relation !== undefined) {
+    return {
+      error: -4,
+      message: '人员关系（employment_relation）不能通过普通编辑接口修改；如需变更，请使用「终态登记」或「返聘」专用入口。',
+    };
+  }
+
   // 工号唯一性检查
   if (updates.employee_code) {
     const existCode = await pool.query(`SELECT id FROM employee WHERE employee_code = $1 AND id != $2 AND is_deleted = false`, [updates.employee_code, id]);
@@ -493,11 +518,8 @@ async function updateEmployee(id, updates) {
       values.push(updates[field]);
     }
   }
-  // 花名册「用工关系状态 / 离职日期」（以花名册为权威，空串置空）
-  if (updates.employment_relation !== undefined) {
-    fields.push(`employment_relation = $${paramIdx++}`);
-    values.push(updates.employment_relation ? String(updates.employment_relation).trim() : null);
-  }
+  // A-02B（B02-DEC-03.35）：employment_relation 的写路径已被函数顶部闸门显式拒绝，
+  // 此处不再保留任何写路径——普通编辑无权修改人员关系，避免「白名单静默删除后返回成功」造成误判。
   if (updates.leave_date !== undefined) {
     fields.push(`leave_date = $${paramIdx++}`);
     values.push(updates.leave_date ? String(updates.leave_date).trim() : null);

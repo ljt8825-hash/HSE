@@ -12,7 +12,6 @@ import {
   NCard,
   NDrawer,
   NDrawerContent,
-  NDropdown,
   NInput,
   NInputNumber,
   NModal,
@@ -44,8 +43,6 @@ import {
   resolvePending,
   executeImport,
   deleteImportBatch,
-  getClearAllPreview,
-  clearAllCascade,
   getRosterSourceFiles,
   importRosterFromSource,
   type EmployeeImportV2Api,
@@ -173,9 +170,7 @@ const resolveForm = reactive({
 const importResultVisible = ref(false);
 const importResult = ref<EmployeeImportV2Api.ImportResult | null>(null);
 
-// 清空
-const clearAllPreview = ref<any>(null);
-const clearAllLoading = ref(false);
+// 清空（已暂停：P0-1 数据删除风险隔离，原 clearAllPreview / clearAllLoading 状态随之移除）
 
 // ============================================================
 // 列表加载
@@ -435,90 +430,17 @@ async function handleDeleteBatch(record: any) {
 }
 
 // ============================================================
-// 清空所有人员
+// 清空所有人员 —— 已暂停（P0-1 数据删除风险隔离 · B02-DEC-03.30）
 // ============================================================
-function buildClearAllContent(preview: any): string {
-  const layers = preview?.layers || {};
-  const summary = preview?.summary || {};
-  const noAction = layers.noAction || {};
-  const setNull = layers.setNull || {};
-  const core = layers.core || {};
-  const noActionTotal = summary.noActionTotal || 0;
-  const setNullTotal = summary.setNullTotal || 0;
-  const coreTotal = summary.coreTotal || 0;
-  const grandTotal = summary.grandTotal || 0;
-
-  const noActionTables = Object.keys(noAction).length;
-  const setNullTables = Object.keys(setNull).length;
-
-  return [
-    '此操作将【物理删除】以下数据，且不可逆、不可恢复：',
-    '',
-    `① 硬引用业务数据（NO ACTION）：${noActionTotal} 条，涉及 ${noActionTables} 张表（风险记录、责任体系、网格检查等）`,
-    `② 软引用业务数据（SET NULL）：${setNullTotal} 条，涉及 ${setNullTables} 张表（培训/考核/三违/事故/隐患/合同等）`,
-    `③ 人员核心数据：${coreTotal} 条（员工 ${core.employee || 0} 人、待确认 ${core.employee_import_pending || 0} 条、批次 ${core.employee_import_batch || 0} 个；任职关系 employee_assignment 已计入上方业务数据）`,
-    '',
-    `合计约 ${grandTotal} 条数据将被永久删除。`,
-    '请确认已对 backup_97_* / backup_98_* 逻辑备份表做过全量备份，是否继续？',
-  ].join('\n');
-}
-
-async function openClearAllConfirm() {
-  clearAllLoading.value = true;
-  try {
-    const preview: any = await getClearAllPreview();
-    clearAllPreview.value = preview;
-    dialog.error({
-      title: '确定级联清空所有人员信息？',
-      content: buildClearAllContent(preview),
-      positiveText: '确认级联清空',
-      negativeText: '取消',
-      onPositiveClick: handleClearAll,
-    });
-  } catch (e: any) {
-    const errMsg: string = e?.message || e?.toString() || '未知错误';
-    if (errMsg.includes('401') || errMsg.includes('token') || errMsg.includes('认证') || errMsg.includes('登录')) {
-      message.error('会话已过期，请重新登录后再试');
-    } else if (errMsg.includes('403') || errMsg.includes('权限')) {
-      message.error('权限不足，仅管理员可执行清空操作');
-    } else {
-      message.error('预检查失败：' + errMsg);
-    }
-  } finally {
-    clearAllLoading.value = false;
-  }
-}
-
-async function handleClearAll() {
-  try {
-    const res: any = await clearAllCascade();
-    const stats = res || {};
-    const details = [
-      stats.employee ? `员工 ${stats.employee} 人` : '',
-      stats.employee_assignment ? `任职 ${stats.employee_assignment} 条` : '',
-      stats.employee_import_batch ? `批次 ${stats.employee_import_batch} 个` : '',
-      stats.employee_import_pending ? `待确认 ${stats.employee_import_pending} 条` : '',
-    ]
-      .filter(Boolean)
-      .join('、');
-    message.success(`级联清空完成：${details || '0 条'}`);
-    loadList();
-    if (detailDrawerVisible.value) {
-      detailDrawerVisible.value = false;
-    }
-  } catch (e: any) {
-    const errMsg: string = e?.message || e?.toString() || '未知错误';
-    const status: number | undefined = e?.response?.status;
-    if (status === 401 || errMsg.includes('401') || errMsg.includes('token') || errMsg.includes('认证') || errMsg.includes('登录')) {
-      message.error('会话已过期，请重新登录后再试');
-    } else if (status === 403 || errMsg.includes('403') || errMsg.includes('权限')) {
-      message.error('权限不足，仅管理员可执行清空操作');
-    } else if (errMsg.includes('foreign key') || errMsg.includes('外键') || errMsg.includes('constraint') || errMsg.includes('引用')) {
-      message.error('级联清空失败：仍有业务数据引用员工记录，请先清理相关业务数据');
-    } else {
-      message.error('级联清空失败：' + errMsg);
-    }
-  }
+// 原实现（GET 预览 → 二次确认弹窗 → POST /clear-all-cascade）已整体移除：
+// 该接口会无条件物理删除全部人员、任职关系及 employee 的全部外键子表数据，不可逆。
+// 服务端已在 services/employeeImportV2Service.js 中以 PURGE_ALL_PERMANENTLY_DISABLED
+// 永久短路（早于 pool.connect()），本页不再保留任何可发起该请求的调用路径。
+// 注意：前端禁用只是交互层提示，真正的安全边界是服务端 fail-closed 隔离。
+function notifyPurgeSuspended() {
+  message.warning(
+    '「清空人员信息」已暂停（P0 数据删除风险隔离）：该操作会物理删除全部人员及关联业务数据，如需清空测试数据请联系系统管理员。',
+  );
 }
 
 // ============================================================
@@ -656,12 +578,10 @@ const actionState = computed<Partial<Record<HseActionKey, { hidden?: boolean; lo
   create: { hidden: true },
 }));
 
-const moreOptions = [
-  { label: '清空人员信息', key: 'clear-all', type: 'error' as const },
-];
-function onMoreSelect(key: string) {
-  if (key === 'clear-all') openClearAllConfirm();
-}
+// 危险操作入口：已暂停（P0-1）。保留占位按钮是为了让管理员明确看到「功能还在、但已停用」，
+// 而不是以为功能被误删；点击只提示，不发起任何请求。
+const purgeSuspendedTip =
+  '已暂停（P0 数据删除风险隔离）：该操作会物理删除全部人员及关联业务数据，如需清空测试数据请联系系统管理员';
 
 function formatDateTime(date?: string | null): string {
   if (!date) return '-';
@@ -690,9 +610,10 @@ onMounted(() => {
       <NButton v-if="canImport" type="primary" secondary @click="openSourceDrawer">
         从目录导入
       </NButton>
-      <NDropdown v-if="canClearAll" :options="moreOptions" @select="onMoreSelect">
-        <NButton>更多操作</NButton>
-      </NDropdown>
+      <!-- P0-1 数据删除风险隔离：全量清空入口已暂停，仅保留禁用态提示，不发起任何请求 -->
+      <NButton v-if="canClearAll" disabled :title="purgeSuspendedTip" @click="notifyPurgeSuspended">
+        清空人员信息（已暂停）
+      </NButton>
     </template>
 
     <!-- 筛选 -->

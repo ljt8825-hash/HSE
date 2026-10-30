@@ -36,6 +36,8 @@ import {
 } from '#/components/hse';
 import EmployeeHistoryDrawer from '#/views/hse/employee/components/EmployeeHistoryDrawer.vue';
 import OrgTransferModal from '#/views/hse/employee/components/OrgTransferModal.vue';
+import RehireModal from '#/views/hse/employee/components/RehireModal.vue';
+import TerminalModal from '#/views/hse/employee/components/TerminalModal.vue';
 import type { VxeTableGridColumns } from '#/adapter/vxe-table';
 import {
   createEmployee,
@@ -50,7 +52,13 @@ import {
   updateEmployee,
   type EmployeeApi,
 } from '#/api/hse/employee';
-import { dialog, message } from '#/adapter/naive';
+import { buildRowActions } from '#/api/hse/employee-rehire';
+import { buildTerminateAction } from '#/api/hse/employee-terminate';
+import {
+  EMPLOYEE_STATUS_FILTER_OPTIONS,
+  orgStatusLabel,
+} from '#/api/hse/employee-status';
+import { message } from '#/adapter/naive';
 
 defineOptions({ name: 'PersonnelEmployee' });
 
@@ -59,21 +67,17 @@ const { hasAccessByRoles } = useAccess();
 const canEdit = computed(() => hasAccessByRoles(['admin', 'safety_manager']));
 
 // ===================== 状态枚举映射（后端存英文，前端展示中文） =====================
-const STATUS_LABEL: Record<string, string> = {
-  active: '在职',
-  left: '离职',
-  inactive: '离职',
-  pending: '待岗',
-  retired: '退休',
-  rehire: '返聘',
-  reinstated: '返聘',
-};
+// A-02d.3（B02-DEC-03.17 P3/P5）：标签与筛选项统一收口到 `#/api/hse/employee-status`，
+// 避免标签表与筛选项各自维护造成漂移；筛选项 value 直接使用后端编码。
 const STATUS_TAG: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'neutral'> = {
   active: 'success',
   left: 'neutral',
   inactive: 'neutral',
   pending: 'warning',
+  secondment: 'warning',
+  unpaid_leave: 'warning',
   retired: 'info',
+  former: 'neutral',
   rehire: 'info',
   reinstated: 'info',
 };
@@ -256,6 +260,9 @@ const formModel = reactive<EmployeeApi.EmployeeFormData & { id?: number }>({
   leave_date: '',
 });
 
+/** A-02B（B02-DEC-03.35）：普通编辑只读展示当前人员关系（以花名册为准），不提交、不可改 */
+const displayEmploymentRelation = ref<string | null>(null);
+
 function resetForm() {
   formModel.id = undefined;
   formModel.employee_code = '';
@@ -270,6 +277,7 @@ function resetForm() {
   formModel.is_public_welfare = false;
   formModel.employment_relation = '';
   formModel.leave_date = '';
+  displayEmploymentRelation.value = null;
 }
 
 function openCreate() {
@@ -278,7 +286,7 @@ function openCreate() {
   editingId.value = null;
   formOpen.value = true;
 }
-function openEdit(row: EmployeeApi.EmployeeItem) {
+async function openEdit(row: EmployeeApi.EmployeeItem) {
   resetForm();
   formMode.value = 'edit';
   editingId.value = row.id;
@@ -294,9 +302,11 @@ function openEdit(row: EmployeeApi.EmployeeItem) {
     person_category: row.person_category,
     person_type: row.person_type ?? '',
     is_public_welfare: row.is_public_welfare ?? false,
-    employment_relation: row.employment_relation ?? '',
     leave_date: row.leave_date ?? '',
   });
+  // A-02B：普通编辑只读展示当前人员关系（以花名册为准），不提交、不可改。
+  const authority = await getRosterAuthority(row.id).catch(() => null);
+  displayEmploymentRelation.value = authority?.employment_relation ?? null;
   formOpen.value = true;
 }
 function openView(row: EmployeeApi.EmployeeItem) {
@@ -326,31 +336,6 @@ async function onSubmit() {
     return;
   }
 
-  // 【以花名册为准】编辑态且明确填写了用工关系状态时，与花名册权威值比对，
-  // 不一致则提醒并询问是否仍按人工填写值保存（避免历史遗留/人工写错被误覆盖或误写）。
-  if (formMode.value === 'edit' && editingId.value != null && formModel.employment_relation) {
-    const authority = await getRosterAuthority(editingId.value).catch(() => null);
-    if (
-      authority?.found &&
-      authority.employment_relation &&
-      authority.employment_relation !== formModel.employment_relation
-    ) {
-      const confirmed = await new Promise<boolean>((resolve) => {
-        dialog.warning({
-          title: '用工状态与花名册不一致',
-          content: `花名册记录该员工用工关系状态为「${authority.employment_relation}」，您当前填写为「${formModel.employment_relation}」。是否仍按您填写的内容保存？`,
-          positiveText: '仍保存',
-          negativeText: '取消',
-          onPositiveClick: () => resolve(true),
-          onNegativeClick: () => resolve(false),
-          onClose: () => resolve(false),
-          onMaskClick: () => resolve(false),
-        });
-      });
-      if (!confirmed) return;
-    }
-  }
-
   formLoading.value = true;
   try {
     const payload: EmployeeApi.EmployeeFormData = {
@@ -364,7 +349,6 @@ async function onSubmit() {
       person_category: formModel.person_category,
       person_type: formModel.person_type || undefined,
       is_public_welfare: formModel.is_public_welfare,
-      employment_relation: formModel.employment_relation || undefined,
       leave_date: formModel.leave_date || undefined,
     };
     if (formMode.value === 'edit' && editingId.value != null) {
@@ -393,13 +377,16 @@ async function onDelete(row: EmployeeApi.EmployeeItem) {
   }
 }
 
-// ===================== 调岗 / 人事变动历史 =====================
+// ===================== 调岗 / 返聘 / 人事变动历史 =====================
 const transferOpen = ref(false);
 const transferEmployeeId = ref<number | null>(null);
 const transferEmployeeName = ref('');
 const historyOpen = ref(false);
 const historyEmployeeId = ref<number | null>(null);
 const historyEmployeeName = ref('');
+const rehireOpen = ref(false);
+const rehireEmployeeId = ref<number | null>(null);
+const rehireEmployeeName = ref('');
 
 function openTransfer(row: EmployeeApi.EmployeeItem) {
   transferEmployeeId.value = row.id;
@@ -411,18 +398,51 @@ function openHistory(row: EmployeeApi.EmployeeItem) {
   historyEmployeeName.value = row.name;
   historyOpen.value = true;
 }
+function openRehire(row: EmployeeApi.EmployeeItem) {
+  rehireEmployeeId.value = row.id;
+  rehireEmployeeName.value = row.name;
+  rehireOpen.value = true;
+}
 
-const moreOptions = [
-  { key: 'transfer', label: '调岗' },
-  { key: 'history', label: '历史' },
-];
+// 终态登记（A-02A）：入口显示由 buildTerminateAction 依据服务端派生的 is_terminal_relation 决定；
+// 真正资格与事务一致性校验在后端 POST /org/terminate 内完成。
+const terminateOpen = ref(false);
+const terminateEmployeeId = ref<number | null>(null);
+const terminateEmployeeName = ref('');
+const terminateOrgStatus = ref<string | null>(null);
+const terminateIsTerminalRelation = ref<boolean | null>(null);
+const terminateIsRetiredRelation = ref<boolean | null>(null);
 
+function openTerminate(row: EmployeeApi.EmployeeItem) {
+  terminateEmployeeId.value = row.id;
+  terminateEmployeeName.value = row.name;
+  terminateOrgStatus.value = row.org_status ?? null;
+  terminateIsTerminalRelation.value = row.is_terminal_relation ?? null;
+  terminateIsRetiredRelation.value = row.is_retired_relation ?? null;
+  terminateOpen.value = true;
+}
+
+// 行操作菜单由 `buildRowActions` 统一构造（A-02e.5-D1）：
+// 「返聘」仅在 当前用户有人员增改权限 且 服务端标记 is_retired_relation=true 时出现，
+// 调岗 / 历史 两项的文案与顺序保持原样。仅为交互体验，后端仍是资格权威。
 function handleMoreSelect(key: string | number, row: EmployeeApi.EmployeeItem) {
   if (key === 'transfer') openTransfer(row);
   else if (key === 'history') openHistory(row);
+  else if (key === 'rehire') openRehire(row);
+  else if (key === 'terminate') openTerminate(row);
 }
 
 function onTransferSuccess() {
+  onRefresh();
+}
+
+// 返聘成功后统一走服务端重新取数（列表 + 统计），不在前端本地改写关系或状态
+function onRehireSuccess() {
+  onRefresh();
+}
+
+// 终态登记成功后同样统一走服务端重新取数，前端不本地改写任何关系或状态
+function onTerminateSuccess() {
   onRefresh();
 }
 
@@ -661,13 +681,7 @@ onMounted(() => {
           v-model:value="searchForm.status"
           placeholder="状态"
           clearable
-          :options="[
-            { label: '在职', value: 'active' },
-            { label: '待岗', value: 'pending' },
-            { label: '离职', value: 'left' },
-            { label: '退休', value: 'retired' },
-            { label: '返聘', value: 'reinstated' },
-          ]"
+          :options="EMPLOYEE_STATUS_FILTER_OPTIONS"
         />
       </NGi>
       <NGi>
@@ -707,7 +721,7 @@ onMounted(() => {
       </template>
       <template #status="{ row }">
         <HseStatusTag :type="STATUS_TAG[row.org_status] || 'neutral'">
-          {{ STATUS_LABEL[row.org_status] || row.org_status || '-' }}
+          {{ orgStatusLabel(row.org_status) }}
         </HseStatusTag>
       </template>
       <template #action="{ row }">
@@ -729,7 +743,10 @@ onMounted(() => {
             </template>
             确定删除该员工吗？
           </NPopconfirm>
-          <NDropdown :options="moreOptions" @select="(key) => handleMoreSelect(key, row)">
+          <NDropdown
+            :options="[...buildRowActions(row, canEdit), ...buildTerminateAction(row, canEdit)]"
+            @select="(key: string | number) => handleMoreSelect(key, row)"
+          >
             <NButton size="small" type="primary" quaternary>更多</NButton>
           </NDropdown>
         </NSpace>
@@ -792,20 +809,13 @@ onMounted(() => {
           </NFormItem>
           <NFormItem
             v-if="formMode === 'edit'"
-            label="用工关系状态"
-            :extra="'以花名册为准；与花名册不一致时保存会提醒'"
+            label="用工关系状态（只读）"
+            :extra="'以花名册为准，变更须走「终态登记 / 返聘」专用入口，普通编辑不可改'"
           >
-            <NSelect
-              v-model:value="formModel.employment_relation"
-              placeholder="选填"
-              clearable
-              :options="[
-                { label: '正式员工', value: '正式员工' },
-                { label: '辞职', value: '辞职' },
-                { label: '死亡', value: '死亡' },
-                { label: '待岗', value: '待岗' },
-                { label: '退休', value: '退休' },
-              ]"
+            <NInput
+              :value="displayEmploymentRelation || '（未登记 / 待核实）'"
+              :disabled="true"
+              placeholder="（未登记 / 待核实）"
             />
           </NFormItem>
           <NFormItem v-if="formMode === 'edit'" label="离职日期">
@@ -858,6 +868,27 @@ onMounted(() => {
       :employee-id="historyEmployeeId ?? undefined"
       :employee-name="historyEmployeeName"
       @update:open="(v: boolean) => (historyOpen = v)"
+    />
+
+    <!-- 返聘（A-02e.5-D1）：唯一正向出口，走 POST /org/rehire，不复用编辑/状态接口 -->
+    <RehireModal
+      :open="rehireOpen"
+      :employee-id="rehireEmployeeId ?? undefined"
+      :employee-name="rehireEmployeeName"
+      @update:open="(v: boolean) => (rehireOpen = v)"
+      @success="onRehireSuccess"
+    />
+
+    <!-- 终态登记（B02-DEC-03.34 / A-02A）：唯一正向出口，走 POST /org/terminate，不复用编辑/状态接口 -->
+    <TerminalModal
+      :open="terminateOpen"
+      :employee-id="terminateEmployeeId ?? undefined"
+      :employee-name="terminateEmployeeName"
+      :org-status="terminateOrgStatus"
+      :is-terminal-relation="terminateIsTerminalRelation"
+      :is-retired-relation="terminateIsRetiredRelation"
+      @update:open="(v: boolean) => (terminateOpen = v)"
+      @success="onTerminateSuccess"
     />
   </HsePageLayout>
 </template>

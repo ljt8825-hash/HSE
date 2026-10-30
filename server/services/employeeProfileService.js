@@ -3,6 +3,13 @@
  * 从 hse-employee/profile-center.js route 内联 handler 迁移 —— 行为逐字节不变
  */
 const { pool } = require('../config/db');
+const {
+  displayStatusSql,
+  profileStatusSql,
+  leftRelationInSql,
+  terminalRelationValueListSql,
+  RELATION,
+} = require('./employeeStatusDict');
 
 // GET /employees/profile/list — 员工档案列表（分页 + 搜索 + 筛选）
 async function getProfileList(query) {
@@ -32,6 +39,8 @@ async function getProfileList(query) {
   }
   if (is_driver === 'true') {
     conditions.push(`(ev.position_name ILIKE '%驾驶员%' OR ev.position_name ILIKE '%司机%')`);
+    // D1：引入「退休」后必须同步这里的「排除终态原因」口径，
+    // 否则退休驾驶员会被当成在岗驾驶员（NOT IN 列表见 terminalRelationValueListSql）。
     conditions.push(`
       COALESCE(
         (SELECT x.employment_relation FROM employee x
@@ -46,17 +55,22 @@ async function getProfileList(query) {
            WHERE x.is_deleted = false AND x.employment_relation IS NOT NULL
              AND x.name IS NOT NULL AND x.name = e.name ORDER BY x.id LIMIT 1),
         e.employment_relation
-      ) NOT IN ('辞职', '死亡')
+      ) NOT IN (${terminalRelationValueListSql()})
     `);
   } else if (is_driver === 'false') {
     conditions.push(`(ev.position_name IS NULL OR (ev.position_name NOT ILIKE '%驾驶员%' AND ev.position_name NOT ILIKE '%司机%'))`);
   }
   if (status) {
-    // 在职/离职以花名册用工关系为权威（与统计卡一致）；其余按任职状态
+    // 在职 / 离职以花名册用工关系为权威（与统计卡一致）；退休单列；其余按任职状态
     if (status === 'active') {
       conditions.push(`e.employment_relation = '正式员工'`);
     } else if (status === 'left') {
-      conditions.push(`e.employment_relation IN ('辞职','死亡')`);
+      conditions.push(leftRelationInSql('e.employment_relation'));
+    } else if (status === 'retired') {
+      // 退休（D1）：新数据以「关系 = 退休」为权威；旧数据可能仅 assignment_status = 'retired'
+      conditions.push(
+        `(e.employment_relation = '${RELATION.RETIRED}' OR ev.assignment_status = 'retired')`,
+      );
     } else {
       conditions.push(`ev.assignment_status = $${paramIdx}`);
       params.push(status);
@@ -91,7 +105,7 @@ async function getProfileList(query) {
             ea.position_id,
             ev.position_name,
             ev.position_code,
-            CASE WHEN e.employment_relation IN ('辞职','死亡') THEN 'left' ELSE ev.assignment_status END AS status,
+            ${displayStatusSql('e.employment_relation', 'ev.assignment_status')} AS status,
             COALESCE(ea.start_date, ev.start_date) AS hire_date,
             e.leave_date,
             e.roster_department,
@@ -134,8 +148,7 @@ async function getProfileDetail(id) {
   const empResult = await pool.query(
     `SELECT e.id, e.employee_code, e.name, e.gender, e.birth_date, e.phone, e.id_card,
             e.person_type, e.person_category, e.is_public_welfare,
-            CASE WHEN e.employment_relation IN ('辞职','死亡') THEN 'left'
-                 WHEN e.is_deleted THEN 'inactive' ELSE 'active' END AS status,
+            ${profileStatusSql('e.employment_relation', 'e.is_deleted')} AS status,
             e.roster_department, e.roster_position, e.roster_work_area, e.leave_date,
             CASE WHEN e.birth_date IS NOT NULL THEN EXTRACT(YEAR FROM age(e.birth_date))::INT ELSE NULL END AS age,
             e.created_at, e.updated_at

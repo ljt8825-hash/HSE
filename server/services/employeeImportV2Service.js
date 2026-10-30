@@ -28,10 +28,35 @@ const { pool, isConnected } = require('../config/db');
 const { auditLog } = require('../routes/audit');
 const { encrypt, hashSensitive } = require('../utils/encryption');
 const { validateUploadedFile, deleteFile, fixFilenameEncoding } = require('../middleware/upload');
+const { isTerminalRelation } = require('./employeeStatusDict');
 
 // ============================================================
 // 常量与配置
 // ============================================================
+
+/**
+ * ⛔【P0-1 数据删除风险隔离 · B02-DEC-03.30】全量物理删除硬开关 —— 恒为 true，即永久禁用。
+ *
+ * 为什么是硬编码常量而不是环境变量 / 配置项：
+ *   这两个端点执行的是「无 WHERE 条件的全表物理删除」（DELETE FROM employee 等），
+ *   一旦存在任何可配置的启用通道，就可能在测试库配置被复制到生产、或部署脚本误设时重新开放。
+ *   因此不提供 env / .env / 数据库配置覆盖入口，只能通过修改源码才能改变。
+ *
+ * 隔离位置与强度：
+ *   - `clearAll` / `clearAllCascade` 两个函数体的第一行即返回，早于 `isConnected()` 与 `pool.connect()`。
+ *   - 因此拒绝路径不会建立数据库连接、不会执行任何 SQL（包括 clearAllCascade 里的
+ *     `ALTER TABLE ... DISABLE TRIGGER USER` 与按表 DELETE），可被单元测试以
+ *     「pool.connect 未被调用」严格证明。
+ *   - 原删除逻辑完整保留（未删除任何代码），仅被前置开关短路，便于将来需要恢复时逐行复核。
+ *
+ * 恢复方式：业务接口不设恢复通道。确需清空测试数据时，由数据库管理员在库内执行专用脚本。
+ * 不受影响：只读端点 `GET /clear-all-preview`（仅 COUNT 查询）保持可用，未纳入隔离范围。
+ */
+const PURGE_ALL_PERMANENTLY_DISABLED = true;
+
+/** 全量清空端点被隔离时对外统一返回的提示文案 */
+const PURGE_ALL_DISABLED_MESSAGE =
+  '全量清空人员信息接口已暂停（P0 数据删除风险隔离）：该接口可无条件物理删除全部人员、任职关系及关联业务数据。如需清空测试数据，请由数据库管理员使用专用脚本执行。';
 
 /**
  * 花名册来源目录：默认 G:\safety_vault\08_保险及人员管理\花名册，
@@ -940,27 +965,43 @@ async function performBatchImport(batchId, { userId, username, ip } = {}) {
       const spName = `sp_${i}`;
       try {
         await client.query(`SAVEPOINT ${spName}`);
-        // 员工匹配
+        // 员工匹配（同时带出权威用工关系，供终态闸门判定；不额外新增查询）
         let employeeId = null;
+        let existingRelation = null;
 
         if (p.employee_no) {
           const r = await client.query(
-            `SELECT id FROM employee WHERE employee_code = $1 AND is_deleted = false`, [p.employee_no]
+            `SELECT id, employment_relation FROM employee WHERE employee_code = $1 AND is_deleted = false`, [p.employee_no]
           );
-          if (r.rows.length > 0) employeeId = r.rows[0].id;
+          if (r.rows.length > 0) { employeeId = r.rows[0].id; existingRelation = r.rows[0].employment_relation; }
         }
         if (!employeeId && p.id_card_hash) {
           const r = await client.query(
-            `SELECT id FROM employee WHERE id_card_hash = $1 AND is_deleted = false`, [p.id_card_hash]
+            `SELECT id, employment_relation FROM employee WHERE id_card_hash = $1 AND is_deleted = false`, [p.id_card_hash]
           );
-          if (r.rows.length > 0) employeeId = r.rows[0].id;
+          if (r.rows.length > 0) { employeeId = r.rows[0].id; existingRelation = r.rows[0].employment_relation; }
         }
         if (!employeeId && p.phone_hash && p.employee_name) {
           const r = await client.query(
-            `SELECT id FROM employee WHERE phone_hash = $1 AND name = $2 AND is_deleted = false`,
+            `SELECT id, employment_relation FROM employee WHERE phone_hash = $1 AND name = $2 AND is_deleted = false`,
             [p.phone_hash, p.employee_name]
           );
-          if (r.rows.length > 0) employeeId = r.rows[0].id;
+          if (r.rows.length > 0) { employeeId = r.rows[0].id; existingRelation = r.rows[0].employment_relation; }
+        }
+
+        // A-02e.5-C1（P0）：终态防复活闸门。
+        // 位置刻意选在【本行任何写操作之前】（UPDATE employee / 关旧段 / INSERT 新段都还没发生），
+        // 且早于 SAVEPOINT 内的所有 SQL 写入 ⇒ 拒绝时本行零副作用；
+        // 外层 catch 的 ROLLBACK TO SAVEPOINT 兜底，批次事务语义（逐行隔离 + partial_completed）不变。
+        // 判定只读 employee.employment_relation 权威字段：不看 assignment.status、不看历史段形态、
+        // 不把 NULL 当终态、不把待岗/借调等中间态当终态，也不回填关系字段。
+        if (employeeId && isTerminalRelation(existingRelation)) {
+          const rel = String(existingRelation).trim();
+          throw new Error(
+            `员工「${p.employee_name || ''}」用工关系为「${rel}」，属于终态，`
+            + '禁止通过花名册导入重新建立任职记录；退休人员请使用返聘流程'
+            + '（POST /api/hse/employee/org/rehire），如需恢复请先由人事处理用工关系'
+          );
         }
 
         if (!employeeId) {
@@ -1391,8 +1432,17 @@ async function deleteBatch(batchId) {
   }
 }
 
-/** POST /clear-all 清空所有人员信息（危险操作，仅 admin） */
+/**
+ * POST /clear-all 清空所有人员信息（危险操作，仅 admin）
+ *
+ * ⛔【P0-1 隔离 · B02-DEC-03.30】本函数已被 `PURGE_ALL_PERMANENTLY_DISABLED` 永久短路：
+ *   首行即返回错误描述符，不会进入 `isConnected()` / `pool.connect()` / 任何 DELETE。
+ *   下方原实现完整保留（含事务与回滚），仅供审计与将来按流程恢复时参考。
+ */
 async function clearAll() {
+  // 【P0-1 隔离】fail-closed：早于数据库连接，拒绝路径零连接、零 SQL。
+  if (PURGE_ALL_PERMANENTLY_DISABLED) return err(-1, PURGE_ALL_DISABLED_MESSAGE);
+
   try {
     if (!isConnected()) return err(-1, '数据库未连接');
 
@@ -1526,8 +1576,17 @@ async function clearAllPreview() {
   }
 }
 
-/** POST /clear-all-cascade 级联清空所有人员信息（危险操作，仅 admin） */
+/**
+ * POST /clear-all-cascade 级联清空所有人员信息（危险操作，仅 admin）
+ *
+ * ⛔【P0-1 隔离 · B02-DEC-03.30】本函数已被 `PURGE_ALL_PERMANENTLY_DISABLED` 永久短路：
+ *   首行即返回错误描述符，不会进入备份表校验、`pool.connect()`、`ALTER TABLE ... DISABLE TRIGGER`
+ *   或任何按表 DELETE。下方原实现完整保留，仅供审计与将来按流程恢复时参考。
+ */
 async function clearAllCascade() {
+  // 【P0-1 隔离】fail-closed：早于数据库连接与触发器禁用，拒绝路径零连接、零 SQL、零 DDL。
+  if (PURGE_ALL_PERMANENTLY_DISABLED) return err(-1, PURGE_ALL_DISABLED_MESSAGE);
+
   try {
     if (!isConnected()) return err(-1, '数据库未连接');
 

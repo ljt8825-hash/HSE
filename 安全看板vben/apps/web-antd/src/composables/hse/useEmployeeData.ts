@@ -26,11 +26,14 @@ export interface UseEmployeeDataReturn {
 const cache = new Map<number, EmployeeInfo>();
 
 /** Q2 §2.1 全部 4 类员工变更事件（Q5 事件驱动缓存失效） */
+// A-02e.5-B2.2：新增 EMPLOYEE_REHIRED（返聘）。只补订阅白名单，不改任何展示逻辑；
+// 若不订阅，返聘后缓存不会失效，详情页会继续显示旧组织/旧状态。
 const EMPLOYEE_EVENT_TYPES = [
   'EMPLOYEE_TRANSFERRED',
   'EMPLOYEE_RESIGNED',
   'EMPLOYEE_STATUS_CHANGED',
   'EMPLOYEE_INFO_UPDATED',
+  'EMPLOYEE_REHIRED',
 ] as const;
 
 export function useEmployeeData(employeeId: number): UseEmployeeDataReturn {

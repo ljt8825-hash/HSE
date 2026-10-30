@@ -15,8 +15,25 @@ export namespace EmployeeApi {
   /** 人员分类 */
   export type PersonCategory = '适龄人员' | '超龄人员';
 
-  /** 组织状态（生命周期）。后端实际返回英文枚举：employeeService 将 employment_relation IN ('辞职','死亡') 映射为 'left'，否则取 employee_assignment.status（active/inactive 等）。 */
-  export type OrgStatus = 'active' | 'left' | 'pending' | 'retired' | 'rehire';
+  /**
+   * 组织状态（生命周期）。后端实际返回英文枚举：employeeService 将 employment_relation IN ('辞职','死亡')
+   * 映射为 'left'，关系=退休映射为 'retired'，否则取 employee_assignment.status（active/inactive 等）。
+   *
+   * A-02d.3（B02-DEC-03.17 P4.1）：与后端真实返回值对齐，补齐 inactive / secondment / unpaid_leave /
+   * former / reinstated。inactive 与 retired 是两个独立编码，不得合并。
+   * rehire 仅为历史兼容别名（后端正式编码 reinstated），保留是为了读取旧数据不报错。
+   */
+  export type OrgStatus =
+    | 'active'
+    | 'former'
+    | 'inactive'
+    | 'left'
+    | 'pending'
+    | 'rehire'
+    | 'reinstated'
+    | 'retired'
+    | 'secondment'
+    | 'unpaid_leave';
 
   /** 员工列表项 */
   export interface EmployeeItem {

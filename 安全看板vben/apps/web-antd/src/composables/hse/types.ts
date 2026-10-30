@@ -26,12 +26,13 @@ export interface EmployeeInfo {
   idCard?: string;
 }
 
-/** 员工变更事件类型（Q2 §2.1） */
+/** 员工变更事件类型（Q2 §2.1；A-02e.5-B2.2 补充 EMPLOYEE_REHIRED） */
 export type EmployeeEventType =
   | 'EMPLOYEE_TRANSFERRED'
   | 'EMPLOYEE_RESIGNED'
   | 'EMPLOYEE_STATUS_CHANGED'
-  | 'EMPLOYEE_INFO_UPDATED';
+  | 'EMPLOYEE_INFO_UPDATED'
+  | 'EMPLOYEE_REHIRED';
 
 /** 调岗事件载荷 */
 export interface TransferredPayload {
