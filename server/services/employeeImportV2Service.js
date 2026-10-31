@@ -29,6 +29,7 @@ const { auditLog } = require('../routes/audit');
 const { encrypt, hashSensitive } = require('../utils/encryption');
 const { validateUploadedFile, deleteFile, fixFilenameEncoding } = require('../middleware/upload');
 const { isTerminalRelation } = require('./employeeStatusDict');
+const { writeSegment } = require('./assignmentSegmentService');
 
 // ============================================================
 // 常量与配置
@@ -926,6 +927,10 @@ async function performBatchImport(batchId, { userId, username, ip } = {}) {
   try {
     await client.query('BEGIN');
 
+    // M1-02 · V2 批次去重：以稳定 employee.id 为键。仅当某 id 在本批次「成功 RELEASE SAVEPOINT」后才登记，
+    // 失败行 ROLLBACK TO SAVEPOINT 不登记 ⇒ 失败可重试、成功不可重复写入。
+    const seenEmployeeIds = new Set();
+
     for (let i = 0; i < pendingResult.rows.length; i++) {
       const p = pendingResult.rows[i];
       const spName = `sp_${i}`;
@@ -935,21 +940,22 @@ async function performBatchImport(batchId, { userId, username, ip } = {}) {
         let employeeId = null;
         let existingRelation = null;
 
+        // 员工匹配（同时带出权威用工关系，供终态闸门判定；M1-02 加 FOR UPDATE 取锁后权威值）
         if (p.employee_no) {
           const r = await client.query(
-            `SELECT id, employment_relation FROM employee WHERE employee_code = $1 AND is_deleted = false`, [p.employee_no]
+            `SELECT id, employment_relation FROM employee WHERE employee_code = $1 AND is_deleted = false FOR UPDATE`, [p.employee_no]
           );
           if (r.rows.length > 0) { employeeId = r.rows[0].id; existingRelation = r.rows[0].employment_relation; }
         }
         if (!employeeId && p.id_card_hash) {
           const r = await client.query(
-            `SELECT id, employment_relation FROM employee WHERE id_card_hash = $1 AND is_deleted = false`, [p.id_card_hash]
+            `SELECT id, employment_relation FROM employee WHERE id_card_hash = $1 AND is_deleted = false FOR UPDATE`, [p.id_card_hash]
           );
           if (r.rows.length > 0) { employeeId = r.rows[0].id; existingRelation = r.rows[0].employment_relation; }
         }
         if (!employeeId && p.phone_hash && p.employee_name) {
           const r = await client.query(
-            `SELECT id, employment_relation FROM employee WHERE phone_hash = $1 AND name = $2 AND is_deleted = false`,
+            `SELECT id, employment_relation FROM employee WHERE phone_hash = $1 AND name = $2 AND is_deleted = false FOR UPDATE`,
             [p.phone_hash, p.employee_name]
           );
           if (r.rows.length > 0) { employeeId = r.rows[0].id; existingRelation = r.rows[0].employment_relation; }
@@ -1025,12 +1031,20 @@ async function performBatchImport(batchId, { userId, username, ip } = {}) {
           [employeeId, normalizeRosterDept(p.raw_dept), p.raw_position || null, p.raw_work_area || null]
         );
 
-        // 处理 employee_assignment
-        // 1. 如果已有当前主岗，标记为非当前（调岗场景）
-        await client.query(
-          `UPDATE employee_assignment
-           SET is_primary = false, is_current = false, end_date = CURRENT_DATE, updated_at = CURRENT_TIMESTAMP
-           WHERE employee_id = $1 AND is_current = true AND is_primary = true AND is_deleted = false`,
+        // M1-02：锁定员工行（既有员工已在匹配查询时 FOR UPDATE 锁定；此处对新员工补锁，统一口径）
+        await client.query('SELECT id, employment_relation FROM employee WHERE id = $1 FOR UPDATE', [employeeId]);
+
+        // M1-02 · V2 批次去重（稳定 employee.id 键）：同批次同 id 仅允许一条成功写入。
+        if (employeeId && seenEmployeeIds.has(employeeId)) {
+          throw new Error(`员工「${p.employee_name || ''}」在本批次已成功入库，重复记录已跳过`);
+        }
+
+        // 处理 employee_assignment —— 统一收口到 assignmentSegmentService.writeSegment
+        // 1) 读取当前主岗段交 writeSegment 做 A/B/C 保护（内部不重新 SELECT）
+        const curSegRes = await client.query(
+          `SELECT id, employee_id, org_unit_id, position_id, status
+             FROM employee_assignment
+            WHERE employee_id = $1 AND is_current = true AND is_primary = true AND is_deleted = false`,
           [employeeId]
         );
 
@@ -1047,19 +1061,37 @@ async function performBatchImport(batchId, { userId, username, ip } = {}) {
           }
         }
 
-        // 3. 创建新的任职关系
+        // 3. 创建新的任职关系（经 writeSegment；关闭旧主岗 + 新建均经统一服务）
         // start_date 优先使用 hire_date；remark 记录 driver/license_type 元信息
         const remarkParts = [];
         if (p.is_driver === true) remarkParts.push('is_driver=true');
         if (p.license_type) remarkParts.push(`license_type=${p.license_type}`);
         const remarkStr = remarkParts.length > 0 ? remarkParts.join(';') : null;
-        await client.query(
-          `INSERT INTO employee_assignment
-           (employee_id, org_unit_id, operation_unit_id, position_id, supervisor_id, dept_name, is_primary, is_current, status, start_date, remark, created_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10, CURRENT_DATE), $11, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-          [employeeId, p.target_org_id, p.target_unit_id, p.target_pos_id, finalSupervisorId || null,
-           p.raw_dept || null, true, true, 'active', p.hire_date || null, remarkStr]
-        );
+        // end_date 对齐原终态：旧主岗段 end_date = CURRENT_DATE（建段 start = COALESCE(hire_date, CURRENT_DATE)）
+        const v2EndDate = new Date().toISOString().split('T')[0];
+        try {
+          await writeSegment(client, {
+            employeeId,
+            scenario: 'ASSIGN',
+            currentSegments: curSegRes.rows,
+            newSegment: {
+              employee_id: employeeId,
+              org_unit_id: p.target_org_id,
+              operation_unit_id: p.target_unit_id || null,
+              position_id: p.target_pos_id,
+              supervisor_id: finalSupervisorId || null,
+              dept_name: p.raw_dept || null,
+              status: 'active',
+              start_date: p.hire_date || null,
+              remark: remarkStr,
+              created_by: userId || null,
+            },
+            endDate: v2EndDate,
+          });
+        } catch (segErr) {
+          // 关闭失败 / 多段冲突 / 新建失败 ⇒ 原样向上抛，由外层 ROLLBACK TO SAVEPOINT 兜底
+          throw segErr;
+        }
         assignmentCount++;
 
         // 3. 标记 pending 记录为已导入
@@ -1069,6 +1101,8 @@ async function performBatchImport(batchId, { userId, username, ip } = {}) {
         );
 
         await client.query(`RELEASE SAVEPOINT ${spName}`);
+        // M1-02：本行 SAVEPOINT 成功 RELEASE 后才登记去重，确保「失败可重试、成功不重复」
+        if (employeeId) seenEmployeeIds.add(employeeId);
       } catch (rowErr) {
         // 回滚到保存点，隔离该行失败对后续行的影响（PostgreSQL 约束错误会使整个事务 abort）
         try {

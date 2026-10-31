@@ -106,9 +106,11 @@ function makeClient({ byNo = {}, byIdCardHash = {}, byPhoneHash = {} } = {}) {
     if (text.includes('INSERT INTO employee (')) return { rows: [{ id: nextId++ }], rowCount: 1 };
     if (text.includes('UPDATE employee SET')) return { rows: [], rowCount: 1 };
     if (text.includes('UPDATE employee_assignment')) return { rows: [], rowCount: 1 };
-    if (text.includes('INSERT INTO employee_assignment')) return { rows: [], rowCount: 1 };
+    if (text.includes('INSERT INTO employee_assignment')) return { rows: [{ id: 9001 }], rowCount: 1 };
     if (text.includes('UPDATE employee_import_pending')) return { rows: [], rowCount: 1 };
     if (text.includes('UPDATE employee_import_batch')) return { rows: [], rowCount: 1 };
+    // M1-02：writeSegment 要求 INSERT 返回行；curSegRes 读取当前主岗段需返回代表性当前段（B 场景）
+    if (text.includes('FROM employee_assignment')) return { rows: [{ id: 7001, employee_id: 7, org_unit_id: 5, position_id: 3, status: 'active' }], rowCount: 1 };
     return { rows: [], rowCount: 0 };
   });
   return { query, release: jest.fn(), calls };
@@ -257,12 +259,18 @@ describe('V2 · 正常人员既有导入行为保持不变', () => {
     expect(order.some((t) => t === 'COMMIT')).toBe(true);
 
     const insert = calls.find((c) => c.text.includes('INSERT INTO employee_assignment'));
-    // 列序固定：employee_id, org_unit_id, operation_unit_id, position_id, supervisor_id,
-    //            dept_name, is_primary, is_current, status, start_date, remark
-    expect(insert.params[0]).toBe(7);
-    expect(insert.params[6]).toBe(true);
-    expect(insert.params[7]).toBe(true);
-    expect(insert.params[8]).toBe('active');
+    // M1-02：经 writeSegment 收口，V2 扩展列 operation_unit_id / dept_name 必须出现在 INSERT 中
+    expect(insert.text).toContain('operation_unit_id');
+    expect(insert.text).toContain('dept_name');
+    // 列序（含 V2 扩展）：employee_id, org_unit_id, operation_unit_id, position_id,
+    //   supervisor_id, status, dept_name, is_current, is_primary, start_date, remark, created_by
+    expect(insert.params[0]).toBe(7);             // employee_id
+    expect(insert.params[1]).toBe(5);             // org_unit_id
+    expect(insert.params[5]).toBe('active');      // status（参数索引因扩展列后移）
+    expect(insert.params[6]).toBe('城区作业中心');  // dept_name
+    expect(insert.params[7]).toBe(true);          // is_current
+    expect(insert.params[8]).toBe(true);          // is_primary
+    expect(insert.params[9]).toBe('2026-01-05');  // start_date
 
     const batchUpdate = calls.find((c) => c.text.includes('UPDATE employee_import_batch'));
     expect(batchUpdate.params[0]).toBe('completed');

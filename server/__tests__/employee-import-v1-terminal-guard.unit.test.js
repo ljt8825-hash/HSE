@@ -79,9 +79,10 @@ function makeClient({ existingByCode = {} } = {}) {
     if (text.includes('INSERT INTO employee (')) return { rows: [{ id: nextId++ }], rowCount: 1 };
     if (text.includes('UPDATE employee SET')) return { rows: [], rowCount: 1 };
     if (text.includes('FROM hse_org_unit WHERE org_name = $1')) return { rows: [{ id: 5 }], rowCount: 1 };
-    if (text.includes('FROM employee_assignment')) return { rows: [], rowCount: 0 };
+    // M1-02：writeSegment 要求 INSERT 返回行；curSegRes 读取当前段需返回代表性当前段（B 场景）
+    if (text.includes('FROM employee_assignment')) return { rows: [{ id: 7001, employee_id: 7, org_unit_id: 5, position_id: 3, status: 'active' }], rowCount: 1 };
     if (text.includes('UPDATE employee_assignment')) return { rows: [], rowCount: 1 };
-    if (text.includes('INSERT INTO employee_assignment')) return { rows: [], rowCount: 1 };
+    if (text.includes('INSERT INTO employee_assignment')) return { rows: [{ id: 9001 }], rowCount: 1 };
     if (text.includes('INSERT INTO employee_history')) return { rows: [], rowCount: 1 };
     return { rows: [], rowCount: 0 };
   });
@@ -174,9 +175,8 @@ describe('V1 · NULL / 空关系不得推断为终态', () => {
     expect(result.success).toBe(1);
     expect(result.failed).toBe(0);
     // 既有流程未被改变：关旧段 → 建新段
-    // 【B-1-P1-02-D】关段 SQL 已补 end_date + is_deleted=false（多行格式），改用正则断言意图
-    expect(calls.some((c) => /UPDATE\s+employee_assignment\s+SET\s+is_current\s*=\s*false/.test(c.text))).toBe(true);
-    expect(calls.some((c) => /end_date\s*=\s*CASE/.test(c.text))).toBe(true);
+    // M1-02：关段已统一经 writeSegment(ASSIGN)，end_date 改为参数化（$2）而非历史 CASE 表达式
+    expect(calls.some((c) => /UPDATE\s+employee_assignment\s+SET\s+is_current\s*=\s*false,\s*end_date\s*=\s*\$2/.test(c.text))).toBe(true);
     expect(calls.some((c) => c.text.includes('INSERT INTO employee_assignment'))).toBe(true);
     // 不补值：没有任何语句写 employment_relation
     expect(writes.some((c) => c.text.includes('employment_relation'))).toBe(false);

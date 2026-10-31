@@ -155,13 +155,26 @@ async function writeSegment(client, params) {
         `writeSegment: 无法识别的任职状态「${newSegment.status}」，可选: 在职/待岗/借调/停薪留职/离职/辞职/死亡/退休/返聘`
       );
     }
-    const insertRes = await client.query(
-      `INSERT INTO employee_assignment (
-        employee_id, org_unit_id, position_id, supervisor_id,
-        status, is_current, is_primary, start_date, remark, created_by
-      ) VALUES ($1, $2, $3, $4, $5, true, true, $6, $7, $8)
-      RETURNING *`,
-      [
+    // 基础 10 列（M1-01 三入口 / V1 共用）：保持与 M1-01 提交形态一致的 VALUES 文本
+    // —— status 走参数 $5，is_current / is_primary 以 SQL 字面量 true 写入，
+    //   参数仅 8 个（$6 start_date / $7 remark / $8 created_by）。
+    // V2 扩展列（operation_unit_id / dept_name）仅在调用方【显式传入】时才拼入，
+    // 此时整体切换为「全参数化」形态（列与参数同序），避免硬编码列序导致扩展列错位。
+    // 这样 V1 / 三入口的 SQL 文本与 M1-01 提交完全等价，V2 仅在确有扩展列时变化。
+    const hasV2Ext =
+      newSegment.operation_unit_id !== undefined || newSegment.dept_name !== undefined;
+
+    let insertSql;
+    let insertVals;
+
+    if (!hasV2Ext) {
+      insertSql =
+        `INSERT INTO employee_assignment (
+           employee_id, org_unit_id, position_id, supervisor_id,
+           status, is_current, is_primary, start_date, remark, created_by
+         ) VALUES ($1, $2, $3, $4, $5, true, true, $6, $7, $8)
+         RETURNING *`;
+      insertVals = [
         newSegment.employee_id,
         newSegment.org_unit_id || null,
         newSegment.position_id || null,
@@ -170,8 +183,39 @@ async function writeSegment(client, params) {
         newSegment.start_date,
         newSegment.remark || null,
         newSegment.created_by || null,
-      ]
-    );
+      ];
+    } else {
+      const cols = [
+        'employee_id', 'org_unit_id', 'position_id', 'supervisor_id',
+        'status', 'is_current', 'is_primary', 'start_date', 'remark', 'created_by',
+      ];
+      const vals = [
+        newSegment.employee_id,
+        newSegment.org_unit_id || null,
+        newSegment.position_id || null,
+        newSegment.supervisor_id || null,
+        normalizedStatus,
+        true,
+        true,
+        newSegment.start_date,
+        newSegment.remark || null,
+        newSegment.created_by || null,
+      ];
+      // V2 扩展列（可选；仅当调用方显式传入才拼入）
+      if (newSegment.operation_unit_id !== undefined) {
+        cols.splice(2, 0, 'operation_unit_id');
+        vals.splice(2, 0, newSegment.operation_unit_id || null);
+      }
+      if (newSegment.dept_name !== undefined) {
+        cols.splice(6, 0, 'dept_name');
+        vals.splice(6, 0, newSegment.dept_name || null);
+      }
+      const placeholders = cols.map((_, i) => `$${i + 1}`).join(', ');
+      insertSql = `INSERT INTO employee_assignment (${cols.join(', ')}) VALUES (${placeholders}) RETURNING *`;
+      insertVals = vals;
+    }
+
+    const insertRes = await client.query(insertSql, insertVals);
     if (!insertRes || !insertRes.rows || insertRes.rows.length === 0) {
       throw new Error('writeSegment: 新任职段未能创建（INSERT 返回空结果）');
     }

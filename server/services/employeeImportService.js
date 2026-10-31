@@ -9,6 +9,7 @@ const { pool } = require('../config/db');
 const { secureEncode } = require('../routes/hse-employee/_shared');
 const { resolveOrgUnitId } = require('./employeeAssignmentService');
 const { isTerminalRelation } = require('./employeeStatusDict');
+const { writeSegment } = require('./assignmentSegmentService');
 
 /**
  * Excel 表头 → 数据库字段的映射（员工导入模板）
@@ -517,6 +518,10 @@ async function importExcelFile({ tmpFile, userId }) {
       .map((rawRow, idx) => ({ normalized: normalizeExcelRow(rawRow), rowIndex: idx + 2 }))
       .filter((item) => Object.keys(item.normalized).length > 0);
 
+    // M1-02 · V1 批次去重：以稳定 employee.id 为键。
+    // 仅当某 id 在本批次「成功提交」后才登记，失败行不登记 ⇒ 失败可重试、成功不可重复写入。
+    const seenEmployeeIds = new Set();
+
     for (const item of validRows) {
       const { normalized, rowIndex } = item;
       try {
@@ -531,14 +536,23 @@ async function importExcelFile({ tmpFile, userId }) {
         const idCardEnc = secureEncode(normalized.id_card);
         const phoneEnc = secureEncode(normalized.phone);
 
-        // 查找现有员工（按工号）
+        // 查找现有员工（按工号）；M1-02：锁定员工行并读取权威关系供终态闸门判定
         let existingEmployee = null;
         if (normalized.employee_code) {
           const existResult = await client.query(
-            `SELECT id, name, employee_code, employment_relation FROM employee WHERE employee_code = $1 AND is_deleted = false`,
+            `SELECT id, name, employee_code, employment_relation FROM employee WHERE employee_code = $1 AND is_deleted = false FOR UPDATE`,
             [normalized.employee_code]
           );
           existingEmployee = existResult.rows[0] || null;
+        }
+
+        // M1-02 · V1 批次去重（稳定 employee.id 键）：同批次同 id 仅允许一条成功进入任职写入。
+        // 命中即视为重复员工冲突，ROLLBACK 本（空）事务后跳过，不影响其它行。
+        if (existingEmployee && seenEmployeeIds.has(existingEmployee.id)) {
+          await client.query('ROLLBACK').catch(() => {});
+          errors.push({ index: rowIndex, message: `员工「${normalized.name || existingEmployee.name}」在本批次已成功导入，重复记录已跳过` });
+          failCount++;
+          continue;
         }
 
         // A-02e.5-C1（P0）：终态防复活闸门。
@@ -546,6 +560,7 @@ async function importExcelFile({ tmpFile, userId }) {
         // 因此拒绝时本行零副作用；外层 catch 仍会 ROLLBACK 兜底（BEGIN 已在循环内开启）。
         // 判定只读 employee.employment_relation 权威字段：不看 assignment.status、不看历史段形态、
         // 不把 NULL 当终态、不把待岗/借调等中间态当终态，也不回填关系字段。
+        // M1-02：existingEmployee 已由上方 FOR UPDATE 查询锁定，employment_relation 即锁后权威值。
         if (existingEmployee && isTerminalRelation(existingEmployee.employment_relation)) {
           const rel = String(existingEmployee.employment_relation).trim();
           throw new Error(
@@ -628,6 +643,12 @@ async function importExcelFile({ tmpFile, userId }) {
           employeeId = insertResult.rows[0].id;
         }
 
+        // M1-02：锁定新员工行（既有员工已在上方 employee_code 查询时 FOR UPDATE 锁定），
+        // 保证「每条员工记录的事务内锁定 employee 行」，与 V2 / 三入口口径统一。
+        if (!existingEmployee) {
+          await client.query('SELECT id, employment_relation FROM employee WHERE id = $1 FOR UPDATE', [employeeId]);
+        }
+
         // 组织/岗位关联：优先按组织路径，其次按「所属部门 + 职位」花名册格式
         let orgUnitId = null;
         let orgPath = null;
@@ -687,44 +708,47 @@ async function importExcelFile({ tmpFile, userId }) {
         if (orgAssigned) {
           const startDate = normalized.hire_date || null;
 
-          // Sprint-C Phase 1: 更新或插入组织关系（employee_assignment）
-          if (existingEmployee) {
-            // 【B-1-P1-02-D 修复】旧段关闭补全：
-            //   1) 补 end_date（对齐 employeeAssignmentService.assignEmployee 关段范式
-            //      :493-496 —— end_date = 新段 start_date - 1 天，保证时间轴无重叠无缝隙；
-            //      新段无 start_date（花名册未填入职日期）时回退 CURRENT_DATE 并记 warning）；
-            //   2) 补 is_deleted = false 条件（原语句会把已软删段也置 is_current=false，
-            //      违反"软删数据不可被业务 UPDATE 触碰"口径）；
-            //   3) 异常显式处理：本 UPDATE 不做局部 try/catch——失败即向上抛出，
-            //      由下方既有 catch 统一 ROLLBACK 并计入该行 errors（行级失败可见，
-            //      不静默吞掉、不出现"关段失败但新段照插"的半更新状态）。
-            const closeResult = await client.query(
-              `UPDATE employee_assignment
-                  SET is_current = false,
-                      end_date = CASE
-                        WHEN $2::date IS NOT NULL THEN ($2::date - INTERVAL '1 day')::date
-                        ELSE CURRENT_DATE
-                      END,
-                      updated_at = NOW()
-                WHERE employee_id = $1
-                  AND is_current = true
-                  AND is_deleted = false`,
-              [employeeId, startDate]
-            );
-            if (closeResult.rowCount === 0) {
-              // 无现行段（异常数据或已被并发关闭）：不阻断导入，但必须留痕
-              warnings.push({ index: rowIndex, message: `员工${normalized.name || employeeId}无现行任职段可关闭，仅新建任职段` });
-            }
-          }
-
-          await client.query(
-            `INSERT INTO employee_assignment (
-               employee_id, org_unit_id, position_id, supervisor_id,
-               status, is_current, is_primary, start_date, remark, created_by
-             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-            [employeeId, orgUnitId, positionId, null,
-             'active', true, true, startDate, 'Excel导入入职', userId || null]
+          // M1-02：任职段写入统一收口到 assignmentSegmentService.writeSegment。
+          // 读取当前有效段交由 writeSegment 做 A/B/C 保护（内部不重新 SELECT，currentSegments 由本函数传入）。
+          // 既有的「逐行事务边界 / 身份匹配 / 字段映射 / 结果结构 / 错误反馈」全部保留。
+          const curSegRes = await client.query(
+            `SELECT id, employee_id, org_unit_id, position_id, status
+               FROM employee_assignment
+              WHERE employee_id = $1 AND is_current = true AND is_deleted = false`,
+            [employeeId]
           );
+          // 仅已有员工才存在「关旧段」语义；新员工直接建段（A 场景）
+          const currentSegments = existingEmployee ? curSegRes.rows : [];
+          // end_date 对齐历史范式：有入职日期则 start-1 天，否则 CURRENT_DATE
+          const endDate = startDate
+            ? new Date(new Date(startDate).getTime() - 86400000).toISOString().split('T')[0]
+            : new Date().toISOString().split('T')[0];
+          try {
+            await writeSegment(client, {
+              employeeId,
+              scenario: 'ASSIGN',
+              currentSegments,
+              newSegment: {
+                employee_id: employeeId,
+                org_unit_id: orgUnitId,
+                position_id: positionId,
+                supervisor_id: null,
+                status: 'active',
+                start_date: startDate,
+                remark: 'Excel导入入职',
+                created_by: userId || null,
+              },
+              endDate,
+            });
+          } catch (segErr) {
+            // 关闭失败（rowCount≠1）/ 多段冲突（C）/ 新建失败 ⇒ 原样向上抛，
+            // 由下方既有 catch 统一 ROLLBACK 并计入该行 errors（行级失败可见，不静默吞）。
+            throw segErr;
+          }
+          if (existingEmployee && curSegRes.rows.length === 0) {
+            // 无现行段（异常数据或已被并发关闭）：不阻断导入，但必须留痕
+            warnings.push({ index: rowIndex, message: `员工${normalized.name || employeeId}无现行任职段可关闭，仅新建任职段` });
+          }
 
           // Sprint-C Phase 1: 仅新增员工时记录历史（使用 org_unit_id）
           if (!existingEmployee) {
@@ -743,6 +767,8 @@ async function importExcelFile({ tmpFile, userId }) {
 
         await client.query('COMMIT');
         successCount++;
+        // M1-02：本行成功提交后才登记去重，确保「失败可重试、成功不重复」
+        if (employeeId) seenEmployeeIds.add(employeeId);
       } catch (e) {
         await client.query('ROLLBACK').catch(() => {});
         errors.push({ index: rowIndex, message: e.message });
