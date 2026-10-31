@@ -265,7 +265,8 @@ describe('A-02e.5-B1 · T6 正常在职流程逐项不变', () => {
     expect(close[1][1]).toBe('2026-10-31');
 
     const ins = client.calls.find(([sql]) => sql.includes('INSERT INTO employee_assignment'));
-    expect(ins[0]).toContain("'active'");
+    // M1-01：status 现由 writeSegment 参数化写入（$5），不在 SQL 字面量里硬编码
+    expect(ins[1][4]).toBe('active');
 
     const hist = client.calls.find(([sql]) => sql.includes('INSERT INTO employee_history'));
     expect(hist[1][1]).toBe('调岗');

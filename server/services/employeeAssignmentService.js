@@ -12,6 +12,8 @@
  */
 
 const { pool } = require('../config/db');
+// M1-01：统一任职段写入服务（由本模块的三个核心入口在已持有事务 client 的前提下调用）
+const { writeSegment } = require('./assignmentSegmentService');
 const {
   STATUS_MAP,
   STATUS_REVERSE_MAP,
@@ -479,21 +481,11 @@ async function assignEmployee(params) {
     let beforeOrgUnitId = null;
     let beforePositionId = null;
     let beforeStatus = null;
-
     if (currentOrgResult.rows.length > 0) {
       const currentOrg = currentOrgResult.rows[0];
       beforeOrgUnitId = currentOrg.org_unit_id;
       beforePositionId = currentOrg.position_id;
       beforeStatus = currentOrg.status;
-
-      // 结束当前组织关系
-      const endDate = new Date(start_date);
-      endDate.setDate(endDate.getDate() - 1);
-      await client.query(
-        `UPDATE employee_assignment SET is_current = false, end_date = $2, updated_at = NOW()
-         WHERE id = $1`,
-        [currentOrg.id, endDate.toISOString().split('T')[0]]
-      );
     }
 
     // 解析 org_unit_id（从 5 列扁平组织映射到 hse_org_unit）
@@ -501,15 +493,42 @@ async function assignEmployee(params) {
       group_id, region_id, enterprise_id, project_id, team_id,
     });
 
-    // 新增组织关系
-    const newOrgResult = await client.query(
-      `INSERT INTO employee_assignment (
-          employee_id, org_unit_id, position_id, supervisor_id, 
-          status, is_current, is_primary, start_date, remark, created_by
-        ) VALUES ($1, $2, $3, $4, 'active', true, true, $5, $6, $7) RETURNING *`,
-      [employee_id, orgUnitId, position_id || null, supervisor_id || null,
-       start_date, change_reason || '调岗', userId || null]
-    );
+    // M1-01：统一任职段写入。事务由本函数持有（已在 BEGIN 之后），writeSegment 不另起事务/连接。
+    // 关闭谓词沿用 assignEmployee 历史口径（仅按 id 关闭，endDate = 新段生效日-1）；
+    // 当前段数量保护（A=0 放行 / B=1 关段并校验 rowCount / C=>1 拒绝）由 writeSegment 统一执行。
+    const endDate = new Date(start_date);
+    endDate.setDate(endDate.getDate() - 1);
+    const segmentEndDate = endDate.toISOString().split('T')[0];
+
+    let writeResult;
+    try {
+      writeResult = await writeSegment(client, {
+        employeeId: employee_id,
+        scenario: 'ASSIGN',
+        currentSegments: currentOrgResult.rows,
+        newSegment: {
+          employee_id,
+          org_unit_id: orgUnitId,
+          position_id: position_id || null,
+          supervisor_id: supervisor_id || null,
+          status: 'active',
+          start_date,
+          remark: change_reason || '调岗',
+          created_by: userId || null,
+        },
+        endDate: segmentEndDate,
+      });
+    } catch (e) {
+      // C 场景（多条当前段）：转化为业务冲突错误返回，不抛 500
+      if (e && e.name === 'SegmentConflictError') {
+        await client.query('ROLLBACK');
+        return { error: BIZ_CONFLICT, message: e.message };
+      }
+      // 其余异常（如 B rowCount 不符）交由外层 catch 统一回滚
+      throw e;
+    }
+
+    const newOrgResult = { rows: writeResult.inserted ? [writeResult.inserted] : [] };
 
     // 记录人事变动
     const eventType = currentOrgResult.rows.length === 0 ? '入职' : '调岗';
@@ -784,21 +803,27 @@ async function rehireEmployee(params) {
     }
 
     // ── 6) 新段（RH-03 四字段一致性）──────────────────────────
-    const newSegment = await client.query(
-      `INSERT INTO employee_assignment (
-         employee_id, org_unit_id, position_id, supervisor_id,
-         status, is_current, is_primary, start_date, remark, created_by
-       ) VALUES ($1, $2, $3, $4, $5, true, true, $6, $7, $8)
-       RETURNING id`,
-      [
-        employee_id, resolvedOrgUnitId, position_id || null, supervisor_id || null,
-        REHIRE_SEGMENT_STATUS, effectiveDate, change_reason || '返聘', userId || null,
-      ]
-    );
-    if (!newSegment.rows || newSegment.rows.length === 0) {
+    // M1-01：统一任职段写入。rehire 不关闭既有段（入口已在步骤3 拒绝「存在当前段」），
+    //        故 currentSegments 传 []（A 场景：仅新建），由 writeSegment 统一校验/插入。
+    const segmentResult = await writeSegment(client, {
+      employeeId: employee_id,
+      scenario: 'REHIRE',
+      currentSegments: [], // rehire 已先行拒绝「存在 is_current 段」，此处必为空
+      newSegment: {
+        employee_id,
+        org_unit_id: resolvedOrgUnitId,
+        position_id: position_id || null,
+        supervisor_id: supervisor_id || null,
+        status: REHIRE_SEGMENT_STATUS,
+        start_date: effectiveDate,
+        remark: change_reason || '返聘',
+        created_by: userId || null,
+      },
+    });
+    if (!segmentResult.inserted) {
       throw new Error('返聘失败：新任职段未创建');
     }
-    const newAssignmentId = newSegment.rows[0].id;
+    const newAssignmentId = segmentResult.inserted.id;
 
     // ── 7) 历史（event_date 必须等于新段 start_date，否则现有历史查询关联不上）──
     // getAssignmentHistory / getAssignmentHistoryDetail 以 eh.event_date = ea.start_date 关联，
@@ -1182,16 +1207,17 @@ async function terminateEmployee(params) {
     }
 
     // ── 6) 关闭当前有效任职段 ─────────────────────────────────
-    const segUpdate = await client.query(
-      `UPDATE employee_assignment
-          SET status = $2, is_current = false, end_date = $3, updated_at = NOW()
-        WHERE id = $1 AND is_current = true AND is_deleted = false`,
-      [current.id, TERMINATION_SEGMENT_STATUS, effectiveDate]
-    );
-    if (segUpdate.rowCount === 0) {
-      // 已锁行；0 行说明段在事务内被改过 ⇒ 必须回滚，不能留下「关系已改、段未关」
-      throw new Error('终态登记失败：当前任职段未能关闭（记录已被并发修改）');
-    }
+    // M1-01：统一任职段写入。terminate 已在本步骤前保证「当前段存在且唯一」，
+    //        故 currentSegments 传 curResult.rows（B 场景：关闭该段并强校验 rowCount）。
+    //        关闭谓词沿用 terminate 历史口径（status=inactive + is_current/is_deleted 幂等谓词），
+    //        rowCount !== 1 时 writeSegment 抛 SegmentCloseFailedError，交由下方 catch 回滚。
+    await writeSegment(client, {
+      employeeId: employee_id,
+      scenario: 'TERMINATE',
+      currentSegments: curResult.rows,
+      closeStatus: TERMINATION_SEGMENT_STATUS,
+      endDate: effectiveDate,
+    });
 
     // ── 7) 人事历史（event_type / after_status 保留终态原因）──
     // 关联口径沿用既有实现：getAssignmentHistoryDetail 以 eh.event_date = ea.start_date 关联，

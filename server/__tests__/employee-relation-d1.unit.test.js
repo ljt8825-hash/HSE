@@ -480,7 +480,8 @@ describe('G8 · assignEmployee 对任职段的影响', () => {
     expect(closeCall[1][1]).toBe('2026-10-05');
 
     const ins = client.calls.find(([sql]) => sql.includes('INSERT INTO employee_assignment'));
-    expect(ins[0]).toContain("'active'");
+    // M1-01：status 现由 writeSegment 参数化写入（$5），不在 SQL 字面量里硬编码
+    expect(ins[1][4]).toBe('active');
     expect(ins[0]).toContain('is_current');
 
     const hist = findCall(client, 'INSERT INTO employee_history');
@@ -507,6 +508,7 @@ describe('G8 · assignEmployee 对任职段的影响', () => {
     // 现状：关闭旧段时未同时改 status，且新段恒为 active
     expect(closeCall[0]).not.toContain('status =');
     const ins = client.calls.find(([sql]) => sql.includes('INSERT INTO employee_assignment'));
-    expect(ins[0]).toContain("'active'");
+    // M1-01：status 现由 writeSegment 参数化写入（$5），不在 SQL 字面量里硬编码
+    expect(ins[1][4]).toBe('active');
   });
 });
