@@ -198,7 +198,7 @@ B-1-P1-04-03 原始任务书在「3.x 审查范围 / 所有」处被截断（仅
 - 提交命令：`git add docs/project-control/B-1-P1-04-03-R1/ && git commit -m "docs(B-1-P1-04-03-R1): M0 冻结评估边界澄清报告" -- docs/project-control/B-1-P1-04-03-R1`
 - 推送：`HTTPS_PROXY=http://127.0.0.1:7890 git push origin feat/b02-dec-03.13-a02d-status-code`
 - 远端核验：`git ls-remote origin feat/b02-dec-03.13-a02d-status-code` 比对 SHA 与本地新 HEAD 一致。
-- 新 HEAD（推送成功后回填）：`__________`（占位，待执行）
+- 新 HEAD（推送成功后回填）：`dbc38f401e44b3f2d9652957fdf7a4c0526d35d7`（= 本 R1 报告提交；远端 `git ls-remote` 已核验与本地一致）
 
 ---
 
