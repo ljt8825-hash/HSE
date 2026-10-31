@@ -259,4 +259,4 @@ npx jest --testPathPatterns="m1-02-import-segment-unification"
 
 - 业务提交 SHA：`0bfdeae`
 - 报告提交 SHA：`85f12ed`
-- 远端 `ls-remote` 核验结论：远端 `refs/heads/feat/b02-dec-03.13-a02d-status-code` = `85f12edbcec0f42359d266b170b6e3cf5fcdd578`，与本地 `HEAD` 一致（ahead 0 / behind 0，已同步）；`cost.js` 不在远端 HEAD（仅本地暂存 `A` 保护态，未提交、未推送）。
+- 远端 `ls-remote` 核验结论：远端 `refs/heads/feat/b02-dec-03.13-a02d-status-code` 与本地 `HEAD` 一致（ahead 0 / behind 0，已同步，末次推送记录见各次 `git push` 输出）；`cost.js` 不在远端 HEAD（仅本地暂存 `A` 保护态，未提交、未推送）。业务提交 `0bfdeae` 与历次报告提交均经 `git push` 送达；复核命令：`git ls-remote origin feat/b02-dec-03.13-a02d-status-code`。
