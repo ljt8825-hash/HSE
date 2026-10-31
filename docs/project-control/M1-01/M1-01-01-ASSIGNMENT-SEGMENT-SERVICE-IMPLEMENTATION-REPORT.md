@@ -231,9 +231,9 @@ else if (n === 1) {
 
 ## 附：提交指纹与远端核验（推送后回填）
 
-> 推送执行后，本小节由同一会话回填实际 SHA 与 `git ls-remote` 结果。
-
 - 业务提交：`cbeb0284d06b53e6d415310bfdd1bbd9fe9f6553`
-- 报告提交：`<推送后 git rev-parse HEAD>`
-- `git ls-remote origin feat/b02-dec-03.13-a02d-status-code` 返回的 tip 须 == 本地 HEAD
-- ahead/behind：推送后 ahead 0 / behind 0
+- 报告提交：`b85db378ad4543557a52553729135a258af0104b`
+- `git ls-remote origin feat/b02-dec-03.13-a02d-status-code` 返回 tip：`b85db378ad4543557a52553729135a258af0104b`
+- 本地 HEAD：`b85db378ad4543557a52553729135a258af0104b`
+- 核验结论：远端 tip == 本地 HEAD ✓；ahead/behind = 0 / 0 ✓
+- 推送范围：`618a4df..b85db37`（业务提交 + 报告提交，共 2 个提交）；`cost.js` 始终维持 `A` 暂存态，未纳入任一提交
