@@ -185,7 +185,7 @@ M1 的实施内容与验收要求（**属于 M1 内部，不得前置为进入 M
 - 提交命令：`git add docs/project-control/B-1-P1-04-03-R1-R1/ && git commit -m "docs(B-1-P1-04-03-R1-R1): 锁序证据与阶段门槛修正报告" -- docs/project-control/B-1-P1-04-03-R1-R1`
 - 推送：`HTTPS_PROXY=http://127.0.0.1:7890 git push origin feat/b02-dec-03.13-a02d-status-code`
 - 远端核验：`git ls-remote origin feat/b02-dec-03.13-a02d-status-code` 比对 SHA 与本地新 HEAD。
-- 基底 HEAD：`11b82b5`；新 HEAD（推送成功后回填）：`__________`（占位，待执行）。
+- 基底 HEAD：`11b82b5`；新 HEAD（推送成功后回填）：`5b83f8271d65168dddfb52c89c2a2d1c14109808`（= 本 R1-R1 报告提交；远端 `git ls-remote` 已核验与本地一致）。
 - GitHub 报告 URL（推送后可用）：`https://github.com/ljt8825-hash/HSE/blob/feat/b02-dec-03.13-a02d-status-code/docs/project-control/B-1-P1-04-03-R1-R1/B-1-P1-04-03-R1-R1-LOCK-AND-GATE-REVISION.md`
 
 ---
