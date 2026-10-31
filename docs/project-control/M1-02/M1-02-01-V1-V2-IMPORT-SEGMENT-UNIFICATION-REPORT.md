@@ -213,7 +213,7 @@ npx jest --testPathPatterns="m1-02-import-segment-unification"
 | 提交 | SHA（短） | 内容 |
 |---|---|---|
 | 业务提交（3 服务 + 3 测试） | `0bfdeae` | `assignmentSegmentService.js` / `employeeImportService.js` / `employeeImportV2Service.js` + 上述 3 个测试文件 |
-| 报告提交 | `3c7b359` | 本报告 `docs/project-control/M1-02/M1-02-01-V1-V2-IMPORT-SEGMENT-UNIFICATION-REPORT.md` |
+| 报告提交 | `85f12ed` | 本报告 `docs/project-control/M1-02/M1-02-01-V1-V2-IMPORT-SEGMENT-UNIFICATION-REPORT.md` |
 
 > SHA 在 `git commit` 后由本会话回填（见末尾「提交回填」小节）。业务与报告**分两次提交**，均推送 `origin/feat/b02-dec-03.13-a02d-status-code`。
 
@@ -221,7 +221,7 @@ npx jest --testPathPatterns="m1-02-import-segment-unification"
 
 ## 13. 远端 HEAD / ahead-behind
 
-- 提交并推送后核验（两次）：`git ls-remote origin feat/b02-dec-03.13-a02d-status-code` 的远端 ref 应与本地 `HEAD` 一致；`git status -sb` 应显示 `ahead 2`（业务 + 报告两次提交），无 `behind`。
+- 提交并推送后核验：`git ls-remote origin feat/b02-dec-03.13-a02d-status-code` 的远端 ref 应与本地 `HEAD` 一致；`git status -sb` 应显示 `ahead N`（业务 1 + 报告若干），无 `behind`。
 - 本节点**不合主、不强推、不变基、不部署**（见 §15）。
 
 ---
@@ -258,5 +258,5 @@ npx jest --testPathPatterns="m1-02-import-segment-unification"
 ### 提交回填（commit 后由本会话更新）
 
 - 业务提交 SHA：`0bfdeae`
-- 报告提交 SHA：`3c7b359`
-- 远端 `ls-remote` 核验结论：`<待推送后回填>`
+- 报告提交 SHA：`85f12ed`
+- 远端 `ls-remote` 核验结论：远端 `refs/heads/feat/b02-dec-03.13-a02d-status-code` = `85f12edbcec0f42359d266b170b6e3cf5fcdd578`，与本地 `HEAD` 一致（ahead 0 / behind 0，已同步）；`cost.js` 不在远端 HEAD（仅本地暂存 `A` 保护态，未提交、未推送）。
