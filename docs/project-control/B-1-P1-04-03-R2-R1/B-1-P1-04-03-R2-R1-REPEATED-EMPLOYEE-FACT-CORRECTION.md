@@ -175,7 +175,7 @@ M1（人员任职写入路径统一）实施与验收范围**仍为六条路径*
 
 ## 11. Git 提交和远端核验信息
 
-- 基底 HEAD：`d7898ccc8bd79a0a384fc98ffac50b6b04c4b6da`；新 HEAD（推送成功后回填）：`__________`（占位，待执行）。
+- 基底 HEAD：`d7898ccc8bd79a0a384fc98ffac50b6b04c4b6da`；新 HEAD（已推送核验）：`689d7c9439572e22d0ae1a314aa8aed7966e0967`。
 - 提交策略：仅 `git add docs/project-control/B-1-P1-04-03-R2-R1/` 后单独提交，不与业务代码混合。
 - 推送分支：`feat/b02-dec-03.13-a02d-status-code`（禁止 `--force`、rebase、merge）。
 - 远端核验：`git ls-remote origin` 比对 SHA；确认无业务代码/SQL/migration/配置文件混入 diff。
