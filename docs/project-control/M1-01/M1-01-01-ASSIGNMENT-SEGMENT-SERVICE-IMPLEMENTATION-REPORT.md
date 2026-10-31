@@ -231,9 +231,9 @@ else if (n === 1) {
 
 ## 附：提交指纹与远端核验（推送后回填）
 
-- 业务提交：`cbeb0284d06b53e6d415310bfdd1bbd9fe9f6553`
-- 报告提交（最终）：`ac3b69d3fa3d52b675501c05fbaa47e35f37434a`（报告初版 `b85db37` + 核验回填 `ac3b69d` 两次提交，以最新者为准）
-- `git ls-remote origin feat/b02-dec-03.13-a02d-status-code` 返回 tip：`ac3b69d3fa3d52b675501c05fbaa47e35f37434a`
-- 本地 HEAD：`ac3b69d3fa3d52b675501c05fbaa47e35f37434a`
+- 业务提交（稳定）：`cbeb0284d06b53e6d415310bfdd1bbd9fe9f6553`
+- 报告提交：报告文件历经多次修订提交（初版 `b85db37`、核验回填 `ac3b69d`、附录校正 `cbe77fe`），**以交付时远端 tip / 本地 HEAD 为准 = `cbe77fe8a01d819f276f44a6ec57ff299aa97f5f`**
+- `git ls-remote origin feat/b02-dec-03.13-a02d-status-code` 返回 tip：`cbe77fe8a01d819f276f44a6ec57ff299aa97f5f`
+- 本地 HEAD：`cbe77fe8a01d819f276f44a6ec57ff299aa97f5f`
 - 核验结论：远端 tip == 本地 HEAD ✓；ahead/behind = 0 / 0 ✓
-- 推送范围：`618a4df..ac3b69d`（业务提交 cbeb0284 + 报告初版 b85db37 + 报告核验回填 ac3b69d，共 3 个提交）；`cost.js` 始终维持 `A` 暂存态，未纳入任一提交
+- 推送范围：`618a4df..cbe77fe`（业务提交 cbeb0284 + 报告三次修订 b85db37/ac3b69d/cbe77fe，共 4 个提交）；`cost.js` 始终维持 `A` 暂存态，未纳入任一提交
