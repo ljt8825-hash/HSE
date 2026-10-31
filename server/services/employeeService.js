@@ -7,6 +7,7 @@
 const { pool } = require('../config/db');
 const { decryptFields } = require('../middleware/encryption');
 const employeeEventService = require('./employeeEventService');
+const { writeSegment, SegmentConflictError } = require('./assignmentSegmentService');
 const {
   statusLabelSql,
   displayStatusSql,
@@ -617,25 +618,72 @@ async function deleteEmployee(id) {
   try {
     await client.query('BEGIN');
 
-    const result = await client.query(
-      `UPDATE employee SET is_deleted = true, updated_at = NOW() WHERE id = $1 AND is_deleted = false RETURNING id, name`,
+    // 1) 锁定员工主表记录（与 M1-01/M1-02 一致的锁定入口）
+    const empRes = await client.query(
+      `SELECT id, name, employment_relation, is_deleted
+       FROM employee WHERE id = $1 FOR UPDATE`,
       [id]
     );
-    if (result.rows.length === 0) {
+    // 2) 锁后确认员工存在且未删除（沿用原有业务返回语义）
+    if (empRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return { error: -2, message: '员工不存在或已删除' };
+    }
+    const emp = empRes.rows[0];
+    if (emp.is_deleted) {
       await client.query('ROLLBACK');
       return { error: -2, message: '员工不存在或已删除' };
     }
 
-    // Sprint-C Phase 1: 使用 employee_assignment 替代 hse_employee_org
-    // 同时结束当前组织关系（与软删同事务，保证原子性）
-    await client.query(
-      `UPDATE employee_assignment SET is_current = false, end_date = CURRENT_DATE, updated_at = NOW()
-       WHERE employee_id = $1 AND is_current = true AND is_deleted = false`,
+    // 3) 锁后读取权威用工关系：按【现有】员工关系规则，删除不区分 relation
+    //    （删除不是离职登记，不得修改 employment_relation，也不得引入新的终态拦截；
+    //     §4.1 明确不得自行改变业务含义）。此处仅捕获锁定查询返回的关系值，
+    //    供审计 / 下游使用；不作为拦截依据。
+    const employmentRelation = emp.employment_relation;
+
+    // 4) 锁定员工后再读取当前有效任职段（冻结口径：is_current=true 且未删除）
+    const segRes = await client.query(
+      `SELECT id, employee_id, org_unit_id, position_id, status, is_current, is_primary, start_date, end_date
+       FROM employee_assignment
+       WHERE employee_id = $1 AND is_current = true AND is_deleted = false
+       ORDER BY id`,
       [id]
     );
+    const currentSegments = segRes.rows; // 0 / 1 / >1
+
+    // 5) 通过统一任职段服务关闭当前任职段：
+    //    A=0 不关闭；B=1 校验 rowCount=1；C=>1 抛 SegmentConflictError（调用方转为业务拒绝）。
+    //    DELETE 场景：end_date=CURRENT_DATE（数据库语义），不改 status / employment_relation。
+    let closed;
+    try {
+      ({ closed } = await writeSegment(client, {
+        employeeId: id,
+        scenario: 'DELETE',
+        currentSegments,
+      }));
+    } catch (segErr) {
+      if (segErr && segErr.name === 'SegmentConflictError') {
+        // C 场景：多条当前段，数据异常 → 业务拒绝 + 回滚（不得抛 500）
+        await client.query('ROLLBACK');
+        return { error: -3, message: '存在多条当前有效任职段，数据异常，已拒绝删除' };
+      }
+      // 其他（含 SegmentCloseFailedError）→ 交由外层 catch 统一回滚 + 抛出
+      throw segErr;
+    }
+
+    // 6) 软删除 employee（仅当任职段关闭成功 / 无当前段后）
+    const delRes = await client.query(
+      `UPDATE employee SET is_deleted = true, updated_at = NOW() WHERE id = $1 AND is_deleted = false RETURNING id, name`,
+      [id]
+    );
+    if (delRes.rows.length === 0) {
+      // 防御性：软删除未命中（已被锁保护，理论上不会到这）→ 回滚，不提交
+      await client.query('ROLLBACK');
+      return { error: -2, message: '员工不存在或已删除' };
+    }
 
     await client.query('COMMIT');
-    return { audit: { id, name: result.rows[0].name } };
+    return { audit: { id, name: delRes.rows[0].name } };
   } catch (e) {
     await client.query('ROLLBACK').catch(() => {});
     throw e; // 显式向上抛出，由路由层统一错误处理；不静默吞掉、不返回伪造成功

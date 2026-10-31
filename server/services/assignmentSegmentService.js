@@ -52,11 +52,22 @@ class SegmentCloseFailedError extends Error {
 
 /**
  * 返回关闭单条当前段的 SQL 与参数构造器。
- * @param {'ASSIGN'|'REHIRE'|'TERMINATE'} scenario
+ * @param {'ASSIGN'|'REHIRE'|'TERMINATE'|'DELETE'} scenario
  * @returns {{text: string, buildParams: (seg: Object, opts: {endDate: string, closeStatus: string}) => Array}}
  */
 function buildCloseStatement(scenario) {
   switch (scenario) {
+    case 'DELETE':
+      // 删除场景关闭：仅改变 is_current / end_date / updated_at，【不得】修改 status；
+      // end_date 使用数据库 CURRENT_DATE 语义（不得用 JavaScript UTC 日期替代）；
+      // 关闭谓词带明确当前有效条件（id + is_current + is_deleted）。
+      return {
+        text:
+          `UPDATE employee_assignment
+             SET is_current = false, end_date = CURRENT_DATE, updated_at = NOW()
+           WHERE id = $1 AND is_current = true AND is_deleted = false`,
+        buildParams: (seg) => [seg.id],
+      };
     case 'TERMINATE':
       // 终态关闭：写入 status=inactive + is_current=false + end_date，并带 is_current/is_deleted 幂等谓词
       return {
@@ -91,7 +102,7 @@ function buildCloseStatement(scenario) {
  * @param {Object} client - 调用方持有并发起的事务连接（必须已 BEGIN）
  * @param {Object} params
  * @param {number|string} params.employeeId - 员工 ID（仅用于错误文案，不参与写入）
- * @param {'ASSIGN'|'REHIRE'|'TERMINATE'} params.scenario - 调用场景，决定关闭谓词
+ * @param {'ASSIGN'|'REHIRE'|'TERMINATE'|'DELETE'} params.scenario - 调用场景，决定关闭谓词
  * @param {Array} [params.currentSegments] - 调用方已锁定的「当前有效任职段」读取结果
  *                                          （必须来自调用方既有 SELECT，**本函数不再 SELECT**）
  * @param {Object} [params.newSegment] - 待建新段；TERMINATE 场景不传（仅关闭）
@@ -113,7 +124,7 @@ async function writeSegment(client, params) {
     endDate,
   } = params || {};
 
-  if (!['ASSIGN', 'REHIRE', 'TERMINATE'].includes(scenario)) {
+  if (!['ASSIGN', 'REHIRE', 'TERMINATE', 'DELETE'].includes(scenario)) {
     throw new Error(`writeSegment: 未知 scenario「${scenario}」`);
   }
 
