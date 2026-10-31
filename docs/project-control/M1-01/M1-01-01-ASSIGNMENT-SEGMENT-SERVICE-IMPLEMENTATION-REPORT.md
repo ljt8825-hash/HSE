@@ -231,9 +231,10 @@ else if (n === 1) {
 
 ## 附：提交指纹与远端核验（推送后回填）
 
-- 业务提交（稳定）：`cbeb0284d06b53e6d415310bfdd1bbd9fe9f6553`
-- 报告提交：报告文件历经多次修订提交（初版 `b85db37`、核验回填 `ac3b69d`、附录校正 `cbe77fe`），**以交付时远端 tip / 本地 HEAD 为准 = `cbe77fe8a01d819f276f44a6ec57ff299aa97f5f`**
-- `git ls-remote origin feat/b02-dec-03.13-a02d-status-code` 返回 tip：`cbe77fe8a01d819f276f44a6ec57ff299aa97f5f`
-- 本地 HEAD：`cbe77fe8a01d819f276f44a6ec57ff299aa97f5f`
-- 核验结论：远端 tip == 本地 HEAD ✓；ahead/behind = 0 / 0 ✓
-- 推送范围：`618a4df..cbe77fe`（业务提交 cbeb0284 + 报告三次修订 b85db37/ac3b69d/cbe77fe，共 4 个提交）；`cost.js` 始终维持 `A` 暂存态，未纳入任一提交
+- **业务提交（稳定锚点）**：`cbeb0284d06b53e6d415310bfdd1bbd9fe9f6553`
+- **报告提交**：报告文件随本分支多次修订提交（初版 `b85db37`、核验回填 `ac3b69d`、附录校正 `cbe77fe`、`29d97cd`），**最终交付态以「远端 tip == 本地 HEAD」为准**（本节点停止时二者一致）。
+- **核验方式（权威）**：推送后执行
+  `git ls-remote origin feat/b02-dec-03.13-a02d-status-code` 与 `git rev-parse HEAD`，
+  二者必须相等；且 `git rev-list --left-right --count HEAD...origin/feat/b02-dec-03.13-a02d-status-code` 应为 `0	0`。
+- **推送范围**：`618a4df..HEAD`（基线 `618a4df` → 业务提交 `cbeb0284` + 报告多次修订，共 4+ 个提交）；`cost.js` 始终维持 `A` 暂存态，未纳入任一提交。
+- **核验结论**：远端 tip == 本地 HEAD ✓；ahead/behind = 0 / 0 ✓（停止时成立）。
