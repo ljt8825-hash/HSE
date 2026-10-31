@@ -157,7 +157,7 @@ M1 目标：**统一任职段写入规则与事务边界**（收编至 `assignme
 
 ## 10. Git 提交与远端核验信息
 
-- 基底 HEAD：`0ed00813b6af673b16aee0902696800b6bae3524`；新 HEAD（推送成功后回填）：`__________`（占位，待执行）。
+- 基底 HEAD：`0ed00813b6af673b16aee0902696800b6bae3524`；新 HEAD（已推送核验）：`c72c2b316e48170ecc6be20378d3d5b4b891a309`。
 - 提交策略：仅 `git add docs/project-control/B-1-P1-04-03-R1-R1-R2/` 后单独提交，不与业务代码混合。
 - 推送分支：`feat/b02-dec-03.13-a02d-status-code`（禁止 `--force`、rebase、merge）。
 - 远端核验：`git ls-remote origin` 比对 SHA；确认无业务代码/SQL/migration/配置文件混入 diff。
