@@ -473,3 +473,150 @@ describe('V2 · 外层事务与批次状态', () => {
     expect(batchUpdate.params[0]).toBe('partial_completed');
   });
 });
+
+// ============================================================
+// R1-02 · V2 入职日期兜底回归（恢复 COALESCE($10, CURRENT_DATE) 语义）
+// ============================================================
+describe('R1-02 · V2 入职日期兜底回归', () => {
+  const today = new Date().toISOString().split('T')[0]; // 与 V2 服务内 v2EndDate 基准一致
+
+  it('V2 有 hire_date → 新任职段 start_date 保留上传日期（等价原 SQL $10）', async () => {
+    const { segInserts } = await runV2(
+      [makeV2Pending({ id: 1, row_num: 2, employee_no: 'E001', hire_date: '2026-03-08' })],
+      { byNo: { E001: { id: 7, employment_relation: '正式员工' } }, segments: {} },
+    );
+    expect(segInserts).toHaveLength(1);
+    // V2 扩展形态 cols = [employee_id, org_unit_id, operation_unit_id, position_id,
+    //   supervisor_id, status, dept_name, is_current, is_primary, start_date, remark, created_by]
+    // → start_date 位于 params[9]
+    expect(segInserts[0].params[9]).toBe('2026-03-08');
+  });
+
+  it('V2 无 hire_date → 新任职段 start_date 使用今日兜底（等价原 SQL CURRENT_DATE）', async () => {
+    const { segInserts } = await runV2(
+      [makeV2Pending({ id: 1, row_num: 2, employee_no: 'E001', hire_date: null })],
+      { byNo: { E001: { id: 7, employment_relation: '正式员工' } }, segments: {} },
+    );
+    expect(segInserts).toHaveLength(1);
+    // 与 v2EndDate（关闭旧段 end_date）同一“今日”基准；断言实际下发参数，非仅调用断言
+    expect(segInserts[0].params[9]).toBe(today);
+    expect(segInserts[0].params[9]).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it('V1 日期行为不受影响：有 hire_date 保留上传日期，无 hire_date 仍为 null（无 CURRENT_DATE 兜底）', async () => {
+    // 有入职日期
+    const withDate = await runV1(
+      [makeV1Row({ 工号: 'E001', 姓名: '张三', 入职日期: '2026-03-08' })],
+      { byCode: { E001: { id: 7, name: '张三', employee_code: 'E001', employment_relation: '正式员工' } }, segments: {} },
+    );
+    expect(withDate.result.success).toBe(1);
+    expect(withDate.segInserts).toHaveLength(1);
+    // V1 基础形态 cols = [employee_id, org_unit_id, position_id, supervisor_id, status,
+    //   is_current, is_primary, start_date, remark, created_by] → start_date 位于 params[5]
+    expect(withDate.segInserts[0].params[5]).toBe('2026-03-08');
+
+    // 无入职日期：断言 start_date 仍为 null（V1 不引入 CURRENT_DATE 兜底，R1-01.3 不改 V1 规则）
+    const noDate = await runV1(
+      [makeV1Row({ 工号: 'E002', 姓名: '李四', 入职日期: undefined })],
+      { byCode: { E002: { id: 8, name: '李四', employee_code: 'E002', employment_relation: '正式员工' } }, segments: {} },
+    );
+    expect(noDate.result.success).toBe(1);
+    expect(noDate.segInserts).toHaveLength(1);
+    expect(noDate.segInserts[0].params[5]).toBe(null);
+  });
+});
+
+// ============================================================
+// R1-03 · V1/V2 行锁（FOR UPDATE）与终态判定复核
+// ============================================================
+describe('R1-03 · 行锁与终态判定复核', () => {
+  // 关键点：employment_relation 仅由「带 FOR UPDATE 的匹配查询」返回；
+  // 其它 employee 查询（如新员工补锁 `WHERE id =`）返回空行，不提供 relation。
+  // 因此终态闸门消耗的 relation 必来自锁定查询 —— 下面用「终态→拒绝 / 非终态→放行」双向验证，
+  // 证明 relation 取值确实驱动了闸门，而非 mock 固定返回值掩盖锁定缺失。
+
+  describe('V1 既有员工匹配查询 FOR UPDATE + 终态闸门', () => {
+    it('V1 按 employee_code 匹配查询包含 FOR UPDATE', async () => {
+      const { calls } = await runV1(
+        [makeV1Row({ 工号: 'E001', 姓名: '张三' })],
+        { byCode: { E001: { id: 7, name: '张三', employee_code: 'E001', employment_relation: '正式员工' } }, segments: {} },
+      );
+      const matchQ = calls.find((c) => c.text.includes('FROM employee WHERE employee_code') && c.text.includes('FOR UPDATE'));
+      expect(matchQ).toBeDefined();
+    });
+
+    it('V1 终态员工（退休）→ 拒绝建段；非终态（正式员工）→ 放行', async () => {
+      const terminal = await runV1(
+        [makeV1Row({ 工号: 'E001', 姓名: '张三' })],
+        { byCode: { E001: { id: 7, name: '张三', employee_code: 'E001', employment_relation: '退休' } }, segments: {} },
+      );
+      expect(terminal.result.success).toBe(0);
+      expect(terminal.result.failed).toBe(1);
+      expect(terminal.result.errors[0].message).toContain('终态');
+      expect(terminal.segInserts).toHaveLength(0);
+
+      const normal = await runV1(
+        [makeV1Row({ 工号: 'E002', 姓名: '李四' })],
+        { byCode: { E002: { id: 8, name: '李四', employee_code: 'E002', employment_relation: '正式员工' } }, segments: {} },
+      );
+      expect(normal.result.success).toBe(1);
+      expect(normal.segInserts).toHaveLength(1);
+    });
+  });
+
+  describe('V2 三条匹配路径均含 FOR UPDATE + 终态闸门', () => {
+    it('路径① employee_no → 匹配查询含 FOR UPDATE；终态拒绝 / 非终态放行', async () => {
+      const { calls, result, segInserts } = await runV2(
+        [makeV2Pending({ id: 1, row_num: 2, employee_no: 'E001' })],
+        { byNo: { E001: { id: 7, employment_relation: '退休' } }, segments: {} },
+      );
+      expect(calls.some((c) => c.text.includes('FROM employee WHERE employee_code') && c.text.includes('FOR UPDATE'))).toBe(true);
+      expect(result.failedCount).toBe(1);
+      expect(result.errors[0]).toContain('终态');
+      expect(segInserts).toHaveLength(0);
+
+      const ok = await runV2(
+        [makeV2Pending({ id: 2, row_num: 3, employee_no: 'E002' })],
+        { byNo: { E002: { id: 8, employment_relation: '正式员工' } }, segments: {} },
+      );
+      expect(ok.result.failedCount).toBe(0);
+      expect(ok.segInserts).toHaveLength(1);
+    });
+
+    it('路径② id_card_hash → 匹配查询含 FOR UPDATE；终态拒绝 / 非终态放行', async () => {
+      const { calls, result, segInserts } = await runV2(
+        [makeV2Pending({ id: 1, row_num: 2, employee_no: null, id_card_hash: 'HX' })],
+        { byIdCard: { HX: { id: 7, employment_relation: '退休' } }, segments: {} },
+      );
+      expect(calls.some((c) => c.text.includes('FROM employee WHERE id_card_hash') && c.text.includes('FOR UPDATE'))).toBe(true);
+      expect(result.failedCount).toBe(1);
+      expect(result.errors[0]).toContain('终态');
+      expect(segInserts).toHaveLength(0);
+
+      const ok = await runV2(
+        [makeV2Pending({ id: 2, row_num: 3, employee_no: null, id_card_hash: 'HY' })],
+        { byIdCard: { HY: { id: 8, employment_relation: '正式员工' } }, segments: {} },
+      );
+      expect(ok.result.failedCount).toBe(0);
+      expect(ok.segInserts).toHaveLength(1);
+    });
+
+    it('路径③ phone_hash + name → 匹配查询含 FOR UPDATE；终态拒绝 / 非终态放行', async () => {
+      const { calls, result, segInserts } = await runV2(
+        [makeV2Pending({ id: 1, row_num: 2, employee_no: null, id_card_hash: null, phone_hash: 'PZ', employee_name: '张三' })],
+        { byPhone: { 'PZ|张三': { id: 7, employment_relation: '退休' } }, segments: {} },
+      );
+      expect(calls.some((c) => c.text.includes('FROM employee WHERE phone_hash') && c.text.includes('FOR UPDATE'))).toBe(true);
+      expect(result.failedCount).toBe(1);
+      expect(result.errors[0]).toContain('终态');
+      expect(segInserts).toHaveLength(0);
+
+      const ok = await runV2(
+        [makeV2Pending({ id: 2, row_num: 3, employee_no: null, id_card_hash: null, phone_hash: 'PY', employee_name: '李四' })],
+        { byPhone: { 'PY|李四': { id: 8, employment_relation: '正式员工' } }, segments: {} },
+      );
+      expect(ok.result.failedCount).toBe(0);
+      expect(ok.segInserts).toHaveLength(1);
+    });
+  });
+});

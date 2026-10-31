@@ -1082,7 +1082,14 @@ async function performBatchImport(batchId, { userId, username, ip } = {}) {
               supervisor_id: finalSupervisorId || null,
               dept_name: p.raw_dept || null,
               status: 'active',
-              start_date: p.hire_date || null,
+              // R1-01：恢复 V2 原 INSERT 的入职日期兜底 —— 原 SQL 为
+              //   start_date = COALESCE($10, CURRENT_DATE)，其中 $10 = p.hire_date || null。
+              // 统一服务 writeSegment 不接受 SQL 级 COALESCE，故在调用前于 V2 层决定有效起始日：
+              //   有 hire_date → 保留上传日期（与原 SQL 的 $10 完全一致）；
+              //   无 hire_date → 使用 v2EndDate（与关闭旧段 end_date 同一“今日”基准，
+              //     等价原 SQL 的 CURRENT_DATE；UTC 日期，与 v2EndDate 既有约定一致）。
+              //   不修改 writeSegment 统一写入职责。
+              start_date: p.hire_date || v2EndDate,
               remark: remarkStr,
               created_by: userId || null,
             },
